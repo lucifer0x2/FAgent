@@ -1,0 +1,152 @@
+use super::{
+    animations::check_animations,
+    links::check_links,
+    prop_keys::{check_keys, check_required},
+    scope::Resolver,
+    stroke::validate_stroke,
+    values::*,
+};
+use crate::{error::*, model::*};
+use serde_json::Value;
+impl Resolver<'_> {
+    pub(super) fn properties(&self, n: &Node) -> Result<()> {
+        if let Some(authored) = n.props.as_object() {
+            check_keys(&n.kind, authored)?;
+        }
+        if n.kind == NodeKind::Instance {
+            let master = n.props["componentId"]
+                .as_str()
+                .and_then(|id| self.nodes.get(id))
+                .filter(|n| n.kind == NodeKind::Frame && n.props.get("component").is_some())
+                .ok_or_else(|| {
+                    StorageError::validation("props.componentId", "Expected a component frame")
+                })?;
+            let mut placed = n.clone();
+            placed.kind = NodeKind::Frame;
+            placed.props = master.props.clone();
+            let mut patch = n.props.as_object().unwrap().clone();
+            patch.remove("componentId");
+            patch.remove("overrides");
+            crate::instance_paint::merge_props(&mut placed.props, &patch);
+            return self.properties(&placed);
+        }
+        let props = self.resolve_scoped_props(n)?;
+        let p = props.as_object().unwrap();
+        check_keys(&n.kind, p)?;
+        self.layout_properties(n, p)?;
+        for (k, v) in p {
+            match k.as_str() {
+                "name" => {
+                    if v.as_str().is_none_or(|s| s.len() > 256) {
+                        return Err(StorageError::validation(
+                            "name",
+                            "Name must be a string up to 256 bytes",
+                        ));
+                    }
+                }
+                "x" | "y" => number(v, -100_000., 100_000., k)?,
+                "radius" => super::quad::radius(v)?,
+                "fontSize" | "lineHeight" => number(v, 1., 10000., k)?,
+                "letterSpacing" | "textWrap" | "textAlign" | "textDecoration" | "textTransform" => {
+                    super::text_props::text_property(k, v)?
+                }
+                "opacity" => number(v, 0., 1., k)?,
+                "fill" => super::paint::paint(v, &n.kind)?,
+                "shadow" => super::shadow::shadow(v)?,
+                "exportSettings" => crate::check_export_settings(v, "exportSettings")?,
+                "stroke" => validate_stroke(v)?,
+                "links" => check_links(v)?,
+                "flowStart" => self.check_flow_start(n, v)?,
+                "animations" => check_animations(v)?,
+                "states" => self.check_states(&n.kind, v)?,
+                "clip" | "visible" => {
+                    if !v.is_boolean() {
+                        return Err(StorageError::validation(k, "Clip must be a boolean"));
+                    }
+                }
+                "crop" => {
+                    let crop = v.as_object().ok_or_else(|| {
+                        StorageError::validation("crop", "Crop must be an object")
+                    })?;
+                    if crop.len() != 4 {
+                        return Err(StorageError::validation(
+                            "crop",
+                            "Crop requires normalized x, y, width and height",
+                        ));
+                    }
+                    for key in ["x", "y", "width", "height"] {
+                        number(
+                            crop.get(key).unwrap_or(&Value::Null),
+                            if key == "width" || key == "height" {
+                                0.000001
+                            } else {
+                                0.
+                            },
+                            1.,
+                            "crop",
+                        )?;
+                    }
+                    if crop["x"].as_f64().unwrap() + crop["width"].as_f64().unwrap() > 1.
+                        || crop["y"].as_f64().unwrap() + crop["height"].as_f64().unwrap() > 1.
+                    {
+                        return Err(StorageError::validation(
+                            "crop",
+                            "Normalized crop must stay inside the source image",
+                        ));
+                    }
+                }
+                "fontId" => {
+                    if !self.fonts.contains_key(v.as_str().unwrap_or("")) {
+                        return Err(StorageError::validation(
+                            k,
+                            "Referenced font does not exist",
+                        ));
+                    }
+                }
+                "assetId" => {
+                    if !self.assets.contains_key(v.as_str().unwrap_or("")) {
+                        return Err(StorageError::validation(
+                            k,
+                            "Referenced asset does not exist",
+                        ));
+                    }
+                }
+                "fit" => crate::image_fit::check_fit(v)?,
+                "text" if v.as_str().is_none_or(|s| s.len() > 64 * 1024) => {
+                    return Err(StorageError::validation(
+                        k,
+                        "Text must be a plain string up to 64 KiB",
+                    ));
+                }
+                _ => {}
+            }
+        }
+        super::animated_fill::check_animated_fill(p)?;
+        check_required(&n.kind, p)?;
+        if n.kind == NodeKind::Image {
+            let asset = p
+                .get("assetId")
+                .and_then(Value::as_str)
+                .and_then(|a| self.assets.get(a))
+                .ok_or_else(|| {
+                    StorageError::validation("assetId", "Image requires an existing asset")
+                })?;
+            if !asset.media_type.starts_with("image/") {
+                return Err(StorageError::validation(
+                    "assetId",
+                    "Image requires an image asset",
+                ));
+            }
+        }
+        if n.kind == NodeKind::Frame
+            && n.props.get("component").is_none()
+            && n.parent_id
+                .as_ref()
+                .and_then(|p| self.nodes.get(p))
+                .is_some_and(|p| p.kind == NodeKind::Page)
+        {
+            super::root_size::check_root_size(p)?;
+        }
+        Ok(())
+    }
+}

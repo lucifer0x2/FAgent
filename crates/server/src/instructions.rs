@@ -1,0 +1,134 @@
+/// What a client is told on connect. It covers both directions: authoring a design, and reading
+/// an existing one to implement it in code, which the tool list alone does not make obvious.
+pub const CONNECT: &str = "Versioned design tools over a local design store. Every read is one \
+consistent revision.
+
+Project design memory: before reading, understanding, inspecting, editing or authoring a design, \
+read the selected project's AGENTS.md at <configured-data-root>/<project-slug>/AGENTS.md \
+(default ~/.fagent/<project>/AGENTS.md), using authorized client filesystem access if available. \
+If absent, create it from confirmed user design requirements and decisions; never invent a \
+palette or fonts. Keep concise confirmed intent, tokens, styles, fonts, components, layout, \
+constraints and exceptions; update it when the user confirms design changes. Prefer this project \
+memory over session-private design memory, subject to user and higher-priority directives. \
+It applies only to FAgent design work, never code, build, test, repository work or unrelated \
+tasks; exclude activity logs and coding rules. This is client instruction policy, not backend \
+validation. MCP currently exposes static skill resources, with no project-memory read/write tool. \
+If the client lacks authorized access or a suitable tool, report that limitation; never claim \
+memory was read, initialized or saved. Use only the selected project's confirmed root and slug; \
+do not create another project or access arbitrary paths to obtain memory. See the project design \
+memory checklist in skill://fagent/author-frame.md.
+
+Viewer element links use /?project=<projectId>&page=<pageId>&frame=<frameId>&node=<nodeId> \
+(URL-decode each value, including virtual instance IDs with /). These are stable IDs at the \
+latest authored revision, not a cached viewport or historical revision. On receiving a link, \
+call find_nodes {projectId, ids:[nodeId]} then get_design_context {projectId, frameId}; \
+use get_subtree {projectId, nodeId} for a smaller authored read. \
+verify the returned scope, and report a missing/deleted ID instead of guessing another element. \
+Read skill://fagent/implement-frame.md for the address contract.
+
+Reuse named tokens/styles and frame props.component masters with kind instance, componentId and \
+flat overrides before duplicating trees. Frame/instance theme selects a token scheme for that \
+subtree; nearest scope wins. Context defaults to references; instances:expand reads virtual children.
+
+Finding: when you know a node's name, visible text, kind, ID or parent (parentId lists direct \
+children), call find_nodes; use get_outline when you need structure: depth counts from the scope \
+root, so nodeId <page> with depth 1 lists that page's root frames in one call. A page-wide scan \
+stays small: get_outline lists an instance as one node with componentId and childCount, and \
+find_nodes (instances:reference by default) skips the virtual children inside instances; \
+find_nodes instances:expand, a nodeId scope on or inside the instance, or ids/parentId reach \
+them. totalMatches 0 means nothing matched, not an error; skippedInstanceMatches counts matches \
+inside instances that reference mode left out. Position ('the card on \
+the right') is not searchable: read bounds with get_design_context viewports or inspect_layout nodeIds.
+
+Authoring and editing designs: inspect tools/list inputSchema and write through MCP apply_batch \
+(atomic). Prefer its source input (OCD line DSL, skill://fagent/ocd.md), compiled server-side \
+to the same operations; structured JSON operations (1–500) stay supported. Do not substitute a JS, shell or HTTP mutation \
+client for available design tools. This client guidance does not restrict app implementation, \
+tests or authorized project-memory filesystem access, and cannot enforce a client's system prompt \
+or external programs. Repeated valid operations are permitted. Read scoped context/get_outline \
+before editing; if no current read or successful commit supplies the revision, read it first. \
+Create a page, a frame, then descendants. Default to row/column stacks; reserve free for overlays \
+and decoration. Update text with update_node {id,props:{text,fontSize}}, never update_text, nodeId \
+or props.content. Node props are listed per kind in skill://fagent/props.md; cache \
+fagent://capabilities by fingerprint/pipeline version and refresh on change before workarounds. \
+A wrong key fails with field props.<key>, allowedKeys and a suggestion.
+
+Several agents may edit one project: commits apply in writer order and the last writer wins per \
+top-level props key (merge:true deep-merges); a node's parent and position are one property. Send \
+expectedRevision from the authored read the batch is based on; a stale revision never fails. The \
+result then lists concurrent: up to 20 {nodeId, key, revision} that later commits wrote and this \
+batch overwrote (key: a props key, placement, created, deleted, token, style or note), with \
+concurrentTotal; concurrentUnknown means that history is gone. Check them (get_changes or a \
+reread) when they matter. Only invalid batches fail (missing or deleted node/parent, cycles, \
+components in use, schema/props errors, virtual children, limits); errors name the node, field and \
+current value so the batch can be fixed without a reread. strict:true restores optimistic checks: \
+without pageIds expectedRevision must be current; with pageIds storage guards those pages and \
+their transitive dependencies (notes need anchor pages; shared-resource/flowStart writes, page \
+delete/reorder/edits, root-frame delete/reparent/reorder and a new project-first page or root \
+frame need strict without pageIds). A strict REVISION_CONFLICT carries changedSince \
+{fromRevision, toRevision, changedIds, truncated}: reread, rebuild and use a new key; never \
+blindly retry it. Mutations need caller-chosen IDs and a stable idempotencyKey. After a lost \
+response retry the exact same body and key. After success use committedRevision without an \
+unnecessary revision-only read. Full validation runs on every commit. \
+Probe a candidate with dryRun:true: \
+baseRevision/changedIds/diagnostics are provisional, with no commit or key consumption. Commit \
+by omitting dryRun or setting false. With authorized filesystem access to the selected project's \
+inbox (inboxDir in list_projects; create it if absent), apply_batch_file is the recommended way for large or iterative batches: write OCD source \
+as <name>.ocd (or a pure JSON operation array as any other name) in the inbox, call it with the \
+relative path and dryRun:true, fix the reported line in the file, then apply; the payload stays \
+out of the conversation. It evaluates no code, applies the same 500-op limit and does not \
+auto-chunk. Import images and fonts by inbox path, several in one import_assets call (one \
+revision) rather than repeated import_asset calls. See tested examples in \
+skill://fagent/author-frame.md.
+
+Keep paragraph/label source strings and spaces semantic; measured characters/lines are comparison \
+output. Intentional lettering/motion is valid: record intent in a note and never auto-merge layers. \
+Text must declare a valid font, size and line height, or take them from a text style. Render jobs \
+never change the authored revision.
+
+Implementing a design in code: find_nodes kinds [frame] or get_outline for the frame, then \
+get_design_context for that frameId. Each node returns authored props beside resolvedProps. Authored props hold the token and \
+style references the design was built from; resolvedProps hold what those references evaluate to \
+for one theme. Write code against the reference, mapped to your own named token, so a theme change \
+in the design stays one change in the code; treat resolvedProps as today's value, not as the \
+design. list_tokens, list_styles and list_fonts give the named system behind those references. \
+For a smaller read pass compact:true: resolvedProps then keep only keys that differ from authored \
+props (resolvedPropsMode differing; the rest equal authored, without styleId) and \
+tokens/styles/fonts/assets only those the frame references (resources referenced).
+
+Build the structure the design declares, not the pixels it measures. A container's layout mode \
+says it: 'row' and 'column' are stacks with padding, gap, align and justify, so implement them as stacks; 'free' \
+positions children at authored x/y. Sizing is authored width/height with min/max, which may be a \
+fixed number, fill, hug or a literal decimal percentage from 0% to 100% on a definite parent axis. \
+layout.breakpoints selects the first full rule whose maxWidth is at least the requested frame viewport width. \
+Stack rules use authored child order and free rules use authored x/y. Computed bounds and text lines are measurements of one viewport, already \
+wrapped, so use them to check an implementation rather than to derive it. Request viewports \
+(up to four) in get_design_context to compare bounds across sizes; while computed.status is \
+pending, wait on its job IDs with render_frame {jobId, waitMs} (up to 10000), then repeat the read. reflow compares every descendant, excluding the resized root, and \
+is null until a successful comparison of at least two viewports. An all-free frame with unchanged bounds is a picture at one size, \
+not a responsive specification: heed NO_REFLOW_INFORMATION, state assumptions or ask the user; \
+do not silently consider absolute positioning complete. Read skill://fagent/implement-frame.md \
+or skill://fagent/author-frame.md through resources/read for detailed checklists. \
+props.states declares flat hover/pressed/focus/disabled visual variants; statesMode:resolved \
+adds resolvedStates to context. Map these to :hover/:active/:focus-visible/[disabled]; never invent \
+undeclared states. render_frame state previews every declaring node in the frame at once, without \
+inheritance or layout changes; named token themes may be requested. \
+Navigation is declared through props.links on a node ({on: click|hover, \
+action: navigate|overlay with to = a root frame ID, or back|close}) and flowStart on a root frame; \
+get_design_context returns them as navigation {out, in}. Implement declared links as routes and \
+overlays. Motion a design declares is props.animations on a node: CSS-like keyframes of opacity, \
+translateX/Y, scale, rotate and fill, played on load, hover or click; get_design_context lists \
+them in animated, including triggerNodeId for ancestor hover. When animatedTruncated is true, \
+page find_nodes in the frame with properties:[\"animations\"] and known IDs or the rendered kinds. \
+Group hover tracks by triggerNodeId, or by animated node if omitted. Use framework-native hover \
+state or handlers for one region per source. Moving between its descendants keeps progress, and \
+leaving reverses from current progress. Ignore touch contact for explicit hover sources. Keep states \
+and links independent. Screen transitions, route paths, overlay placement and \
+data are not in the design: ask rather than invent. Notes: put intent props cannot carry (behavior, constraints, unsupported \
+effects) in create_note on its node; get_design_context returns the open notes of the frame, its \
+descendants and ancestors. After implementing one, reply_note, then update_note resolved:true. \
+To check an implementation, render_frame at the same revision and viewport and \
+compare it with inspect_layout bounds and text lines for that job's scene key. Poll a pending \
+job with waitMs rather than in a tight loop: it returns as soon as the job is ready or failed. \
+A node with exportSettings is an image asset: get its PNG files with export_nodes and download \
+each url, instead of rebuilding it in code.";

@@ -1,0 +1,18 @@
+[package]
+name = "fagent-scene-input"
+version = "0.1.0"
+edition.workspace = true
+license.workspace = true
+
+[features]
+default = []
+# Native storage retains its existing error conversion without changing type identity.
+sqlite-errors = ["dep:rusqlite"]
+# Task24 benchmark only: raises MAX_NODES and records phase timings. Never a default.
+large-project-bench = []
+
+[dependencies]
+fagent-layout = { path = "../layout" }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+rusqlite = { version = "=0.41.0", optional = true }

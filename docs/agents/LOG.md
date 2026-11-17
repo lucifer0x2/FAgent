@@ -1,0 +1,49 @@
+# FAgent coordination log
+
+Append-only. Rules for entries:
+
+- One dated heading per task: `### <task> — YYYY-MM-DD`; each entry is a few lines.
+- Record only decisions, final results, blockers and links to reports. Do not copy content that already lives in `docs/TASK*-REPORT.md`, `tasks/`, test output or git history; no intermediate numbers.
+- Log at every assignment, result received, blocker found and before stopping. Never write secrets or the user's private data paths.
+- When this file exceeds ~300 lines, delete closed entries; record any technology or approach that was dropped in `docs/REJECTED-APPROACHES.md` first.
+
+### Task 30 follow-ups (Vello engine worker) — 2026-11-17
+
+- Task 30 accepted: Worker engine; Vello is the viewer default since 2026-11-17 and `?renderer=canvas2d`/`?scene=server` keep Canvas2D. Details and measurements: `docs/VIEWER.md`, section "Vello engine".
+- Still open: the `npm run test:e2e` harness is broken (`compareViewer`; already failing before Task 30); the Layers panel is virtualized but the ~90 ms long task on large boards was not re-measured; Safari 26 has not been measured.
+- Safari WebGPU renders blank while WebGL2 works. Cause unconfirmed (hypothesis: `transferToImageBitmap` of a WebGPU OffscreenCanvas in a Worker returns an empty image). Mitigation: a 16 px present probe at attach, uncaught GPU errors caught, and automatic fallback to WebGL2 with a note; the `gpuFault=blank|throw|error` hook simulates it on Chromium. Not tried on real Safari/iOS.
+
+### Task 34 — Vello CPU export — 2026-11-17
+
+- Decision: export (`render_frame`, `export_nodes`) moves to `vello_cpu` plus native compute; the build-time env `FAGENT_RENDER_BACKEND=chromium|vello` (default `chromium`) picks the backend, and the native build uses `vello`. The `rust`/tiny-skia backend is removed (`paint-core` stays). Final goal: no Node/Chromium in the runtime. Native `vello-gpu` (phase 5) is skipped because raster is under 40% of job time.
+- Phases 1–3 done and phase 4 partly done; merged into `main`. Parity with Chrome is not exact (text up to ~6.6%); the user accepted it. Report: [PURE-RUST-EXPORT.md](../PURE-RUST-EXPORT.md).
+- Not run yet: `docker build`, a real `build-release.sh`/`deploy.sh`; the Kubernetes probe still uses `node`. `cargo clippy --all-targets` on the server fails in files this work does not touch; `native_layout_parity` fails independently of it.
+- Waiting on the user: whether to drop the runtime `RENDER_BACKEND` override.
+
+### Render speed — Tasks 35, 36, 37 — 2026-11-17
+
+- Priority order set by the user: 34 → 36 → 37 → 31/35 → 33.
+- Task 36 (web: bounded progressive drawing, removal of the ~300 ms Suspense delay, parallel font/image loading, `MessageChannel` yield) targets All pages cold load ~4.0–4.8 s → ~2.5 s. Constraint: do not preload App or fetch project data before `ViewerGate` opens (`app-shell-smoke.mjs` enforces it).
+- Task 37 (Rust: HarfRust shape plan cache, paint/path prebuilt in `Prepared`; wasm build flags and allocator are an optional phase). Task 35 (frame-scoped resolve per revision, byte-exact oracle). Small-node LOD at low zoom goes to Task 31; compute pool, scene cache in IndexedDB and `/snapshot`/JS compression go to Task 32.
+- Open: Tasks 31, 32, 33, 35, 36, 37 not assigned yet.
+
+### Task 38 — Kubernetes public smoke — 2026-11-17
+
+- Code review of `56db62b..HEAD` found 8 issues; 7 are fixed with tests. The eighth is shelved as [Task 38](../../tasks/38-kubernetes-public-smoke-live-updates.md): the Kubernetes smoke and three docs still assert the old `/api/v1/viewer` body, which gained `liveUpdates`. Low priority because the user no longer uses Kubernetes.
+- Public viewer live updates are off by default (`FAGENT_PUBLIC_LIVE_UPDATES=on` enables them); contract in `docs/SERVER.md`, section "Public live updates". Viewer overscan is the env `FAGENT_VIEWER_OVERSCAN`, default 0 (off), served through `/api/v1/viewer`.
+- Not verified: Mac Mouse Fix and real touch screens for the gesture fixes.
+
+### Agent feedback: known limitations — 2026-11-17
+
+- Already on `main`: `import_asset` by inbox `path`, root frame `height:"hug"`, `apply_batch_file` (now also accepts `.ocd`), `import_assets` (1–50 items in one revision), `find_nodes` with `instances: reference|expand` (default reference; skips virtual instance children, reports `skippedInstanceMatches`).
+- Rendering a frame at a past revision is not built: [Task 39](../../tasks/39-render-past-revision.md), backlog.
+- Layout and instance limitations triage: one real bug (`crates/layout/src/tree.rs` treats a free container as an anchor only for percentage-sized children, ignoring `fill`); two cases mostly by design with gaps (stretch inside a hug parent, an unset axis treated as hug once stretched); `clip` missing on instances, by design; slots and breakpoints that resize children are missing features. Proposed order: A free-container anchor bug, B stretch/hug gaps, C `clip` on instances, D breakpoint resizing of children, E slots; waiting for the user to choose.
+- PostgreSQL `apply_batch_file` returned `STAGING_UNSUPPORTED`; fixed by "read batch files from the inbox root on every engine", merged into `main` on 2026-11-17. Native deploy waits for the user.
+
+### Repository restart — 2026-11-17
+
+- At the user's request the repository restarts with fresh git history, English only. Removed: closed tasks 01–19b, their reports, research for dropped directions, `docs/recommend-features/`, `docs/agents/history/`, `docs/checkpoints/`, old spikes (`rust-export`, `responsive-proposal`). Dropped technologies are summarized in `docs/REJECTED-APPROACHES.md`.
+- Non-English test strings and fixtures were replaced with English (accented Latin where a test needs diacritics); non-English Chromium-measured corpus entries were removed rather than translated.
+- New rules in `AGENTS.md`: English-only content and a blocking "Public repository" rule. `scripts/check-public-content.sh` (run by `.githooks/pre-commit`) blocks local absolute paths, real tailnet hosts, secrets, non-example emails and the names in the untracked `.private-patterns`.
+- Open-source scrub: client project names, IDs, slugs and snapshot hashes, real backup names, a real tailnet host and the migration scripts for the previous product were removed; machine notes moved to the untracked `CLAUDE.local.md`. Limitation IDs that pointed to the previous product's feedback list were replaced with plain descriptions.
+- The README screenshots and motion GIF were removed because the demo frame's footer showed the previous product name. Open: the user will add new screenshots to `README.md`.

@@ -1,0 +1,27 @@
+{
+  "name": "fagent",
+  "private": true,
+  "license": "MIT OR Apache-2.0",
+  "type": "module",
+  "scripts": {
+    "build": "node scripts/app.mjs build debug",
+    "build:release": "node scripts/app.mjs build release",
+    "build:scene-wasm": "node scripts/build-scene-wasm.mjs",
+    "build:engine-wasm": "node scripts/build-engine-wasm.mjs",
+    "dev": "node scripts/app.mjs run debug",
+    "start": "node scripts/app.mjs run release",
+    "build:renderer": "esbuild renderer/index.ts --bundle --format=esm --outfile=renderer/dist/index.js",
+    "check:renderer": "tsc --noEmit",
+    "test:renderer": "node --test renderer/*.test.mjs",
+    "test:pipeline": "npm run build:renderer && cargo build -p fagent-layout --bin layout-step && node --test --test-concurrency=1 spikes/pipeline/*.test.mjs",
+    "worker": "node worker/cli.mjs",
+    "test:e2e": "npm run build:renderer && cargo build --offline -p fagent-layout -p fagent-server && npm --prefix web run build && node spikes/e2e/run.mjs"
+  },
+  "devDependencies": {
+    "@types/node": "26.6.5",
+    "esbuild": "0.28.2",
+    "playwright": "1.64.1",
+    "prettier": "3.9.10",
+    "typescript": "7.0.2"
+  }
+}

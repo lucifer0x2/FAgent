@@ -1,0 +1,11 @@
+#!/bin/sh
+# Enable once per clone: git config core.hooksPath .githooks
+root=$(git rev-parse --show-toplevel) || exit 1
+status=0
+"$root/scripts/check-public-content.sh" --staged || status=1
+if command -v gitleaks >/dev/null 2>&1; then
+  (cd "$root" && gitleaks git --pre-commit --staged --config "$root/.gitleaks.toml" --redact --no-banner) || status=1
+else
+  echo "warning: gitleaks not found on PATH; skipping secret scan (brew install gitleaks)" >&2
+fi
+exit $status

@@ -1,0 +1,71 @@
+use super::*;
+
+/// Blocking-operation limits. The connection string is deliberately not Debug.
+#[derive(Clone)]
+pub struct PostgresConfig {
+    pub(crate) url: String,
+    pub connect_timeout: Duration,
+    pub statement_timeout: Duration,
+    pub lock_timeout: Duration,
+    pub operation_timeout: Duration,
+    pub pool_size: usize,
+    /// Schema holding the runtime tables; first on every session's `search_path`.
+    pub schema: super::DatabaseSchema,
+    /// Task28 node-memory shadow; defaults to `FAGENT_NODE_MEMORY_SHADOW`.
+    pub node_memory_shadow: crate::ShadowMode,
+    /// Task28 I2 scoped reads from memory; defaults to `FAGENT_NODE_MEMORY_READS`.
+    pub node_memory_reads: crate::ReadsMode,
+    /// Task28 I3 commits through memory; defaults to `FAGENT_NODE_MEMORY_WRITES`.
+    pub node_memory_writes: crate::WritesMode,
+}
+
+impl PostgresConfig {
+    pub fn new(url: impl Into<String>) -> Self {
+        Self {
+            url: url.into(),
+            connect_timeout: Duration::from_secs(3),
+            statement_timeout: Duration::from_secs(15),
+            lock_timeout: Duration::from_secs(3),
+            operation_timeout: Duration::from_secs(30),
+            pool_size: 4,
+            schema: super::DatabaseSchema::default(),
+            node_memory_shadow: crate::ShadowMode::from_env(),
+            node_memory_reads: crate::ReadsMode::from_env(),
+            node_memory_writes: crate::WritesMode::from_env(),
+        }
+    }
+
+    pub(super) fn driver(&self) -> Result<::postgres::Config> {
+        if self.pool_size == 0
+            || self.pool_size > 32
+            || [
+                self.connect_timeout,
+                self.statement_timeout,
+                self.lock_timeout,
+                self.operation_timeout,
+            ]
+            .iter()
+            .any(Duration::is_zero)
+        {
+            return Err(crate::StorageError::validation(
+                "postgres",
+                "Invalid database limits",
+            ));
+        }
+        let mut config: ::postgres::Config = self.url.parse().map_err(|_| {
+            crate::StorageError::validation("postgres", "Invalid database configuration")
+        })?;
+        config.connect_timeout(self.connect_timeout)
+            .tcp_user_timeout(self.operation_timeout)
+            .keepalives(true)
+            .keepalives_idle(Duration::from_secs(3))
+            .keepalives_interval(Duration::from_secs(1))
+            .keepalives_retries(3)
+            .application_name("fagent-runtime")
+            .options(&format!(
+                "-c search_path={},pg_catalog -c statement_timeout={} -c lock_timeout={} -c idle_in_transaction_session_timeout={} -c synchronous_commit=on",
+                self.schema.quoted(), milliseconds(self.statement_timeout), milliseconds(self.lock_timeout), milliseconds(self.operation_timeout),
+            ));
+        Ok(config)
+    }
+}

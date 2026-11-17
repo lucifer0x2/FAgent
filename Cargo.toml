@@ -1,0 +1,7 @@
+[workspace]
+members = ["crates/layout", "crates/storage", "crates/server", "crates/text", "crates/paint-core", "crates/scene-input", "crates/scene-wasm", "crates/node-memory", "crates/paint-vello", "crates/engine-wasm", "spikes/vello-gpu/wasm"]
+resolver = "2"
+
+[workspace.package]
+edition = "2021"
+license = "MIT OR Apache-2.0"
