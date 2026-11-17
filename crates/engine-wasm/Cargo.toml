@@ -1,0 +1,31 @@
+[package]
+name = "fagent-engine-wasm"
+version = "0.1.0"
+edition.workspace = true
+license.workspace = true
+description = "Viewer engine Worker module: snapshot → scene (scene-wasm) → Vello paint, scene kept in Rust."
+
+[lib]
+crate-type = ["cdylib", "rlib"]
+
+[dependencies]
+fagent-layout = { path = "../layout" }
+fagent-scene-wasm = { path = "../scene-wasm", default-features = false }
+fagent-paint-vello = { path = "../paint-vello", default-features = false, features = ["cpu"] }
+serde = { version = "=1.0.229", features = ["derive"] }
+serde_json = "=1.0.154"
+
+# The browser engine (vello_gpu backends, wasm-bindgen API) exists only on wasm32;
+# the model, hit test and draw order build and test natively.
+[target.'cfg(target_arch = "wasm32")'.dependencies]
+fagent-paint-vello = { path = "../paint-vello", default-features = false, features = ["cpu", "gpu"] }
+vello_gpu = { version = "=0.4.0", default-features = false, features = ["std", "wgpu", "webgl", "blurred_rounded_rect", "full_image_support", "probe"] }
+vello_cpu = { version = "=0.4.0", default-features = false, features = ["std", "u8_pipeline"] }
+wgpu = { version = "=30.0.2", default-features = false, features = ["std", "webgpu"] }
+wasm-bindgen = "=0.2.129"
+wasm-bindgen-futures = "0.4"
+js-sys = "=0.3.106"
+web-sys = { version = "0.3", features = ["console", "HtmlCanvasElement", "OffscreenCanvas", "ImageBitmap", "ImageBitmapRenderingContext", "ImageData", "OffscreenCanvasRenderingContext2d", "WorkerGlobalScope", "Performance", "WebGl2RenderingContext", "WebGlTexture"] }
+
+[dev-dependencies]
+vello_cpu = { version = "=0.4.0", default-features = false, features = ["std", "u8_pipeline"] }

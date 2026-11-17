@@ -1,0 +1,99 @@
+use axum::{
+    http::{header, StatusCode},
+    response::{IntoResponse, Response},
+    Json,
+};
+use fagent_storage::StorageError;
+use serde_json::{json, Map, Value};
+
+/// A storage-shaped error plus optional server-added detail fields (such as `changedSince` on
+/// `REVISION_CONFLICT`). Details are merged into the `error` object; they never replace the
+/// storage fields, so `code`, `message`, `retryable` and `currentRevision` stay as storage set them.
+#[derive(Debug, Clone)]
+pub struct ApiError(pub Box<StorageError>, Option<Box<Map<String, Value>>>);
+pub type Result<T> = std::result::Result<T, ApiError>;
+impl ApiError {
+    pub fn new(code: &str, message: &str) -> Self {
+        let mut error = StorageError::new(code, message);
+        error.retryable = matches!(
+            code,
+            "QUEUE_FULL" | "JOB_TIMEOUT" | "WORKER_UNAVAILABLE" | "WORKER_FAILED"
+        );
+        Self(Box::new(error), None)
+    }
+    pub fn invalid(message: &str) -> Self {
+        Self::new("INVALID_REQUEST", message)
+    }
+    /// Adds a detail field to the serialized `error` object; storage fields win on a name clash.
+    pub fn with_detail(mut self, key: &str, value: Value) -> Self {
+        self.1.get_or_insert_default().insert(key.into(), value);
+        self
+    }
+    pub fn value(&self) -> Value {
+        let mut error = json!(self.0);
+        if let (Some(details), Some(object)) = (&self.1, error.as_object_mut()) {
+            for (key, value) in details.iter() {
+                object.entry(key.clone()).or_insert_with(|| value.clone());
+            }
+        }
+        json!({ "error": error })
+    }
+}
+impl From<StorageError> for ApiError {
+    fn from(e: StorageError) -> Self {
+        Self(Box::new(e), None)
+    }
+}
+impl From<serde_json::Error> for ApiError {
+    fn from(_: serde_json::Error) -> Self {
+        Self::invalid("Invalid request fields or types")
+    }
+}
+impl IntoResponse for ApiError {
+    fn into_response(self) -> Response {
+        let status = match self.0.code.as_str() {
+            "REVISION_CONFLICT" | "IDEMPOTENCY_KEY_REUSED" | "REVISION_UNAVAILABLE" => {
+                StatusCode::CONFLICT
+            }
+            "PROJECT_NOT_FOUND" | "ASSET_NOT_FOUND" | "JOB_NOT_FOUND" | "NODE_NOT_FOUND"
+            | "FILE_NOT_FOUND" | "FONT_NOT_FOUND" => StatusCode::NOT_FOUND,
+            "QUEUE_FULL" | "STORAGE_BUSY" | "STORAGE_UNAVAILABLE" => {
+                StatusCode::SERVICE_UNAVAILABLE
+            }
+            "INTERNAL_ERROR" | "STORAGE_FAILED" | "STORAGE_IO" => StatusCode::INTERNAL_SERVER_ERROR,
+            "IMAGE_NOT_READY" => StatusCode::CONFLICT,
+            "EXPORT_EXPIRED" => StatusCode::GONE,
+            crate::public_viewer::LIVE_DISABLED => StatusCode::FORBIDDEN,
+            _ => StatusCode::BAD_REQUEST,
+        };
+        let body = self.value();
+        // HTTP clients get the same retry guidance as a header, in whole seconds.
+        match body["error"]["retryAfterMs"].as_u64() {
+            Some(ms) => {
+                let seconds = ms.div_ceil(1000).to_string();
+                (status, [(header::RETRY_AFTER, seconds)], Json(body)).into_response()
+            }
+            None => (status, Json(body)).into_response(),
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn status(code: &str) -> StatusCode {
+        ApiError::from(StorageError::new(code, "fixture"))
+            .into_response()
+            .status()
+    }
+
+    #[test]
+    fn transient_storage_failures_are_service_unavailable() {
+        for code in ["QUEUE_FULL", "STORAGE_BUSY", "STORAGE_UNAVAILABLE"] {
+            assert_eq!(status(code), StatusCode::SERVICE_UNAVAILABLE, "{code}");
+        }
+        assert_eq!(status("PROJECT_NOT_FOUND"), StatusCode::NOT_FOUND);
+        assert_eq!(status("INVALID_REQUEST"), StatusCode::BAD_REQUEST);
+    }
+}

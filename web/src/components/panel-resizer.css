@@ -1,0 +1,37 @@
+/* An 8 px hit area centred on the panel border; the negative margins keep it out of the flow. */
+.panel-resizer {
+  position: relative;
+  z-index: 3;
+  flex: none;
+  width: 8px;
+  margin: 0 -4px;
+  cursor: col-resize;
+  touch-action: none;
+  outline: none;
+}
+.panel-resizer::after {
+  content: "";
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  left: 3px;
+  width: 2px;
+  background: transparent;
+  transition: background 120ms;
+}
+.panel-resizer:hover::after,
+.panel-resizer:focus-visible::after,
+.panel-resizer.is-dragging::after {
+  background: var(--blue);
+}
+.is-resizing-panel,
+.is-resizing-panel * {
+  cursor: col-resize !important;
+  user-select: none !important;
+}
+/* Narrow layouts show the panels as fixed-width overlays: no resizing there. */
+@media (max-width: 800px) {
+  .panel-resizer {
+    display: none;
+  }
+}

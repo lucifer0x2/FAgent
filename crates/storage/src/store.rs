@@ -1,0 +1,211 @@
+use crate::*;
+pub(crate) struct Root {
+    pub(crate) path: PathBuf,
+    _lock: File,
+    pub(crate) projects: Mutex<BTreeMap<String, Weak<Project>>>,
+    pub(crate) viewer_db: Mutex<Option<Connection>>,
+    pub(crate) indexes: crate::revision_indexes::IndexCache,
+    pub(crate) shadow: crate::shadow::Shadow,
+}
+impl Root {
+    pub(crate) fn check_path(&self) -> Result<()> {
+        no_symlink(&self.path)?;
+        if fs::canonicalize(&self.path)? != self.path || !self.path.is_dir() {
+            return Err(StorageError::new(
+                "PATH_REJECTED",
+                "Data root location has changed",
+            ));
+        }
+        Ok(())
+    }
+}
+#[derive(Clone)]
+pub struct Store {
+    pub(crate) root: Arc<Root>,
+}
+impl Store {
+    /// Explicit root selection. Does not create any project or touch a default home.
+    pub fn open(data_root: impl AsRef<Path>) -> Result<Self> {
+        Self::open_with_shadow(data_root, crate::ShadowMode::from_env())
+    }
+    /// [`Self::open`] with an explicit Task28 node-memory shadow mode.
+    pub fn open_with_shadow(
+        data_root: impl AsRef<Path>,
+        shadow: crate::ShadowMode,
+    ) -> Result<Self> {
+        Self::open_with_node_memory(data_root, shadow, crate::ReadsMode::from_env())
+    }
+    /// [`Self::open`] with explicit Task28 shadow and memory-read modes.
+    pub fn open_with_node_memory(
+        data_root: impl AsRef<Path>,
+        shadow: crate::ShadowMode,
+        reads: crate::ReadsMode,
+    ) -> Result<Self> {
+        Self::open_with_node_memory_writes(data_root, shadow, reads, crate::WritesMode::from_env())
+    }
+    /// [`Self::open`] with explicit Task28 shadow, memory-read and memory-write modes.
+    pub fn open_with_node_memory_writes(
+        data_root: impl AsRef<Path>,
+        shadow: crate::ShadowMode,
+        reads: crate::ReadsMode,
+        writes: crate::WritesMode,
+    ) -> Result<Self> {
+        version_check()?;
+        fs::create_dir_all(data_root.as_ref())?;
+        let path = fs::canonicalize(data_root.as_ref())?;
+        let lock_path = path.join(".instance.lock");
+        no_symlink(&lock_path)?;
+        let lock = OpenOptions::new()
+            .read(true)
+            .write(true)
+            .create(true)
+            .truncate(false)
+            .open(lock_path)?;
+        lock.try_lock_exclusive().map_err(|_| {
+            StorageError::new("DATA_ROOT_LOCKED", "Another backend owns this data root")
+        })?;
+        let shadow = crate::shadow::Shadow::new(shadow, reads, writes);
+        Ok(Self {
+            root: Arc::new(Root {
+                path,
+                _lock: lock,
+                projects: Mutex::new(BTreeMap::new()),
+                viewer_db: Mutex::new(None),
+                indexes: crate::revision_indexes::IndexCache::default().with_owner(shadow.clone()),
+                shadow,
+            }),
+        })
+    }
+    pub fn create_project(&self, slug: &str, name: &str) -> Result<Arc<Project>> {
+        self.root.check_path()?;
+        validate_slug(slug)?;
+        if name.is_empty() || name.len() > 256 {
+            return Err(StorageError::validation(
+                "name",
+                "Project name must contain 1–256 bytes",
+            ));
+        }
+        // Root registry lock also serializes create/open for one slug.
+        let mut registry = self.root.projects.lock().map_err(|_| poisoned())?;
+        let path = self.root.path.join(slug);
+        no_symlink(&path)?;
+        fs::create_dir(&path).map_err(|e| {
+            if e.kind() == std::io::ErrorKind::AlreadyExists {
+                StorageError::new("PROJECT_EXISTS", "A project with this slug already exists")
+            } else {
+                e.into()
+            }
+        })?;
+        let path = guard(&path, &self.root.path)?;
+        fs::create_dir(path.join("assets"))?;
+        fs::create_dir(path.join("inbox"))?;
+        sync_dir(&path)?;
+        sync_dir(&self.root.path)?;
+        let mut conn = Connection::open(path.join("db.sql"))?;
+        configure(&conn, true)?;
+        let project_id = format!("p_{}", uuid::Uuid::new_v4().simple());
+        initialize(
+            &mut conn,
+            &project_id,
+            slug,
+            name,
+            migration::DATABASE_SCHEMA_VERSION,
+        )?;
+        sync_dir(&path)?;
+        let project = Arc::new(Project {
+            root: self.root.clone(),
+            file_identity: project::file_identity(&path.join("db.sql"))?,
+            path,
+            project_id: project_id.clone(),
+            writer: Mutex::new(conn),
+        });
+        registry.insert(slug.into(), Arc::downgrade(&project));
+        registry.insert(project_id, Arc::downgrade(&project));
+        Ok(project)
+    }
+    pub fn list_projects(&self) -> Result<Vec<ProjectMeta>> {
+        self.root.check_path()?;
+        let mut list = Vec::new();
+        for entry in fs::read_dir(&self.root.path)? {
+            let entry = entry?;
+            let slug = entry.file_name().to_string_lossy().to_string();
+            if validate_slug(&slug).is_err() || !entry.file_type()?.is_dir() {
+                continue;
+            }
+            let path = guard(&entry.path(), &self.root.path)?;
+            let db = path.join("db.sql");
+            if !db.exists() {
+                continue;
+            }
+            guard(&db, &path)?;
+            no_symlink(&path.join("db.sql-wal"))?;
+            no_symlink(&path.join("db.sql-shm"))?;
+            let conn = Connection::open_with_flags(db, OpenFlags::SQLITE_OPEN_READ_ONLY)?;
+            configure(&conn, false)?;
+            let meta = read_list_meta(&conn)?;
+            if meta.slug != slug {
+                return Err(StorageError::new(
+                    "PROJECT_INVALID",
+                    "Project manifest does not match its directory",
+                ));
+            }
+            list.push(meta);
+        }
+        list.sort_by(|a, b| a.slug.cmp(&b.slug));
+        Ok(list)
+    }
+    pub fn open_project(&self, id_or_slug: &str) -> Result<Arc<Project>> {
+        self.root.check_path()?;
+        if !validate::valid_id(id_or_slug) {
+            return Err(StorageError::validation(
+                "projectId",
+                "Invalid project identifier",
+            ));
+        }
+        let mut registry = self.root.projects.lock().map_err(|_| poisoned())?;
+        if let Some(existing) = registry.get(id_or_slug).and_then(Weak::upgrade) {
+            existing.check_paths()?;
+            return Ok(existing);
+        }
+        let slug = if validate_slug(id_or_slug).is_ok() && self.root.path.join(id_or_slug).exists()
+        {
+            id_or_slug.to_string()
+        } else {
+            self.list_projects()?
+                .into_iter()
+                .find(|m| m.project_id == id_or_slug)
+                .map(|m| m.slug)
+                .ok_or_else(|| StorageError::new("PROJECT_NOT_FOUND", "Project does not exist"))?
+        };
+        let path = guard(&self.root.path.join(&slug), &self.root.path)?;
+        guard(&path.join("assets"), &path)?;
+        guard(&path.join("db.sql"), &path)?;
+        no_symlink(&path.join("db.sql-wal"))?;
+        no_symlink(&path.join("db.sql-shm"))?;
+        let mut conn =
+            Connection::open_with_flags(path.join("db.sql"), OpenFlags::SQLITE_OPEN_READ_WRITE)?;
+        configure(&conn, false)?;
+        migration::migrate(&mut conn)?;
+        configure(&conn, true)?;
+        let meta = read_meta(&conn)?;
+        if meta.slug != slug {
+            return Err(StorageError::new(
+                "PROJECT_INVALID",
+                "Project manifest does not match its directory",
+            ));
+        }
+        // A (re)opened file may hold rows written outside this process's batches:
+        // migrations, bundle import or restore.
+        self.root.shadow.evict(&meta.project_id);
+        let project = Arc::new(Project {
+            root: self.root.clone(),
+            file_identity: project::file_identity(&path.join("db.sql"))?,
+            path,
+            project_id: meta.project_id.clone(),
+            writer: Mutex::new(conn),
+        });
+        registry.insert(slug, Arc::downgrade(&project));
+        registry.insert(meta.project_id, Arc::downgrade(&project));
+        Ok(project)
+    }
+}

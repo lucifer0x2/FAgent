@@ -1,0 +1,301 @@
+@import "./canvas.css";
+.workspace {
+  position: relative;
+  display: flex;
+  flex: 1;
+  min-height: 0;
+}
+.left-panel {
+  width: 234px;
+  flex-shrink: 0;
+  background: white;
+  border-right: 1px solid var(--line);
+  overflow: auto;
+  /* The Layers list is virtualized: the browser must not shift scrollTop to keep an anchor. */
+  overflow-anchor: none;
+}
+.layers-content {
+  min-height: 100%;
+  display: flex;
+  flex-direction: column;
+}
+.section-heading {
+  min-height: 45px;
+  padding: 15px 16px 12px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  font-size: 11px;
+  font-weight: 600;
+}
+.section-heading .subtle,
+.readonly-label {
+  font-size: 10px;
+  font-weight: 400;
+  color: var(--subtle);
+}
+.layers-list {
+  position: relative;
+  flex-shrink: 0;
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+/* Virtualized rows: each item is placed at its index × row height (Layers.tsx ROW_HEIGHT). */
+.layer-item {
+  position: absolute;
+  left: 0;
+  right: 0;
+  height: 33px;
+}
+.layer-row {
+  display: flex;
+  align-items: center;
+  height: 33px;
+  border-top: 1px solid transparent;
+  border-bottom: 1px solid transparent;
+}
+.layer-row:hover {
+  background: #f4f6f8;
+}
+.layer-row.is-selected {
+  background: #eaf3ff;
+  border-color: #dbeafe;
+  color: #145fbd;
+}
+.layer-select {
+  flex: 1;
+  justify-content: flex-start;
+  min-width: 0;
+  padding: 6px 8px 6px 3px;
+  background: transparent !important;
+  border: 0;
+  border-radius: 0;
+  text-align: left;
+  gap: 8px;
+  font-size: 11px;
+}
+.layer-select[aria-pressed="true"] {
+  color: inherit;
+}
+.layer-select span {
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.disclosure {
+  width: 18px;
+  min-height: 25px;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: #697380;
+}
+.disclosure svg {
+  transition: transform 150ms;
+}
+.disclosure.is-open svg {
+  transform: rotate(90deg);
+}
+.disclosure-spacer {
+  width: 18px;
+  flex-shrink: 0;
+}
+.panel-footer {
+  margin-top: auto;
+  padding: 22px 16px 16px;
+  color: #616975;
+  font-size: 10px;
+  line-height: 1.65;
+  max-width: 220px;
+}
+.panel-empty {
+  color: var(--subtle);
+  padding: 12px 16px;
+  line-height: 1.7;
+  max-width: 260px;
+}
+.inspector {
+  width: 268px;
+  flex-shrink: 0;
+  background: white;
+  border-left: 1px solid var(--line);
+  overflow: auto;
+}
+.inspector > .section-heading {
+  border-bottom: 1px solid var(--line);
+}
+.inspector-identity {
+  display: flex;
+  gap: 10px;
+  padding: 20px 16px;
+  align-items: center;
+}
+.node-icon {
+  display: grid;
+  place-items: center;
+  width: 35px;
+  height: 35px;
+  border-radius: 6px;
+  background: #f1f4f7;
+  color: #5f6e80;
+  flex-shrink: 0;
+}
+.inspector-identity h2 {
+  font-size: 12px;
+  font-weight: 600;
+  margin-bottom: 4px;
+  overflow-wrap: anywhere;
+}
+.inspector-identity .subtle {
+  font-size: 10px;
+  text-transform: capitalize;
+}
+.inspect-section {
+  border-top: 1px solid var(--line);
+  padding: 17px 16px;
+}
+.inspect-section h3 {
+  font-size: 11px;
+  font-weight: 600;
+  margin-bottom: 13px;
+}
+.inspect-section dl {
+  margin: 0;
+}
+.property {
+  display: grid;
+  grid-template-columns: 70px minmax(0, 1fr);
+  gap: 8px;
+  padding: 6px 0;
+  font-size: 10px;
+  line-height: 1.5;
+}
+.property dt {
+  color: var(--subtle);
+  overflow-wrap: anywhere;
+}
+.property dd {
+  margin: 0;
+  overflow-wrap: anywhere;
+  white-space: pre-wrap;
+  font-variant-numeric: tabular-nums;
+}
+.bounds-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 3px 16px;
+}
+.bounds-grid .property {
+  grid-template-columns: 1fr;
+  gap: 3px;
+  background: #f6f7f9;
+  padding: 8px 9px;
+  border-radius: 4px;
+}
+.bounds-grid .property dd {
+  font-size: 12px;
+}
+.section-note {
+  font-size: 10px;
+  line-height: 1.65;
+  margin-bottom: 10px;
+}
+@media (max-width: 1100px) {
+  .left-panel {
+    width: 210px;
+  }
+  .inspector {
+    width: 238px;
+  }
+}
+/* User-resized panels (PanelResizer), wide layouts only; keep room for the canvas. */
+@media (min-width: 801px) {
+  .workspace.left-sized .left-panel {
+    width: var(--left-panel-width);
+  }
+  .workspace.right-sized .inspector {
+    width: var(--right-panel-width);
+  }
+  .left-panel,
+  .inspector {
+    max-width: max(200px, calc(50vw - 160px));
+  }
+}
+@media (max-width: 800px) {
+  .left-panel,
+  .inspector {
+    position: absolute;
+    top: 0;
+    bottom: 0;
+    z-index: 2;
+    width: 220px;
+    box-shadow: 3px 0 12px #26394b0c;
+  }
+  .left-panel {
+    left: 0;
+  }
+  .inspector {
+    right: 0;
+    box-shadow: -3px 0 12px #26394b0c;
+  }
+}
+@media (max-width: 560px) {
+  .left-panel,
+  .inspector {
+    width: 190px;
+  }
+  .section-heading {
+    padding-left: 12px;
+    padding-right: 12px;
+  }
+}
+/* All pages: one collapsible heading per page above its frames. */
+.layer-group-heading {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  width: 100%;
+  height: 33px;
+  min-height: 0;
+  padding: 0 12px 0 10px;
+  background: transparent !important;
+  border: 0;
+  border-radius: 0;
+  border-top: 1px solid #edf0f3;
+  justify-content: flex-start;
+  font-size: 11px;
+  font-weight: 600;
+  color: #1d2433;
+  text-align: left;
+}
+.layer-group-heading.is-first {
+  border-top-color: transparent;
+}
+.layer-group-heading:hover {
+  background: #f4f6f8 !important;
+}
+.layer-group-heading .disclosure {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 0;
+  flex-shrink: 0;
+}
+.layer-group-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  flex-shrink: 0;
+}
+.layer-group-name {
+  flex: 1;
+  min-width: 0;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.layer-group-heading small {
+  color: var(--subtle);
+  font-weight: 400;
+}

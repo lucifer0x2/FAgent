@@ -1,0 +1,23 @@
+title = "FAgent gitleaks config"
+
+[extend]
+useDefault = true
+
+[[allowlists]]
+description = "Paths that are never published or are binary"
+paths = [
+  '''(^|/)node_modules/''',
+  '''(^|/)target/''',
+  '''(^|/)\.runtime/''',
+  '''(^|/)Cargo\.lock$''',
+  '''(^|/)package-lock\.json$''',
+  '''(^|/)pnpm-lock\.yaml$''',
+  '''(^|/)yarn\.lock$''',
+  '''\.(woff2?|ttf|otf|png|jpe?g|gif|webp|ico|wasm)$''',
+]
+
+# SQL upsert "signing_key=excluded.signing_key" is a column reference, not a key.
+[[allowlists]]
+description = "SQL upsert column reference in viewer_auth"
+paths = ['''crates/storage/src/(backend/sqlite|postgres)/viewer_auth\.rs$''']
+regexes = ['''signing_key=excluded\.signing_key''']

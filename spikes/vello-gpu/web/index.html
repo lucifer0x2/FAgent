@@ -1,0 +1,19 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Vello GPU demo</title>
+  <style>
+    html, body { margin: 0; height: 100%; overflow: hidden; background: #e9ebef; font: 12px system-ui, sans-serif; }
+    #view { position: fixed; inset: 0; width: 100vw; height: 100vh; display: block; touch-action: none; cursor: grab; }
+    #status { position: fixed; left: 8px; bottom: 8px; padding: 4px 8px; border-radius: 4px;
+      background: rgb(0 0 0 / 70%); color: #fff; white-space: pre; pointer-events: none; }
+  </style>
+</head>
+<body>
+  <canvas id="view"></canvas>
+  <div id="status">loading…</div>
+  <script type="module" src="./main.mjs"></script>
+</body>
+</html>

@@ -1,0 +1,46 @@
+[package]
+name = "fagent-server"
+version = "0.1.0"
+edition.workspace = true
+license.workspace = true
+
+[features]
+# Task24 benchmark build only (see crates/scene-input/Cargo.toml).
+large-project-bench = ["fagent-storage/large-project-bench"]
+
+[dependencies]
+fagent-scene-input = { path = "../scene-input" }
+fagent-storage = { path = "../storage" }
+fagent-layout = { path = "../layout" }
+fagent-text = { path = "../text" }
+fagent-paint-core = { path = "../paint-core" }
+fagent-paint-vello = { path = "../paint-vello", default-features = false, features = ["export"] }
+axum = "0.8.8"
+moka = { version = "=0.12.15", default-features = false, features = ["sync"] }
+tokio = { version = "1.48", features = ["full"] }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+rmcp = { version = "=3.4.0", features = ["server", "transport-streamable-http-server"] }
+tower-http = { version = "0.6", features = ["fs", "cors", "set-header"] }
+async-stream = "0.3"
+base64 = "0.22"
+sha2 = "0.10"
+uuid = { version = "1", features = ["v4", "serde"] }
+argon2 = "0.5.3"
+ring = "0.17.14"
+futures-util = "0.3"
+
+[dev-dependencies]
+brotli = "8"
+flate2 = "1"
+postgres = "0.19"
+tempfile = "3"
+reqwest = { version = "0.12", features = ["json", "stream"] }
+rusqlite = "0.41.0"
+png = "0.18"
+roxmltree = "0.20"
+
+# Task24 benchmark: compiled only when its feature raises the node cap.
+[[test]]
+name = "large_project_benchmark"
+required-features = ["large-project-bench"]

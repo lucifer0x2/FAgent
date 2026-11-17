@@ -1,0 +1,44 @@
+[package]
+name = "fagent-paint-vello"
+version = "0.1.0"
+edition.workspace = true
+license.workspace = true
+description = "scene-3 encoded for Vello: vello_gpu viewer, vello_cpu export and parity reference."
+
+[features]
+default = ["cpu"]
+# vello_cpu backend: native PNG export and the parity reference.
+cpu = ["dep:vello_cpu"]
+# vello_gpu scene encoding (renderer backends are chosen by the embedding crate).
+gpu = ["dep:vello_gpu", "dep:glifo"]
+# Native CLIs: a scene JSON to PNG with vello_cpu (images decoded by fagent-paint-core).
+cli = ["export", "dep:png"]
+# Strict server/CLI PNG export through the shared fagent-paint-core contract.
+export = ["cpu", "dep:fagent-paint-core"]
+
+[dependencies]
+fagent-layout = { path = "../layout" }
+fagent-paint-core = { path = "../paint-core", optional = true }
+fagent-text = { path = "../text" }
+serde = { version = "=1.0.229", features = ["derive"] }
+serde_json = "=1.0.154"
+vello_common = { version = "=0.4.0", default-features = false, features = ["std"] }
+vello_cpu = { version = "=0.4.0", default-features = false, features = ["std", "u8_pipeline"], optional = true }
+vello_gpu = { version = "=0.4.0", default-features = false, features = ["std", "blurred_rounded_rect", "full_image_support", "text"], optional = true }
+glifo = { version = "=0.5.0", default-features = false, features = ["std"], optional = true }
+png = { version = "=0.18.1", optional = true }
+
+[[bin]]
+name = "paint-vello-png"
+path = "src/bin/paint_vello_png.rs"
+required-features = ["cli"]
+
+# Strict export adapter for spikes/native-paint-parity (the harness adapter protocol).
+[[bin]]
+name = "paint-vello-export"
+path = "src/bin/paint_vello_export.rs"
+required-features = ["cli"]
+
+[dev-dependencies]
+sha2 = "=0.10.9"
+png = "=0.18.1"

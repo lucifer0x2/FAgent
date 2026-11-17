@@ -1,0 +1,76 @@
+import type { Scene } from "../../renderer/types";
+import type {
+  SnapshotAsset,
+  SnapshotFont,
+  SnapshotStyle,
+  SnapshotToken,
+} from "./snapshotTypes";
+
+export interface ProjectRef {
+  projectId: string;
+  slug: string;
+  name: string;
+  revision: number;
+}
+
+export interface DesignNode {
+  id: string;
+  parentId: string | null;
+  sortKey: number;
+  kind: string;
+  props: Record<string, unknown>;
+}
+
+export interface Snapshot extends ProjectRef {
+  schemaVersion: number;
+  nodes: DesignNode[];
+  tokens: SnapshotToken[];
+  styles: SnapshotStyle[];
+  fonts: SnapshotFont[];
+  assets: SnapshotAsset[];
+  notes?: unknown[];
+  retention: { oldestCommitRevision: number; idempotencyPolicy: string };
+  truncated: boolean;
+}
+
+export interface Selection {
+  projectId: string;
+  pageId: string;
+  frameId: string;
+  nodeId: string;
+}
+
+export interface Viewport {
+  width: number;
+  height: number;
+}
+export interface SceneRequest extends Viewport {
+  projectId: string;
+  revision: number;
+  frameId: string;
+  /** The root height hugs content: the scene reports it and `height` is a placeholder. */
+  hugHeight?: boolean;
+}
+
+export interface RenderJob {
+  jobId: string;
+  status: "pending" | "ready" | "failed";
+  projectId: string;
+  revision: number;
+  frameId: string;
+  sceneKey?: string;
+  scene?: Scene;
+  diagnostics?: Scene["diagnostics"];
+  error?: { code: string; message: string };
+}
+
+/** `static`: the listener serves no live updates; a reload shows newer revisions. */
+export type Connection = "connecting" | "live" | "reconnecting" | "static";
+export interface CommitEvent {
+  projectId: string;
+  revision: number;
+}
+export interface ActivityEvent {
+  projectId: string;
+  revision: number;
+}

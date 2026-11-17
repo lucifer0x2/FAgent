@@ -1,0 +1,245 @@
+use super::values::*;
+use crate::{error::*, model::*};
+use std::collections::{BTreeMap, BTreeSet};
+#[derive(Clone)]
+pub struct Candidate {
+    pub(super) theme: String,
+    pub nodes: BTreeMap<String, Node>,
+    pub tokens: BTreeMap<String, Token>,
+    pub styles: BTreeMap<String, Style>,
+    pub assets: BTreeMap<String, Asset>,
+    pub fonts: BTreeMap<String, Font>,
+    pub notes: BTreeMap<String, Note>,
+    /// Node IDs deleted by this batch; links to them are pruned before validation.
+    pub(super) deleted: BTreeSet<String>,
+}
+impl Candidate {
+    pub fn from_snapshot(s: &Snapshot) -> Self {
+        Self {
+            theme: "default".into(),
+            nodes: s.nodes.iter().cloned().map(|x| (x.id.clone(), x)).collect(),
+            tokens: s
+                .tokens
+                .iter()
+                .cloned()
+                .map(|x| (x.id.clone(), x))
+                .collect(),
+            styles: s
+                .styles
+                .iter()
+                .cloned()
+                .map(|x| (x.id.clone(), x))
+                .collect(),
+            assets: s
+                .assets
+                .iter()
+                .cloned()
+                .map(|x| (x.id.clone(), x))
+                .collect(),
+            fonts: s.fonts.iter().cloned().map(|x| (x.id.clone(), x)).collect(),
+            notes: s.notes.iter().cloned().map(|x| (x.id.clone(), x)).collect(),
+            deleted: BTreeSet::new(),
+        }
+    }
+}
+impl Candidate {
+    pub fn validate(&self) -> Result<()> {
+        if self.nodes.len() > MAX_NODES {
+            return Err(StorageError::validation(
+                "nodes",
+                &format!("Project exceeds {MAX_NODES} authored nodes"),
+            ));
+        }
+        use crate::bench_phase::time;
+        time("validate.notes_navigation", || {
+            self.validate_notes()?;
+            self.validate_navigation()
+        })?;
+        let themes = time("validate.tokens", || self.validate_tokens())?;
+        for theme in &themes {
+            time("validate.theme", || -> Result<()> {
+                let context = super::scope::Resolver {
+                    candidate: self,
+                    nodes: &self.nodes,
+                    theme,
+                };
+                for style in self.styles.values() {
+                    context.style(style)?;
+                }
+                for node in self.nodes.values() {
+                    context.node(node)?;
+                }
+                Ok(())
+            })?;
+        }
+        time("validate.animation_triggers", || {
+            self.validate_animation_triggers()
+        })?;
+        time("validate.instances", || {
+            self.validate_instances(None, &themes)
+        })?;
+        Ok(())
+    }
+    fn place(
+        &mut self,
+        id: &str,
+        parent: Option<String>,
+        index: Option<usize>,
+        changed: &mut BTreeSet<String>,
+    ) -> Result<()> {
+        let mut siblings: Vec<_> = self
+            .nodes
+            .values()
+            .filter(|n| n.id != id && n.parent_id == parent)
+            .map(|n| (n.sort_key, n.id.clone()))
+            .collect();
+        siblings.sort();
+        let i = index.unwrap_or(siblings.len());
+        if i > siblings.len() {
+            let parent = parent.as_deref();
+            return Err(super::structural::index_out_of_bounds(
+                id,
+                i,
+                parent,
+                siblings.len(),
+            ));
+        }
+        siblings.insert(i, (0, id.to_string()));
+        for (i, (_, key)) in siblings.into_iter().enumerate() {
+            let n = self.nodes.get_mut(&key).unwrap();
+            if n.sort_key != i as i64 || n.parent_id != parent {
+                n.sort_key = i as i64;
+                n.parent_id = parent.clone();
+                changed.insert(key);
+            }
+        }
+        Ok(())
+    }
+    pub fn apply(&mut self, op: &Operation, changed: &mut BTreeSet<String>) -> Result<()> {
+        self.instance_write_guard(op)?;
+        match op {
+            Operation::CreateNode {
+                id: key,
+                kind,
+                parent_id,
+                props,
+                index,
+            } => {
+                id(key)?;
+                if self.nodes.contains_key(key) {
+                    return Err(super::structural::duplicate_node(key));
+                }
+                if self.notes.contains_key(key) {
+                    return Err(StorageError::validation(
+                        "id",
+                        "ID already belongs to a note",
+                    ));
+                }
+                self.nodes.insert(
+                    key.clone(),
+                    Node {
+                        id: key.clone(),
+                        kind: kind.clone(),
+                        parent_id: parent_id.clone(),
+                        props: props.clone(),
+                        sort_key: 0,
+                    },
+                );
+                self.node(&self.nodes[key])?;
+                self.place(key, parent_id.clone(), *index, changed)?;
+                changed.insert(key.clone());
+            }
+            Operation::UpdateNode {
+                id: key,
+                props,
+                merge,
+            } => {
+                let update = props.as_object().ok_or_else(|| {
+                    StorageError::validation("props", "Update properties must be an object")
+                })?;
+                let n = self
+                    .nodes
+                    .get_mut(key)
+                    .ok_or_else(|| super::structural::missing_node(key))?;
+                // Stored rows from older releases/raw SQL must not panic here.
+                let stored = n.props.as_object_mut().ok_or_else(|| {
+                    StorageError::validation("props", "Properties must be an object")
+                })?;
+                match merge {
+                    true => crate::merge_props(stored, update),
+                    false => stored.extend(update.clone()),
+                }
+                self.node(&self.nodes[key])?;
+                changed.insert(key.clone());
+            }
+            Operation::ReparentNode {
+                id: key,
+                parent_id,
+                index,
+            } => {
+                let n = self
+                    .nodes
+                    .get_mut(key)
+                    .ok_or_else(|| super::structural::missing_node(key))?;
+                n.parent_id = Some(parent_id.clone());
+                self.node(&self.nodes[key])?;
+                self.place(key, Some(parent_id.clone()), *index, changed)?;
+                changed.insert(key.clone());
+            }
+            Operation::ReorderNode { id: key, index } => {
+                let parent = self
+                    .nodes
+                    .get(key)
+                    .ok_or_else(|| super::structural::missing_node(key))?
+                    .parent_id
+                    .clone();
+                self.place(key, parent, Some(*index), changed)?;
+                changed.insert(key.clone());
+            }
+            Operation::DeleteSubtree { id: key } => {
+                if !self.nodes.contains_key(key) {
+                    return Err(super::structural::missing_node(key));
+                }
+                let mut remove = BTreeSet::from([key.clone()]);
+                loop {
+                    let children: Vec<_> = self
+                        .nodes
+                        .values()
+                        .filter(|n| {
+                            !remove.contains(&n.id)
+                                && n.parent_id.as_ref().is_some_and(|p| remove.contains(p))
+                        })
+                        .map(|n| n.id.clone())
+                        .collect();
+                    if children.is_empty() {
+                        break;
+                    }
+                    remove.extend(children);
+                }
+                self.cascade_notes(&remove, changed);
+                self.component_delete_guard(&remove)?;
+                self.deleted.extend(remove.iter().cloned());
+                for key in remove {
+                    self.nodes.remove(&key);
+                    changed.insert(key);
+                }
+            }
+            Operation::UpsertToken { token } => {
+                id(&token.id)?;
+                self.tokens.insert(token.id.clone(), token.clone());
+                self.validate_tokens()?;
+                changed.insert(token.id.clone());
+            }
+            Operation::UpsertStyle { style } => {
+                self.style(style)?;
+                self.styles.insert(style.id.clone(), style.clone());
+                changed.insert(style.id.clone());
+            }
+            Operation::CreateNote { .. }
+            | Operation::ReplyNote { .. }
+            | Operation::UpdateNote { .. }
+            | Operation::DeleteNote { .. } => self.apply_note(op, changed)?,
+        }
+        Ok(())
+    }
+}

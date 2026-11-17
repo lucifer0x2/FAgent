@@ -1,0 +1,135 @@
+use super::{scope::Resolver, values::*, Candidate};
+use crate::{error::*, model::*};
+use std::collections::BTreeSet;
+impl Candidate {
+    pub(super) fn ancestors(&self, id: &str) -> impl Iterator<Item = &Node> {
+        let parent = |node: &Node| node.parent_id.as_ref().and_then(|id| self.nodes.get(id));
+        std::iter::successors(self.nodes.get(id).and_then(parent), move |node| {
+            parent(node)
+        })
+        .take(128)
+    }
+}
+impl Resolver<'_> {
+    pub(super) fn style(&self, style: &Style) -> Result<()> {
+        id(&style.id)?;
+        if style.name.len() > 256 {
+            return Err(StorageError::validation("name", "Name exceeds 256 bytes"));
+        }
+        match style.kind.as_str() {
+            "fill" => {
+                if style.value.get("styleId").is_some() {
+                    return Err(StorageError::validation(
+                        "style.value",
+                        "Style aliases are not supported",
+                    ));
+                }
+                super::paint::paint(&self.resolve_paint(&style.value)?, &NodeKind::Rectangle)?;
+            }
+            "text" => {
+                let o = style.value.as_object().ok_or_else(|| {
+                    StorageError::validation("value", "Text style must be a property object")
+                })?;
+                for (k, v) in o {
+                    match k.as_str() {
+                        "fontId" => {
+                            if !self.fonts.contains_key(v.as_str().unwrap_or("")) {
+                                return Err(StorageError::validation(
+                                    "fontId",
+                                    "Referenced font does not exist",
+                                ));
+                            }
+                        }
+                        "fill" => {
+                            if v.get("styleId").is_some() {
+                                return Err(StorageError::validation(
+                                    "style.value",
+                                    "Style aliases are not supported",
+                                ));
+                            }
+                            self.resolve_value(v, "color")?;
+                        }
+                        "fontSize" | "lineHeight" => {
+                            number(&self.resolve_value(v, "dimension")?, 1., 10000., k)?;
+                        }
+                        "letterSpacing" => {
+                            super::text_props::text_property(k, &self.resolve_value(v, "number")?)?;
+                        }
+                        "textWrap" | "textAlign" | "textDecoration" | "textTransform" => {
+                            super::text_props::text_property(k, v)?;
+                        }
+                        "fontFamily" | "fontWeight" | "fontStyle" => {
+                            let resolved = if k == "fontWeight" {
+                                self.resolve_value(v, "number")?
+                            } else {
+                                v.clone()
+                            };
+                            super::font_face::check_face_property(k, &resolved)?;
+                        }
+                        _ => {
+                            return Err(StorageError::validation(
+                                "style.value",
+                                "Unsupported text style property",
+                            ))
+                        }
+                    }
+                }
+                if o.contains_key("fontId") && o.contains_key("fontFamily") {
+                    return Err(StorageError::validation(
+                        "style.value",
+                        "Choose fontId or fontFamily, not both",
+                    ));
+                }
+            }
+            _ => {
+                return Err(StorageError::validation(
+                    "style.kind",
+                    "Only primitive fill and text styles are supported",
+                ))
+            }
+        }
+        Ok(())
+    }
+    pub(super) fn node(&self, n: &Node) -> Result<()> {
+        id(&n.id)?;
+        match (&n.kind, &n.parent_id) {
+            (NodeKind::Page, None) => {}
+            (NodeKind::Page, Some(_)) => {
+                return Err(StorageError::validation("parentId", "Pages must be roots"))
+            }
+            (_, None) => {
+                return Err(StorageError::validation(
+                    "parentId",
+                    "Non-page nodes require a parent",
+                ))
+            }
+            (_, Some(p)) => {
+                let parent = self
+                    .nodes
+                    .get(p)
+                    .ok_or_else(|| super::structural::missing_parent(&n.id, p))?;
+                if !parent.kind.container() {
+                    let kind = parent.kind.as_str();
+                    return Err(super::structural::not_container(&n.id, p, kind));
+                }
+                let mut ancestors = BTreeSet::new();
+                let mut cursor = Some(n.id.as_str());
+                while let Some(k) = cursor {
+                    if !ancestors.insert(k) {
+                        return Err(super::structural::cycle(&n.id, p));
+                    }
+                    if ancestors.len() > 128 {
+                        return Err(StorageError::validation(
+                            "parentId",
+                            "Tree exceeds maximum depth 128",
+                        ));
+                    }
+                    cursor = self.nodes.get(k).and_then(|n| n.parent_id.as_deref());
+                }
+            }
+        }
+        self.properties(n)
+            .map_err(|e| e.on_node(&n.id, n.kind.as_str()))?;
+        Ok(())
+    }
+}

@@ -1,0 +1,21 @@
+[package]
+name = "fagent-vello-gpu-demo"
+version = "0.1.0"
+edition.workspace = true
+license.workspace = true
+description = "Task 29 P0 web demo: vello_gpu on WebGPU (primary) and WebGL2 (fallback)."
+publish = false
+
+[lib]
+crate-type = ["cdylib", "rlib"]
+
+# Browser-only; on other targets the crate is empty so workspace checks stay cheap.
+[target.'cfg(target_arch = "wasm32")'.dependencies]
+fagent-paint-vello = { path = "../../../crates/paint-vello", default-features = false, features = ["gpu"] }
+vello_gpu = { version = "=0.4.0", default-features = false, features = ["std", "wgpu", "webgl", "blurred_rounded_rect", "full_image_support"] }
+wgpu = { version = "=30.0.2", default-features = false, features = ["std", "webgpu"] }
+serde_json = "=1.0.154"
+wasm-bindgen = "=0.2.129"
+wasm-bindgen-futures = "0.4"
+js-sys = "=0.3.106"
+web-sys = { version = "0.3", features = ["HtmlCanvasElement", "Window", "Performance", "WebGl2RenderingContext", "WebGlTexture"] }
