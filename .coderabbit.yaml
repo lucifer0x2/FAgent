@@ -1,0 +1,229 @@
+# yaml-language-server: $schema=https://coderabbit.ai/integrations/schema.v2.json
+#
+# CodeRabbit pull request review for this public repository.
+# The repository rules live in AGENTS.md ("English only", "Public repository"); CodeRabbit reads
+# AGENTS.md as a code guideline by default. Per-area path instructions and four warning checks
+# steer the feature review; three error checks restate the rules that must block a merge. The deterministic gate stays in CI: .github/workflows/public-content.yml runs
+# scripts/check-public-content.sh and a gitleaks history scan on every push and pull request.
+
+language: en-US
+tone_instructions: >-
+  Write every comment in concise, plain English. Point to the exact file and line, quote at most the
+  offending fragment, and never repeat a secret or private value in full.
+early_access: false
+
+reviews:
+  profile: chill
+  # Request changes while a blocking finding or an `error` pre-merge check is open; approve only
+  # after they are resolved. The author cannot approve their own PR with `@coderabbitai approve`.
+  auto_approvals:
+    enabled: true
+    allow_author_approval: false
+  high_level_summary: true
+  review_status: true
+  commit_status: true
+  fail_commit_status: false
+  collapse_walkthrough: true
+  sequence_diagrams: false
+  poem: false
+  in_progress_fortune: false
+  abort_on_close: true
+
+  auto_review:
+    enabled: true
+    drafts: false
+    base_branches:
+      - "^main$"
+
+  # Lockfiles and binary assets only. Every other path is reviewed, because a secret or a local
+  # path can hide in any text file.
+  path_filters:
+    - "!**/Cargo.lock"
+    - "!**/package-lock.json"
+    - "!**/*.wasm"
+    - "!**/*.png"
+    - "!**/*.jpg"
+    - "!**/*.jpeg"
+    - "!**/*.gif"
+    - "!**/*.webp"
+    - "!**/*.ico"
+    - "!**/*.ttf"
+    - "!**/*.otf"
+    - "!**/*.woff"
+    - "!**/*.woff2"
+
+  path_instructions:
+    - path: "**/*"
+      instructions: >-
+        This repository is open source and English only. Flag any non-English prose in comments,
+        docs, logs, commit-facing text, test strings, fixtures or sample content. Flag hard-coded API
+        keys, tokens, passwords, connection strings with credentials and private keys. Flag local
+        absolute paths such as /Users/<name>/, /home/<name>/, /Volumes/, /var/folders/ or
+        C:\Users\<name>\; the allowed forms are repo-relative paths and placeholders like
+        <repo root>, $HOME and $TMPDIR.
+    # Feature review: what each area must keep true. PLAN.md holds the product requirements and
+    # docs/CONTRACT.md the module contract; read them when a change touches behavior they describe.
+    - path: "crates/**/*.rs"
+      instructions: >-
+        Review the change for behavior, not only style. Check that every new or changed code path
+        returns a typed error instead of panicking on input from a client, a file or the database
+        (no unwrap/expect/indexing that can fail at run time outside tests). Look for off-by-one
+        and ordering bugs, lost errors, and state left half-updated when a step fails. A behavior
+        change needs a test that fails without it; tests must use a temporary data root or
+        database, never ~/.fagent.
+    - path: "crates/storage/**"
+      instructions: >-
+        Storage must stay correct on both SQLite and PostgreSQL: a change to one backend needs the
+        same behavior, or a stated reason, in the other. A commit is atomic: either the whole batch
+        and its new revision are persisted or nothing is. Reads return one consistent revision.
+        Migrations must load data written by the previous release. Check cache invalidation (Moka
+        snapshot cache, node memory) whenever a write path changes.
+    - path: "crates/node-memory/**"
+      instructions: >-
+        The node-memory engine knows nothing about databases: no SQL crates or storage types.
+        A commit validates only the batch delta and its dependency closure, never the whole
+        project; each create/update/reparent is still checked right after it is applied, so an
+        invalid intermediate state is rejected at that operation index. See
+        tasks/41-node-memory-engine.md.
+    - path: "crates/scene-input/**"
+      instructions: >-
+        Validation decides what the design store accepts. Check that a new rule rejects the bad case
+        with a stable error code and the operation index, accepts the valid neighbors, and has tests
+        for both. Flag any change that silently accepts data an older rule rejected.
+    - path: "crates/server/**"
+      instructions: >-
+        Any change to an MCP tool (name, input schema, output shape, error code) or an HTTP route
+        must match docs/CONTRACT.md and docs/SERVER.md in the same pull request. The public viewer
+        listener stays read-only: no mutation route or MCP tool may be reachable through it.
+        Check Host/Origin handling and that no request can read outside the configured data root.
+    - path: "crates/layout/**"
+      instructions: &render >-
+        Layout, text and paint must be deterministic: the same input gives the same output on every
+        run and backend. Check that the Vello GPU path, the vello_cpu export path and the Canvas2D
+        fallback still agree for the changed feature.
+    - path: "crates/text/**"
+      instructions: *render
+    - path: "crates/paint-*/**"
+      instructions: *render
+    - path: "web/**"
+      instructions: &viewer >-
+        The web viewer is read-only. Vello (WebGPU first, WebGL2 fallback) is the default renderer;
+        ?renderer=canvas2d and ?scene=server must keep working. Flag work added to the main thread
+        that can cause long tasks on large projects, unbounded caches, missing cleanup of workers,
+        listeners or GPU resources, and UI that breaks while the scene is still loading.
+    - path: "renderer/**"
+      instructions: *viewer
+    - path: "docs/**"
+      instructions: >-
+        Docs must stay English and must not name private projects, clients, hosts, people, emails
+        or local machine paths. Use synthetic examples and aggregate numbers.
+    - path: "scripts/**"
+      instructions: &credentials >-
+        Credentials must be generated at run time (for example `openssl rand`) or read from the
+        environment or a Kubernetes Secret, never written as literals. Never echo a secret to logs.
+    - path: "deploy/**"
+      instructions: *credentials
+
+  tools:
+    gitleaks:
+      enabled: true
+    trufflehog:
+      enabled: true
+    presidio:
+      enabled: true
+    languagetool:
+      enabled: true
+    markdownlint:
+      enabled: true
+    shellcheck:
+      enabled: true
+    actionlint:
+      enabled: true
+    yamllint:
+      enabled: true
+    clippy:
+      enabled: true
+    eslint:
+      enabled: true
+    biome:
+      enabled: true
+
+  pre_merge_checks:
+    title:
+      mode: warning
+    description:
+      mode: warning
+    issue_assessment:
+      mode: warning
+    custom_checks:
+      # Feature checks: judgment calls, so they warn instead of blocking.
+      - name: Task acceptance criteria
+        mode: warning
+        instructions: >-
+          If the pull request title, description or branch names a task (for example "Task 41",
+          tasks/41-..., task-41), open that file in tasks/ and read its "Acceptance" section (and
+          "Decisions" or "Constraints" when present). For each acceptance item, say whether the diff
+          implements it, the description explains why it is deferred, or it is missing. Fail when an
+          item in scope is missing with no explanation, or when the diff changes files the task marks
+          as out of scope. Pass when no task is named.
+      - name: Tests for behavior changes
+        mode: warning
+        instructions: >-
+          Fail when the pull request changes runtime behavior in crates/, web/, renderer/ or worker/
+          (new feature, bug fix, changed validation, changed API output) and adds or updates no test
+          that covers it, unless the description says how it was verified and why a test is not
+          practical. Pure refactors, docs, comments and formatting pass.
+      - name: Contract and docs in sync
+        mode: warning
+        instructions: >-
+          Fail when the diff changes an MCP tool name, input schema, output shape or error code, an
+          HTTP route, an environment variable, a CLI flag or a storage schema, and does not update the
+          matching document in the same pull request (docs/CONTRACT.md, docs/SERVER.md,
+          docs/GETTING-STARTED.md, docs/BACKUP.md or docs/VIEWER.md).
+      - name: No rejected approach
+        mode: warning
+        instructions: >-
+          Fail when the diff adds a dependency, engine, renderer or storage design that
+          docs/REJECTED-APPROACHES.md lists as rejected, unless the description states that the
+          maintainer approved bringing it back.
+      # Repository rules: these block the merge.
+      - name: English only
+        mode: error
+        instructions: >-
+          Fail if any added or changed line in the pull request contains prose that is not English:
+          code comments, documentation, Markdown, logs, error messages, test names and strings,
+          fixtures, sample content, or the pull request title and description. Accented Latin
+          letters inside test data that exercises text shaping or diacritics (for example "café"
+          or "naïve") pass. Proper nouns, code
+          identifiers, URLs and font or language names pass. List each failing file and line.
+      - name: No secrets or passwords
+        mode: error
+        instructions: >-
+          Fail if any added or changed line contains a real-looking secret: an API key or token
+          (for example ghp_, github_pat_, sk-, xox?-, AKIA prefixes, JWTs, bearer tokens), a private
+          key block, a hard-coded password or passphrase, a password embedded in a URL or
+          connection string, a .env file with values, or a cookie or session value. Pass when the
+          value is generated at run time, read from an environment variable or a secret store, or is
+          an obvious placeholder (for example ${VAR}, <password>, changeme-test, example.invalid).
+          Do not repeat the secret in the report; give the file, line and kind only.
+      - name: No local absolute paths
+        mode: error
+        instructions: >-
+          Fail if any added or changed line contains a local absolute path from a developer
+          machine: /Users/<name>/, /home/<name>/, /Volumes/<disk>, /var/folders/, /private/var/folders/
+          or C:\Users\<name>\. Pass repo-relative paths, ~ or $HOME paths with no user name, and
+          placeholders such as <repo root>, $HOME and $TMPDIR. Paths inside a container image or a
+          system location that names no user (for example /usr/local/bin or /app) pass. List each
+          failing file and line.
+
+chat:
+  auto_reply: true
+
+knowledge_base:
+  opt_out: false
+  code_guidelines:
+    enabled: true
+    filePatterns:
+      - "AGENTS.md"
+      - "docs/REJECTED-APPROACHES.md"
+      - "docs/CONTRACT.md"
