@@ -68,6 +68,16 @@ impl Storage {
         self.backend.reader_snapshot(key)
     }
 
+    /// See [`StorageBackend::memory_stats`].
+    pub fn memory_stats(&self) -> crate::NodeMemoryStats {
+        self.backend.memory_stats()
+    }
+
+    /// See [`StorageBackend::memory_read_failed`].
+    pub fn memory_read_failed(&self) {
+        self.backend.memory_read_failed()
+    }
+
     /// See [`StorageBackend::scoped_snapshot`].
     pub fn scoped_snapshot(&self, key: &str, target: &str) -> Result<crate::ScopedRead> {
         self.backend.scoped_snapshot(key, target)

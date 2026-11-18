@@ -25,6 +25,8 @@ pub(super) fn probe(project: &Project) -> Result<(ProjectMeta, Option<SnapshotCa
 
 /// The identity of the project as `conn` sees it, without loading entities. A
 /// writer calls this under the project writer lock, bracketed by `stamp`.
+/// Unused until SQLite commits stage in `NodeMemory`.
+#[allow(dead_code)]
 pub(crate) fn probe_on(
     project: &Project,
     conn: &Connection,

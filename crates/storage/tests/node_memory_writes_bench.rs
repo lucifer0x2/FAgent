@@ -1,4 +1,4 @@
-//! Task28 I3 commit latency on PostgreSQL, writes through memory off vs on: 30
+//! Commit latency on PostgreSQL with node memory always on: 30
 //! scoped commits (median) on a generated 200k project and, when given, the largest
 //! project of a disposable backup restore. Prints counts and timings only.
 //!
@@ -64,11 +64,8 @@ mod erased {
     }
 }
 
-fn storage(url: &str, writes: WritesMode) -> Storage {
-    let mut config = PostgresConfig::new(url);
-    config.node_memory_shadow = ShadowMode::Off;
-    config.node_memory_reads = ReadsMode::Off;
-    config.node_memory_writes = writes;
+fn storage(url: &str) -> Storage {
+    let config = PostgresConfig::new(url);
     let backend = PostgresBackend::with_config(config).unwrap();
     let cache = SnapshotCache::new(backend.cache_namespace());
     Storage::from_shared(Arc::new(backend.with_cache(cache).unwrap()))
@@ -133,23 +130,21 @@ fn measure(storage: &Storage, project: &str, node: &str, page: &str) -> Value {
 
 fn compare(label: &str, url: &str, project: &str, snapshot: &Snapshot) {
     let (node, page) = target(snapshot);
-    for (mode, writes) in [("off", WritesMode::Off), ("on", WritesMode::On)] {
-        let report = measure(&storage(url, writes), project, &node, &page);
-        println!(
-            "writes-bench {label} nodes={} {mode} {report}",
-            snapshot.nodes.len()
-        );
-    }
+    let report = measure(&storage(url), project, &node, &page);
+    println!(
+        "writes-bench {label} nodes={} {report}",
+        snapshot.nodes.len()
+    );
 }
 
 #[test]
-#[ignore = "Task28 I3 timing on a disposable PostgreSQL (scripts/task19-check.sh)"]
-fn commit_latency_off_vs_on() {
+#[ignore = "commit timing on a disposable PostgreSQL (scripts/task19-check.sh)"]
+fn commit_latency() {
     let url = std::env::var("TASK19_POSTGRES_URL").expect("TASK19_POSTGRES_URL");
     assert!(!url.contains(":2703"), "never the live cluster");
     let nodes = std::env::var("WRITES_BENCH_NODES").map_or(200_000, |v| v.parse().unwrap());
     let snapshot = generate(nodes);
-    let setup = storage(&url, WritesMode::Off);
+    let setup = storage(&url);
     let id = setup
         .create_project("gen-writes", "Generated")
         .unwrap()
@@ -159,7 +154,7 @@ fn commit_latency_off_vs_on() {
     compare("generated", &url, &id, &snapshot);
     if let Ok(real) = std::env::var("WRITES_BENCH_REALDATA_URL") {
         assert!(!real.contains("2703"), "never the live cluster");
-        let storage = storage(&real, WritesMode::Off);
+        let storage = storage(&real);
         let largest = storage
             .list_projects()
             .unwrap()

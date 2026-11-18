@@ -165,7 +165,7 @@ impl RevisionIndexes {
 #[derive(Clone)]
 pub(crate) struct IndexCache {
     entries: Cache<SnapshotCacheIdentity, Arc<RevisionIndexes>>,
-    owner: crate::shadow::Shadow,
+    owner: crate::memory::Memory,
     gate: Arc<Mutex<()>>,
 }
 impl Default for IndexCache {
@@ -186,7 +186,7 @@ impl IndexCache {
             gate: Default::default(),
         }
     }
-    pub(crate) fn with_owner(mut self, owner: crate::shadow::Shadow) -> Self {
+    pub(crate) fn with_owner(mut self, owner: crate::memory::Memory) -> Self {
         self.owner = owner;
         self
     }

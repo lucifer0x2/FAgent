@@ -76,7 +76,7 @@ impl Project {
             meta.privacy_status = privacy;
         }
         tx.commit()?;
-        self.root.shadow.evict(&self.project_id);
+        self.root.memory.evict(&self.project_id);
         Ok((meta, changed))
     }
     pub(crate) fn request_ids(&self, project: &str, key: &str) -> Result<()> {

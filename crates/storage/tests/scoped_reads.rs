@@ -87,13 +87,13 @@ fn exercise(storage: &Storage, p: &ProjectHandle) {
 
 #[test]
 fn sqlite_scope_pairing_warm_commit_order_old_readers_and_field_swap() {
-    let (temp, storage, p) = sqlite_legacy("scoped-reads");
+    let (temp, storage, p) = sqlite("scoped-reads");
     exercise(&storage, &p);
     let expected = parity(&storage.shared_snapshot(p.id()).unwrap());
     let project_id = p.id().to_string();
     drop(p);
     drop(storage);
-    let fresh = legacy_store(temp.path());
+    let fresh: Storage = Store::open(temp.path()).unwrap().into();
     assert_eq!(
         expected,
         parity(&fresh.shared_snapshot(&project_id).unwrap())

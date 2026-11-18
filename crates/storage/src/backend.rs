@@ -86,9 +86,9 @@ pub trait StorageBackend: Send + Sync {
         let indexes = Arc::new(crate::RevisionIndexes::new(&snapshot.nodes));
         Ok(crate::SharedSnapshot::untrusted(snapshot, indexes))
     }
-    /// Task28 I2: the snapshot for a scoped read of `target` (a node, frame or page
-    /// ID, or a virtual instance ID). Builtin backends with memory reads on may hand
-    /// out an immutable whole-project view; otherwise this is today's snapshot.
+    /// The snapshot for a scoped read of `target` (a node, frame or page ID, or a
+    /// virtual instance ID). Builtin backends hand out an immutable whole-project
+    /// view from node memory when it is fresh; otherwise this is the database snapshot.
     /// Use SharedSnapshot::scoped for payloads; a memory view's Snapshot holds only
     /// header/resources, rather than a serializable full project.
     fn scoped_snapshot(&self, project: &str, target: &str) -> Result<crate::ScopedRead> {
@@ -101,6 +101,13 @@ pub trait StorageBackend: Send + Sync {
     fn reader_snapshot(&self, project: &str) -> Result<crate::ScopedRead> {
         self.scoped_snapshot(project, "")
     }
+    /// Counters of the node-memory adapter; zero for backends without one.
+    fn memory_stats(&self) -> crate::NodeMemoryStats {
+        crate::NodeMemoryStats::default()
+    }
+    /// A reader failed on a memory view and the read was served again from the
+    /// database snapshot.
+    fn memory_read_failed(&self) {}
     /// Authoritative lookup by ID or slug. A source error must propagate.
     /// Backends that cannot provide a cheap, reliable probe return None.
     fn snapshot_cache_identity(&self, _project: &str) -> Result<Option<SnapshotCacheIdentity>> {

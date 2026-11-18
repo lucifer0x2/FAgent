@@ -17,7 +17,7 @@ pub struct SnapshotCache {
     namespace: String,
     entries: Cache<String, CachedSnapshot>,
     max_entry_weight: u32,
-    owner: crate::shadow::Shadow,
+    owner: crate::memory::Memory,
     gate: Arc<Mutex<()>>,
 }
 
@@ -53,7 +53,7 @@ impl SnapshotCache {
     pub(crate) fn namespace(&self) -> &str {
         &self.namespace
     }
-    pub(crate) fn with_owner(mut self, owner: crate::shadow::Shadow) -> Self {
+    pub(crate) fn with_owner(mut self, owner: crate::memory::Memory) -> Self {
         self.owner = owner;
         self
     }

@@ -1,7 +1,6 @@
 //! Generated projects (`crates/node-memory/fixtures/generate.mjs`, never printed)
-//! seeded into SQLite and copied, so memory-on and memory-off stores hold
-//! identical bytes. Needs Node.js >= 20 on PATH.
-use fagent_storage::{ReadsMode, ShadowMode, Snapshot, Storage, Store};
+//! seeded into SQLite and copied, so the two stores of a pair hold identical bytes. Needs Node.js >= 20 on PATH.
+use fagent_storage::{Snapshot, Storage, Store};
 use std::path::Path;
 use std::process::{Command, Stdio};
 
@@ -69,14 +68,14 @@ fn seed(db: &Path, snapshot: &Snapshot) {
 }
 
 /// Seeds `snapshot` as project `slug` under `root/on`, copies it to `root/off`, and
-/// opens memory-on (strict shadow) and memory-off stores. Returns them and the id.
+/// opens a store on each. Returns them (`on`, `off`) and the id.
 pub(super) fn sqlite_pair(
     root: &Path,
     slug: &str,
     snapshot: &Snapshot,
 ) -> (Storage, Storage, String) {
     let (on, off) = (root.join("on"), root.join("off"));
-    let store = Store::open_with_node_memory(&on, ShadowMode::Off, ReadsMode::Off).unwrap();
+    let store = Store::open(&on).unwrap();
     let id = store
         .create_project(slug, "Differential")
         .unwrap()
@@ -85,13 +84,8 @@ pub(super) fn sqlite_pair(
     drop(store);
     seed(&on.join(slug).join("db.sql"), snapshot);
     copy(&on.join(slug), &off.join(slug));
-    let open = |path: &Path, shadow, reads| -> Storage {
-        Store::open_with_node_memory(path, shadow, reads)
-            .unwrap()
-            .into()
-    };
-    let memory = open(&on, ShadowMode::Strict, ReadsMode::On);
-    (memory, open(&off, ShadowMode::Off, ReadsMode::Off), id)
+    let open = |path: &Path| -> Storage { Store::open(path).unwrap().into() };
+    (open(&on), open(&off), id)
 }
 
 fn copy(from: &Path, to: &Path) {

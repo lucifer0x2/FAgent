@@ -3,7 +3,6 @@ use crate::*;
 use serde::Serialize;
 mod commit;
 mod history;
-mod incremental;
 mod validation;
 #[cfg(test)]
 pub(crate) use validation::validated_candidate;
@@ -98,22 +97,8 @@ impl Project {
                 return Ok((Outcome::Committed(result), metrics));
             }
         }
-        if !dry_run {
-            if let Some(result) = self.try_memory_batch(
-                &mut conn,
-                &request,
-                pages.as_deref(),
-                &request_value,
-                &request_hash,
-                base,
-                &mut metrics,
-            )? {
-                metrics.total_us = us(total);
-                return Ok((Outcome::Committed(result), metrics));
-            }
-        }
         let time = Instant::now();
-        let (before, identity, memory) = self.load_base(&mut conn, dry_run)?;
+        let (before, identity) = self.load_base(&mut conn)?;
         let indexes = self.root.indexes.for_snapshot(&before, identity.clone());
         metrics.read_us = us(time);
         base.check(before.revision, pages.is_some())?;
@@ -178,28 +163,19 @@ impl Project {
         let commit = commit::Commit {
             before: &before,
             candidate: &candidate,
-            operations: &request.operations,
             key: &request.idempotency_key,
             hash: &request_hash,
             history: &history,
             result: &result,
-            identity: identity.as_ref(),
         };
-        self.commit(&mut conn, commit, memory, &mut metrics)?;
+        self.commit(&mut conn, commit, &mut metrics)?;
         if let Some(mut identity) = identity {
             identity.revision = result.committed_revision;
             // The write may have changed the file stamp; we still hold the writer lock.
             if let Ok(Some(stamp)) = backend::sqlite::identity::file_stamp(self) {
                 identity.incarnation = stamp;
             }
-            self.root.shadow.retag(&identity);
-            if self.root.shadow.owns_project(&self.project_id) {
-                if self.root.shadow.claim_cache_cleanup(&self.project_id) {
-                    self.root.indexes.evict(&self.project_id);
-                }
-            } else {
-                self.root.indexes.publish(identity, next_indexes);
-            }
+            self.root.indexes.publish(identity, next_indexes);
         }
         metrics.total_us = us(total);
         Ok((Outcome::Committed(result), metrics))

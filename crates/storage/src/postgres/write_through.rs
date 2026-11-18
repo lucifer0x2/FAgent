@@ -10,11 +10,7 @@ use std::{collections::HashSet, sync::Arc};
 pub(super) struct Committed {
     /// Entity rows as stored before the write, without readiness applied.
     before: Snapshot,
-    /// HOT writes already published their reader view. They retain no full base
-    /// snapshot or old reader view for post-commit cache reconstruction.
-    hot: bool,
     /// Binary hashes of the project at commit, including this write's import.
-    /// `None` for a commit staged in memory, whose base already has readiness.
     binaries: Option<Binaries>,
     written: transaction::Written,
     revision: u64,
@@ -33,7 +29,6 @@ impl Committed {
         let (generation, namespace) = project;
         Self {
             before,
-            hot: binaries.is_none(),
             binaries,
             written,
             revision,
@@ -42,60 +37,13 @@ impl Committed {
         }
     }
 
-    pub fn from_memory(
-        before: Arc<fagent_scene_input::read_scope::ReadView>,
-        written: transaction::Written,
-        revision: u64,
-        project: (i64, String),
-    ) -> Self {
-        let mut committed = Self::new(
-            before.metadata().as_ref().clone(),
-            None,
-            written,
-            revision,
-            project,
-        );
-        committed.hot = true;
-        committed
-    }
-
-    /// Mirrors this commit into the node-memory shadow (call after the commit). A
-    /// commit staged in memory (Task28 I3) is already there.
-    pub fn observe(
-        &self,
-        shadow: &crate::shadow::Shadow,
-        operations: &[crate::Operation],
-        result: &crate::BatchResult,
-    ) {
-        let Some(binaries) = &self.binaries else {
-            return;
-        };
-        let rows = self.written.shadow_rows();
-        let identity = snapshot::identity(
-            self.before.project_id.clone(),
-            self.before.schema_version,
-            self.before.revision,
-            self.generation,
-            &self.namespace,
-        );
-        let ready = |snapshot: &mut Snapshot| snapshot::apply_readiness(snapshot, binaries);
-        shadow.observe(crate::shadow::Commit {
-            before: &self.before,
-            operations,
-            result,
-            rows: &rows,
-            identity: Some(&identity),
-            ready: Some(&ready),
-        });
-    }
-
     /// Call only after the transaction committed. Fills a cache bound to the
     /// namespace that the write transaction observed; `put` keeps newer entries.
     pub fn fill(self, cache: Option<&SnapshotCache>) {
         let Some(cache) = cache.filter(|cache| cache.namespace() == self.namespace) else {
             return;
         };
-        if self.hot || cache.memory_owned(&self.before.project_id) {
+        if cache.memory_owned(&self.before.project_id) {
             cache.evict(&self.before.project_id);
             return;
         }

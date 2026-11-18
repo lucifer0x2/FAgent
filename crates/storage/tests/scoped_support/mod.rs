@@ -66,19 +66,6 @@ pub fn sqlite(label: &str) -> (tempfile::TempDir, Storage, Arc<ProjectHandle>) {
     let p = storage.create_project(label, label).unwrap();
     (temp, storage, p)
 }
-/// Node-memory flags off regardless of the environment: the legacy revision-index
-/// cache these callers check serves only projects that are not HOT.
-pub fn legacy_store(root: &std::path::Path) -> Storage {
-    Store::open_with_node_memory_writes(root, ShadowMode::Off, ReadsMode::Off, WritesMode::Off)
-        .unwrap()
-        .into()
-}
-pub fn sqlite_legacy(label: &str) -> (tempfile::TempDir, Storage, Arc<ProjectHandle>) {
-    let temp = tempfile::tempdir().unwrap();
-    let storage = legacy_store(temp.path());
-    let p = storage.create_project(label, label).unwrap();
-    (temp, storage, p)
-}
 pub fn token(id: &str, value: Value) -> Operation {
     Operation::UpsertToken {
         token: Token {

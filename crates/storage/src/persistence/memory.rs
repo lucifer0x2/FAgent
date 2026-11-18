@@ -1,11 +1,13 @@
-//! Task28 I3: persists rows staged in memory. Like the candidate path, a row whose
-//! value equals the base row is not rewritten, so the stored text is identical.
+//! Persists rows staged in memory. Like the candidate path, a row whose value equals
+//! the base row is not rewritten, so the stored text is identical. Unused until
+//! SQLite commits stage in `NodeMemory`.
 use super::{begin, finish};
-use crate::shadow::MemoryRows;
 use crate::*;
+use fagent_node_memory::Rows;
 use std::collections::{HashMap, HashSet};
 
 /// The base rows of `ids`, by one pass over a base table.
+#[allow(dead_code)]
 fn base_rows<'a, T>(
     rows: &'a [T],
     ids: impl Iterator<Item = &'a str>,
@@ -19,12 +21,12 @@ fn base_rows<'a, T>(
 }
 
 impl Project {
-    #[allow(clippy::too_many_arguments)]
+    #[allow(clippy::too_many_arguments, dead_code)]
     pub(crate) fn persist_memory(
         &self,
         conn: &mut Connection,
         before: &Snapshot,
-        rows: &MemoryRows,
+        rows: &Rows,
         key: &str,
         request_hash: &str,
         ops: &Value,

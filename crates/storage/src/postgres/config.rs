@@ -11,12 +11,6 @@ pub struct PostgresConfig {
     pub pool_size: usize,
     /// Schema holding the runtime tables; first on every session's `search_path`.
     pub schema: super::DatabaseSchema,
-    /// Task28 node-memory shadow; defaults to `FAGENT_NODE_MEMORY_SHADOW`.
-    pub node_memory_shadow: crate::ShadowMode,
-    /// Task28 I2 scoped reads from memory; defaults to `FAGENT_NODE_MEMORY_READS`.
-    pub node_memory_reads: crate::ReadsMode,
-    /// Task28 I3 commits through memory; defaults to `FAGENT_NODE_MEMORY_WRITES`.
-    pub node_memory_writes: crate::WritesMode,
 }
 
 impl PostgresConfig {
@@ -29,9 +23,6 @@ impl PostgresConfig {
             operation_timeout: Duration::from_secs(30),
             pool_size: 4,
             schema: super::DatabaseSchema::default(),
-            node_memory_shadow: crate::ShadowMode::from_env(),
-            node_memory_reads: crate::ReadsMode::from_env(),
-            node_memory_writes: crate::WritesMode::from_env(),
         }
     }
 

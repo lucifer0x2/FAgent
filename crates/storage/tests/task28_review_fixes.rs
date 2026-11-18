@@ -4,13 +4,18 @@ use common::*;
 use fagent_storage::*;
 use serde_json::{json, Value};
 
-fn store(root: &std::path::Path, memory: bool) -> Store {
-    let (shadow, reads, writes) = if memory {
-        (ShadowMode::Strict, ReadsMode::On, WritesMode::Strict)
-    } else {
-        (ShadowMode::Off, ReadsMode::Off, WritesMode::Off)
-    };
-    Store::open_with_node_memory_writes(root, shadow, reads, writes).unwrap()
+/// Node memory is always on. Each case runs with memory cold and, when `warm`, with
+/// the project loaded into memory by a read before the batches under test.
+fn store(root: &std::path::Path) -> Store {
+    Store::open(root).unwrap()
+}
+
+fn warm(store: &Store, p: &Project, warm: bool) {
+    if warm {
+        let storage: Storage = store.clone().into();
+        storage.reader_snapshot(p.id()).unwrap();
+        assert!(storage.reader_snapshot(p.id()).unwrap().from_memory);
+    }
 }
 
 fn update(props: Value) -> Vec<Operation> {
@@ -42,12 +47,12 @@ fn scoped(
 fn malformed_page_ids_never_commit_or_reserve_replay_keys() {
     for memory in [false, true] {
         let temp = tempfile::tempdir().unwrap();
-        let store = store(temp.path(), memory);
+        let store = store(temp.path());
         let p = store.create_project("fixture", "Fixture").unwrap();
         p.apply_batch(request(&p, 0, "seed", initial())).unwrap();
-        // First batch loads memory; the next supported update exercises the HOT path.
         p.apply_batch(request(&p, 1, "warm", update(json!({"name":"warm"}))))
             .unwrap();
+        warm(&store, &p, memory);
         let before = p.snapshot().unwrap();
         let db = rusqlite::Connection::open(temp.path().join("fixture/db.sql")).unwrap();
         let invalid = [
@@ -89,7 +94,6 @@ fn malformed_page_ids_never_commit_or_reserve_replay_keys() {
         }
         // A rejected payload never reserves the key; valid nonstrict pages have no
         // existence, affected-page or stale dependency semantics.
-        let start = node_memory_shadow_stats();
         let req = scoped(
             &p,
             "invalid-0-false-false",
@@ -108,9 +112,6 @@ fn malformed_page_ids_never_commit_or_reserve_replay_keys() {
             3
         );
         assert!(p.apply_scoped_batch(req.clone()).unwrap().replayed);
-        if memory {
-            assert!(node_memory_shadow_stats().write_incremental > start.write_incremental);
-        }
         // Resource operations use the full fallback, with the same nonstrict
         // request shape but no semantic page guard.
         assert_eq!(
@@ -159,7 +160,7 @@ fn resource() -> Vec<Operation> {
 fn stale_lww_keeps_latest_conflicts_across_asset_import_and_bundle_restore() {
     for memory in [false, true] {
         let temp = tempfile::tempdir().unwrap();
-        let store = store(temp.path(), memory);
+        let store = store(temp.path());
         let p = store.create_project("fixture", "Fixture").unwrap();
         p.apply_batch(request(&p, 0, "seed", initial())).unwrap();
         p.apply_batch(request(
@@ -185,18 +186,17 @@ fn stale_lww_keeps_latest_conflicts_across_asset_import_and_bundle_restore() {
             }),
         })
         .unwrap();
-        // Import evicts the mirror. Rewarm, then exercise the incremental HOT path.
         p.apply_batch(request(&p, 4, "rewarm", update(json!({"name":"warm"}))))
             .unwrap();
         p.apply_batch(request(&p, 5, "latest", update(json!({"width":140}))))
             .unwrap();
+        warm(&store, &p, memory);
         let bundle = p.export_bundle().unwrap();
         let target = tempfile::tempdir().unwrap();
         let restored_store = Store::open(target.path()).unwrap();
         let restored = restored_store
             .restore_bundle("restored", &bundle.bytes)
             .unwrap();
-        let start = node_memory_shadow_stats();
         for source in [&p, &restored] {
             let req = request(source, 1, "stale", update(json!({"width":150,"height":60})));
             let result = source.apply_batch(req.clone()).unwrap();
@@ -217,9 +217,6 @@ fn stale_lww_keeps_latest_conflicts_across_asset_import_and_bundle_restore() {
             );
             assert_eq!(result.committed_revision, 7);
             assert!(source.apply_batch(req).unwrap().replayed);
-        }
-        if memory {
-            assert!(node_memory_shadow_stats().write_incremental > start.write_incremental);
         }
     }
 }

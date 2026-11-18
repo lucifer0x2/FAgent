@@ -19,8 +19,8 @@ impl PostgresBackend {
         let (result, committed) = self
             .pool
             .run(move |session| resources::import(session, &key, request, fields))?;
+        self.memory.evict(&result.result.project_id);
         self.fill(committed);
-        self.shadow.evict(&result.result.project_id);
         Ok(result)
     }
     /// One worker checkout: the probe and, on a miss, the repeatable-read load.
@@ -43,6 +43,16 @@ impl PostgresBackend {
             }
         }
         Ok((snapshot, generation, namespace))
+    }
+
+    /// The database shared snapshot with the identity of the same read.
+    fn shared_with_identity(&self, project: &str) -> Result<crate::memory::Loaded> {
+        let (snapshot, identity) = self.snapshot_with_cache_identity(project)?;
+        let indexes = self.indexes.for_snapshot(&snapshot, identity.clone());
+        Ok((
+            crate::SharedSnapshot::committed(snapshot, indexes),
+            identity,
+        ))
     }
 
     /// Write-through runs on the caller after the worker reported a commit, so
@@ -117,7 +127,7 @@ impl StorageBackend for PostgresBackend {
             .pool
             .run(move |session| projects::update_privacy(session, &key, privacy));
         if let Ok((meta, _)) = &updated {
-            self.shadow.evict(&meta.project_id);
+            self.memory.evict(&meta.project_id);
         }
         updated
     }
@@ -162,13 +172,13 @@ impl StorageBackend for PostgresBackend {
     }
 
     fn scoped_snapshot(&self, project: &str, target: &str) -> Result<crate::ScopedRead> {
-        let read = self.shadow.scoped_read(
+        let read = self.memory.scoped_read(
             target,
             || self.snapshot_cache_identity(project),
             || self.shared_with_identity(project),
         )?;
         if self
-            .shadow
+            .memory
             .claim_cache_cleanup(&read.shared.snapshot.project_id)
         {
             self.indexes.evict(&read.shared.snapshot.project_id);
@@ -177,6 +187,14 @@ impl StorageBackend for PostgresBackend {
             }
         }
         Ok(read)
+    }
+
+    fn memory_stats(&self) -> crate::NodeMemoryStats {
+        self.memory.stats()
+    }
+
+    fn memory_read_failed(&self) {
+        self.memory.read_failed()
     }
 
     fn apply_batch(&self, project: &str, request: BatchRequest) -> Result<BatchResult> {

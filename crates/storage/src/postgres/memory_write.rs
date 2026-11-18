@@ -1,55 +1,12 @@
-//! Task28 I3 on PostgreSQL: where a commit's base comes from and the rows it
-//! persists when it was staged in memory.
-//!
-//! The whole commit runs in one pool job on one worker thread: the project row lock
-//! (`FOR UPDATE`) orders writers of a project across processes, and the staged
-//! batch's `std::sync` write guard is created and released on that thread, with no
-//! `.await` anywhere in storage. The staged batch is committed after the database
-//! commit, so the next writer (waiting on the row lock, then on the project's read
-//! lock) sees memory at the revision the database reports.
-use super::snapshot::{self, Binaries, Stored};
+//! The rows a batch staged in memory persists on PostgreSQL. Unused until
+//! PostgreSQL commits stage in `NodeMemory`.
 use super::transaction::Written;
-use super::*;
-use crate::shadow::{MemoryBase, MemoryRows, Shadow};
-use crate::{Snapshot, SnapshotCacheIdentity, StorageError};
+use crate::{Result, Snapshot};
+use fagent_node_memory::Rows;
 use std::collections::{HashMap, HashSet};
 
-/// Internal: the lib rejected a batch the validator accepted. The adapter evicts
-/// the project and runs the batch again on today's path; never returned to callers.
-pub(super) const FALLBACK: &str = "NODE_MEMORY_FALLBACK";
-
-pub(super) fn fallback() -> StorageError {
-    StorageError::new(FALLBACK, "Retry on the database path")
-}
-
-/// Where a commit's base snapshot came from.
-pub(super) enum Source {
-    /// Today's path: stored rows (with their text) and binary hashes.
-    Database {
-        binaries: Binaries,
-        stored: Stored,
-    },
-    Memory(MemoryBase),
-}
-
-/// The base snapshot for a commit at `identity`: memory when writes are on and it
-/// holds this incarnation and revision, else today's full load.
-pub(super) fn load<C: ::postgres::GenericClient>(
-    db: &mut Db<'_, C>,
-    project: projects::ProjectRow,
-    shadow: Option<&Shadow>,
-    identity: &SnapshotCacheIdentity,
-) -> Result<(Snapshot, Source)> {
-    if let Some(found) = shadow.and_then(|s| s.memory_base(identity)) {
-        let (before, memory) = found;
-        return Ok((before, Source::Memory(memory)));
-    }
-    let (before, binaries, stored) =
-        crate::bench_phase::time("load", || snapshot::entities_for_write(db, project))?;
-    Ok((before, Source::Database { binaries, stored }))
-}
-
 /// The base row text of `ids` in one table, by one pass over it.
+#[allow(dead_code)]
 fn base_text<'a, T: serde::Serialize>(
     rows: &'a [T],
     ids: impl Iterator<Item = &'a str>,
@@ -66,7 +23,8 @@ fn base_text<'a, T: serde::Serialize>(
 
 /// The entity rows of a batch staged in memory, as `persist` writes them. Like
 /// `Stored::delta`, a row whose text equals the base row's is not rewritten.
-pub(super) fn written(before: &Snapshot, rows: &MemoryRows) -> Result<Written> {
+#[allow(dead_code)]
+pub(super) fn written(before: &Snapshot, rows: &Rows) -> Result<Written> {
     let nodes = base_text(
         &before.nodes,
         rows.nodes.iter().map(|n| n.id.as_str()),

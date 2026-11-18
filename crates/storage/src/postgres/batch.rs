@@ -1,6 +1,5 @@
 use super::*;
 use crate::{BatchRequest, BatchResult, DryRunResult};
-use memory_write::Source;
 use request::{canonical, history_after};
 use write_through::Committed;
 
@@ -30,7 +29,7 @@ pub(super) fn apply_mode(
     dry: bool,
     pages: Option<Vec<String>>,
     indexes: &crate::revision_indexes::IndexCache,
-    shadow: Option<&crate::shadow::Shadow>,
+    memory: Option<&crate::memory::Memory>,
 ) -> Result<Outcome> {
     if dry {
         return preview(session, key, request, pages, indexes).map(Outcome::Preview);
@@ -59,61 +58,8 @@ pub(super) fn apply_mode(
         identity.0,
         &identity.1,
     );
-    // Supported HOT operations use persistent endpoint dependency closures with
-    // the unchanged strict/history oracle. Unsupported operations fall through.
-    {
-        if let Some(memory) = shadow.and_then(|s| s.memory_handle(&cache_identity)) {
-            if let Some((staged, local)) = memory.prepare(&request.operations)? {
-                let history = match base.history_after(cache_identity.revision, pages.is_some()) {
-                    Some(after) => history_after(&mut db, &cache_identity.project_id, after)?,
-                    None => vec![],
-                };
-                if let (Some(pages), true) = (&pages, base.strict) {
-                    local.check_pages(&request, pages, &history)?;
-                }
-                let result = local.result(&request, &history, &value["operations"]);
-                let history = crate::scoped::envelope_with_scopes(
-                    local.footprint,
-                    value.clone(),
-                    value["operations"].clone(),
-                )?;
-                let rows = memory_write::written(&local.preimages, &local.rows)?;
-                let persisted = transaction::persist(
-                    &mut db,
-                    &local.preimages,
-                    rows,
-                    &request.idempotency_key,
-                    &hash,
-                    &history,
-                    &result,
-                    None,
-                )
-                .and_then(|written| tx.commit().map_err(sql).map(|_| written));
-                let written = match persisted {
-                    Ok(written) => {
-                        staged.commit();
-                        written
-                    }
-                    Err(error) => {
-                        drop(staged);
-                        if let Some(shadow) = shadow {
-                            shadow.write_aborted();
-                            shadow.evict(&cache_identity.project_id);
-                        }
-                        return Err(error);
-                    }
-                };
-                let committed = Committed::from_memory(
-                    local.before,
-                    written,
-                    result.committed_revision,
-                    identity,
-                );
-                return Ok(Outcome::Commit(result, Some(Box::new(committed))));
-            }
-        }
-    }
-    let (before, source) = memory_write::load(&mut db, project, shadow, &cache_identity)?;
+    let (before, binaries, stored) =
+        crate::bench_phase::time("load", || snapshot::entities_for_write(&mut db, project))?;
     let old_indexes = indexes.for_snapshot(&before, Some(cache_identity.clone()));
     let (candidate, changed_ids, mut work, next_indexes) =
         crate::batch::validated_candidate_indexed(
@@ -164,52 +110,24 @@ pub(super) fn apply_mode(
         )
     })?;
     let key = &request.idempotency_key;
-    let (written, binaries) = match source {
-        Source::Database { binaries, stored } => {
-            let rows = crate::bench_phase::time("persist.delta", || stored.delta(&candidate))?;
-            drop((stored, candidate));
-            let _phase = crate::bench_phase::Span::new("persist");
-            let written =
-                transaction::persist(&mut db, &before, rows, key, &hash, &history, &result, None)?;
-            tx.commit().map_err(sql)?;
-            (written, Some(binaries))
-        }
-        Source::Memory(memory) => {
-            let Some(staged) = memory.stage(&request.operations) else {
-                return Err(memory_write::fallback());
-            };
-            memory.verify(&staged, &candidate, &result.changed_ids);
-            drop(candidate);
-            let rows = crate::bench_phase::time("persist.delta", || {
-                memory_write::written(&before, &crate::shadow::memory_rows(&staged))
-            })?;
-            let _phase = crate::bench_phase::Span::new("persist");
-            let persisted =
-                transaction::persist(&mut db, &before, rows, key, &hash, &history, &result, None)
-                    .and_then(|written| tx.commit().map_err(sql).map(|_| written));
-            match persisted {
-                // The project row lock is released; the next writer waits on memory's
-                // write lock until this commit is kept.
-                Ok(written) => {
-                    drop(staged.commit());
-                    (written, None)
-                }
-                Err(error) => {
-                    drop(staged);
-                    if let Some(shadow) = shadow {
-                        shadow.write_aborted();
-                        shadow.evict(&before.project_id);
-                    }
-                    return Err(error);
-                }
-            }
-        }
+    let rows = crate::bench_phase::time("persist.delta", || stored.delta(&candidate))?;
+    drop((stored, candidate));
+    let written = {
+        let _phase = crate::bench_phase::Span::new("persist");
+        let written =
+            transaction::persist(&mut db, &before, rows, key, &hash, &history, &result, None)?;
+        tx.commit().map_err(sql)?;
+        written
     };
+    // Commits do not stage in memory yet: the next read reloads the new revision.
+    if let Some(memory) = memory {
+        memory.evict(&before.project_id);
+    }
     let revision = result.committed_revision;
     let mut next_identity = cache_identity;
     next_identity.revision = revision;
     indexes.publish(next_identity, next_indexes);
-    let committed = Committed::new(before, binaries, written, revision, identity);
+    let committed = Committed::new(before, Some(binaries), written, revision, identity);
     Ok(Outcome::Commit(result, Some(Box::new(committed))))
 }
 

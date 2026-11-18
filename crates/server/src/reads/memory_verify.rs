@@ -1,25 +1,5 @@
-//! Strict memory reads (`FAGENT_NODE_MEMORY_READS=strict`, tests only): a read
-//! served from a memory slice must match today's path byte for byte.
-use crate::error::Result;
+//! Test helper: where two read responses first differ.
 use serde_json::Value;
-
-/// Panics naming the tool and the first differing JSON path, never the bodies.
-pub(super) fn same(name: &str, memory: &Result<Value>, today: &Result<Value>) {
-    let (a, b) = (outcome(memory), outcome(today));
-    if serde_json::to_vec(&a).ok() != serde_json::to_vec(&b).ok() {
-        panic!(
-            "node-memory read differs: {name} at {}",
-            first_difference(&a, &b, String::new())
-        );
-    }
-}
-
-fn outcome(result: &Result<Value>) -> Value {
-    match result {
-        Ok(value) => value.clone(),
-        Err(error) => error.value(),
-    }
-}
 
 /// The JSON path of the first difference, e.g. `/nodes/3/id`.
 pub(crate) fn first_difference(a: &Value, b: &Value, path: String) -> String {

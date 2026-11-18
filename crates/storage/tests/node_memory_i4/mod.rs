@@ -10,7 +10,6 @@ fn smoke(pair: &Pair) {
         }
         pair.both(&request, false)
     };
-    let start = node_memory_shadow_stats();
     let result = send(
         "prefix",
         json!([
@@ -76,10 +75,6 @@ fn smoke(pair: &Pair) {
     );
     assert_eq!(replay["replayed"], true);
     pair.assert_rows(0);
-    assert!(
-        node_memory_shadow_stats().write_incremental > start.write_incremental,
-        "must exercise exact-delta adapter"
-    );
 }
 
 #[test]
@@ -94,10 +89,8 @@ fn sqlite_i4_delta_smoke_and_db_failure_rollback() {
     }
     smoke(&pair);
     let old = pair.on.snapshot(&pair.project).unwrap();
-    let before = node_memory_shadow_stats();
     let result = pair.both(&json!({"projectId":pair.project,"idempotencyKey":"db-fail","operations":[{"op":"update_node","id":"r0","props":{"name":"fail"}}]}), false);
     assert!(result.get("error").is_some());
-    assert!(node_memory_shadow_stats().write_aborts > before.write_aborts);
     assert_eq!(
         pair.on.snapshot(&pair.project).unwrap().revision,
         old.revision

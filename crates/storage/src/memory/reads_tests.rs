@@ -1,7 +1,5 @@
 //! Freshness and fallback rules of memory reads, with scripted probes and loads.
-use super::mirror::Mirror;
-use super::read_mode::{Loaded, ReadsMode, ScopedRead};
-use super::reads::Reads;
+use super::{Loaded, Memory, ScopedRead};
 use crate::{RevisionIndexes, SharedSnapshot, Snapshot, SnapshotCacheIdentity, StorageError};
 use serde_json::json;
 use std::cell::Cell;
@@ -37,16 +35,14 @@ fn loaded(snapshot: Snapshot, incarnation: &str) -> Loaded {
 }
 
 struct Fixture {
-    mirror: Mirror,
-    reads: Reads,
+    memory: Memory,
     loads: Cell<usize>,
 }
 
 impl Fixture {
     fn new() -> Self {
         Self {
-            mirror: Mirror::new(false),
-            reads: Reads::new(ReadsMode::On).unwrap(),
+            memory: Memory::default(),
             loads: Cell::new(0),
         }
     }
@@ -68,14 +64,12 @@ impl Fixture {
             self.loads.set(self.loads.get() + 1);
             load()
         };
-        self.reads
-            .read(&self.mirror, target, || probe, load)
-            .unwrap()
+        self.memory.scoped_read(target, || probe, load).unwrap()
     }
 
     fn hot(&self) -> Option<u64> {
-        let handle = self.mirror.registry.get("proj")?;
-        let revision = handle.read().revision();
+        let project = self.memory.engine().project("proj")?;
+        let revision = project.view().metadata().revision;
         Some(revision)
     }
 }
@@ -86,7 +80,7 @@ fn cold_loads_then_serves_a_view_at_the_probed_revision() {
     assert!(!f.read("frame", 3, "i").from_memory);
     assert_eq!(f.hot(), Some(3));
     let hit = f.read("frame", 3, "i");
-    assert!(hit.from_memory && !hit.verify);
+    assert!(hit.from_memory);
     assert_eq!(hit.shared.snapshot.revision, 3);
     assert!(hit.shared.trusted_scoped().unwrap().is_some());
     assert!(
@@ -99,10 +93,13 @@ fn cold_loads_then_serves_a_view_at_the_probed_revision() {
         2,
         "only the cold read and the unknown target load"
     );
+    let stats = f.memory.stats();
+    assert_eq!((stats.read_hits, stats.read_fallbacks), (2, 2));
+    assert_eq!((stats.read_loads, stats.memory.loads), (1, 1));
 }
 
-/// An observer the mirror skipped or one not yet run leaves memory behind the
-/// database: the read never serves it, falls back and reloads.
+/// A commit evicts memory, but a read may have loaded an older revision meanwhile:
+/// the read never serves it, falls back and reloads.
 #[test]
 fn behind_or_another_incarnation_reloads_and_ahead_falls_back() {
     let f = Fixture::new();
@@ -112,59 +109,72 @@ fn behind_or_another_incarnation_reloads_and_ahead_falls_back() {
     assert!(f.read("frame", 4, "i").from_memory);
     assert!(!f.read("frame", 4, "restored").from_memory);
     assert!(f.read("frame", 4, "restored").from_memory);
-    // Memory ahead of a probe (a commit landed after it): today's path, no reload.
+    // Memory ahead of a probe (a commit landed after it): the database, no reload.
     assert!(!f.read("frame", 3, "restored").from_memory);
     assert_eq!(f.hot(), Some(4));
+    assert_eq!(f.memory.stats().read_reloads, 2);
 }
 
 #[test]
-fn untagged_projects_from_the_mirror_reload_once() {
+fn untagged_loads_reload_once() {
     let f = Fixture::new();
-    f.mirror.registry.load(snapshot(5, None)).unwrap();
+    f.memory.engine().load(snapshot(5, None)).unwrap();
     assert!(!f.read("frame", 5, "i").from_memory);
     assert!(f.read("frame", 5, "i").from_memory);
 }
 
 #[test]
-fn probe_failures_fall_back_and_load_errors_are_todays() {
+fn eviction_makes_the_next_read_cold() {
+    let f = Fixture::new();
+    f.read("frame", 3, "i");
+    assert!(f.read("frame", 3, "i").from_memory);
+    f.memory.evict("proj");
+    assert_eq!(f.hot(), None);
+    assert!(!f.read("frame", 3, "i").from_memory);
+    assert!(f.read("frame", 3, "i").from_memory);
+    assert_eq!(f.memory.stats().read_loads, 2);
+}
+
+#[test]
+fn probe_failures_fall_back_and_load_errors_are_the_databases() {
     let f = Fixture::new();
     let error = || StorageError::new("PROJECT_NOT_FOUND", "Project does not exist");
     let read = f.read_with("frame", Err(error()), || Ok(loaded(snapshot(1, None), "i")));
     assert!(!read.from_memory);
     assert_eq!(f.hot(), None, "no identity, no load");
     let failed = f
-        .reads
-        .read(&f.mirror, "frame", || Err(error()), || Err(error()));
+        .memory
+        .scoped_read("frame", || Err(error()), || Err(error()));
     assert_eq!(failed.err().unwrap().code, "PROJECT_NOT_FOUND");
 }
 
 #[test]
-fn snapshots_the_lib_rejects_are_not_retried() {
+fn snapshots_the_engine_rejects_are_not_retried() {
     let f = Fixture::new();
     let cyclic = || Ok(loaded(snapshot(2, Some("a")), "i"));
     let probe = || Ok(Some(identity(2, "i")));
     assert!(!f.read_with("frame", probe(), cyclic).from_memory);
-    assert!(f.reads.failed("proj"));
+    assert!(f.memory.failed("proj"));
     assert!(!f.read_with("frame", probe(), cyclic).from_memory);
     assert_eq!(f.hot(), None);
+    assert_eq!(f.memory.stats().memory.load_failures, 1);
     // A new revision is tried again.
     assert!(!f.read("frame", 3, "i").from_memory);
-    assert!(!f.reads.failed("proj"));
+    assert!(!f.memory.failed("proj"));
     assert!(f.read("frame", 3, "i").from_memory);
 }
 
 #[test]
-fn i5_hot_ownership_suppresses_late_cache_fills_and_releases_on_eviction() {
-    use super::{Shadow, ShadowMode, WritesMode};
+fn ownership_suppresses_late_cache_fills_and_releases_on_eviction() {
     use crate::{revision_indexes::IndexCache, SnapshotCache};
-    let shadow = Shadow::new(ShadowMode::Off, ReadsMode::On, WritesMode::Off);
-    let cache = SnapshotCache::new("test").with_owner(shadow.clone());
-    let indexes = IndexCache::default().with_owner(shadow.clone());
+    let memory = Memory::default();
+    let cache = SnapshotCache::new("test").with_owner(memory.clone());
+    let indexes = IndexCache::default().with_owner(memory.clone());
     let snapshot = Arc::new(snapshot(1, None));
     cache.put(&snapshot, 1);
     let old = indexes.for_snapshot(&snapshot, Some(identity(1, "i")));
     assert!(cache.get("proj", 1, 1).is_some());
-    let read = shadow
+    let read = memory
         .scoped_read(
             "",
             || Ok(Some(identity(1, "i"))),
@@ -172,13 +182,9 @@ fn i5_hot_ownership_suppresses_late_cache_fills_and_releases_on_eviction() {
         )
         .unwrap();
     assert!(!read.from_memory);
-    assert!(shadow.claim_cache_cleanup("proj"));
-    assert!(!shadow.claim_cache_cleanup("proj"));
-    shadow.retag(&identity(1, "i"));
-    assert!(
-        !shadow.claim_cache_cleanup("proj"),
-        "retag keeps transition state"
-    );
+    assert!(memory.owns_project("proj"));
+    assert!(memory.claim_cache_cleanup("proj"));
+    assert!(!memory.claim_cache_cleanup("proj"));
     indexes.evict("proj");
     cache.evict("proj");
     cache.put(&snapshot, 1); // a read/commit begun before admission finishes late
@@ -188,19 +194,20 @@ fn i5_hot_ownership_suppresses_late_cache_fills_and_releases_on_eviction() {
         &old,
         &indexes.for_snapshot(&snapshot, Some(identity(1, "i")))
     ));
-    let retained = shadow
+    let retained = memory
         .scoped_read(
             "",
             || Ok(Some(identity(1, "i"))),
-            || panic!("HOT must not load"),
+            || panic!("a resident project must not load"),
         )
         .unwrap();
     assert!(retained.from_memory);
-    shadow.evict("proj");
+    memory.evict("proj");
+    assert!(!memory.owns_project("proj"));
     assert!(retained.shared.scoped().unwrap().node("a").is_some());
     cache.put(&snapshot, 1);
     assert!(cache.get("proj", 1, 1).is_some());
-    shadow
+    memory
         .scoped_read(
             "",
             || Ok(Some(identity(1, "i"))),
@@ -208,16 +215,10 @@ fn i5_hot_ownership_suppresses_late_cache_fills_and_releases_on_eviction() {
         )
         .unwrap();
     assert!(
-        shadow.claim_cache_cleanup("proj"),
+        memory.claim_cache_cleanup("proj"),
         "reload gets a new transition"
     );
-    let mirror_only = Shadow::new(ShadowMode::On, ReadsMode::Off, WritesMode::Off);
-    mirror_only
-        .mirror
-        .as_ref()
-        .unwrap()
-        .registry
-        .load(snapshot.as_ref().clone())
-        .unwrap();
-    assert!(!mirror_only.owns_project("proj"));
+    let untagged = Memory::default();
+    untagged.engine().load(snapshot.as_ref().clone()).unwrap();
+    assert!(!untagged.owns_project("proj"));
 }
