@@ -5,10 +5,13 @@ pub mod batch_oracle;
 pub mod fixture;
 pub mod ops;
 pub mod oracle;
+pub mod random_cases;
 pub mod random_extra;
 pub mod random_ops;
 pub mod random_props;
 pub mod random_resources;
+pub mod random_scripted;
+pub mod scenario;
 
 #[allow(unused_imports)]
 pub use ops::*;
