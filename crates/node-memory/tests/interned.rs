@@ -129,3 +129,19 @@ fn a_rolled_back_prepared_batch_discards_its_names_unless_its_view_escaped() {
     assert!(project.estimated_bytes() > before);
     assert_eq!(memory.stats().rollbacks, 2);
 }
+
+#[test]
+fn names_a_rejected_batch_keeps_are_counted_by_the_handle() {
+    let handle = handle();
+    let before = handle.estimated_bytes();
+    // Another batch on a clone of the same state is open: the rejected batch's names
+    // cannot be told apart from it, so they stay.
+    let mut other = handle.read().clone();
+    let staged = other.begin(&long_create()).unwrap();
+    let opened = handle.read().estimated_bytes();
+    assert!(handle.begin(&rejected(0)).is_err());
+    let kept = handle.read().estimated_bytes() - opened;
+    assert!(kept > 20_000, "kept {kept} bytes");
+    assert_eq!(handle.estimated_bytes() - before, kept);
+    drop(staged);
+}

@@ -99,7 +99,11 @@ impl Interner {
     /// Closes a batch. With `discard`, the caller guarantees that no live version
     /// holds a key the batch interned; the names are then removed when they are
     /// provably the batch's own: no other batch was open at any point in between.
-    /// Returns the bytes of the names the batch's window added and that stay.
+    /// Returns the bytes of the names added since the mark that stay. When batches
+    /// overlapped, that window also holds names the other batches interned, so the
+    /// sum over-counts until the owner recomputes its estimate at the next commit:
+    /// the safe direction for the byte budget (earlier eviction, never a missed one).
+    /// Telling the names apart would need per-batch ownership on every intern.
     pub(crate) fn close(&self, mark: Mark, discard: bool) -> usize {
         let mut names = self.write();
         names.open -= 1;
