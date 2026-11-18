@@ -5,6 +5,7 @@
 //! [`HotProject::view`], and commits through [`HotProject::begin`] (see `batch`). The
 //! engine reads time only through [`Clock`], never reads the environment and never
 //! spawns tasks: expiry runs when the adapter calls [`NodeMemory::maybe_expire`].
+mod admission;
 mod config;
 mod project;
 mod stats;
@@ -43,10 +44,11 @@ impl NodeMemory {
         }
     }
 
-    /// Indexes `snapshot` and makes the project resident (structure only), then
-    /// applies the eviction policy to the others. Fails with `PROJECT_EXISTS` when the
-    /// id is already resident: evict it first to reload, and treat a lost race as
-    /// "someone else loaded it".
+    /// Indexes `snapshot` and makes the project resident (structural checks only),
+    /// admits it (full validation once; invalid stored data is still served, see
+    /// `admission`), then applies the eviction policy to the others. Fails with
+    /// `PROJECT_EXISTS` when the id is already resident: evict it first to reload,
+    /// and treat a lost race as "someone else loaded it".
     pub fn load(&self, snapshot: Snapshot) -> Result<HotProject> {
         let start = nanos(&*self.clock);
         match self.registry.load(snapshot) {
@@ -54,6 +56,7 @@ impl NodeMemory {
                 let micros = nanos(&*self.clock).saturating_sub(start) / 1_000;
                 self.stats.load_micros.fetch_add(micros, Ordering::Relaxed);
                 Stats::bump(&self.stats.loads);
+                self.admit(&handle);
                 self.count(&evicted);
                 Ok(HotProject::new(handle, self.stats.clone()))
             }

@@ -9,8 +9,14 @@ pub struct MemoryStats {
     pub loads: u64,
     /// `load` calls that failed validation (a lost race is not a failure).
     pub load_failures: u64,
-    /// Time spent in successful loads, in `Clock` microseconds.
+    /// Time spent in successful loads, in `Clock` microseconds (admission excluded).
     pub load_micros: u64,
+    /// Full validations of a loaded revision (one per successful load).
+    pub admissions: u64,
+    /// Admissions that found the stored revision invalid (it is still served).
+    pub admission_failures: u64,
+    /// Time spent in admissions, in `Clock` microseconds.
+    pub admission_micros: u64,
     /// Projects dropped by `evict`.
     pub evictions: u64,
     /// Projects dropped by the TTL.
@@ -42,6 +48,9 @@ pub(crate) struct Stats {
     pub(crate) loads: AtomicU64,
     pub(crate) load_failures: AtomicU64,
     pub(crate) load_micros: AtomicU64,
+    pub(crate) admissions: AtomicU64,
+    pub(crate) admission_failures: AtomicU64,
+    pub(crate) admission_micros: AtomicU64,
     pub(crate) evictions: AtomicU64,
     pub(crate) expired: AtomicU64,
     pub(crate) over_budget: AtomicU64,
@@ -66,6 +75,9 @@ impl Stats {
             loads: get(&self.loads),
             load_failures: get(&self.load_failures),
             load_micros: get(&self.load_micros),
+            admissions: get(&self.admissions),
+            admission_failures: get(&self.admission_failures),
+            admission_micros: get(&self.admission_micros),
             evictions: get(&self.evictions),
             expired: get(&self.expired),
             over_budget: get(&self.over_budget),
