@@ -147,7 +147,8 @@ database remains the source of truth. On a 200k-node project (PostgreSQL, releas
 | In-memory props update / begin + commit | – | **584 ns / 542 ns** |
 | RAM per authored node | – | **~1.3 KB** |
 
-Node-memory is experimental and off by default; enable it with the `FAGENT_NODE_MEMORY_*` flags.
+Node-memory is always on since [Task41](tasks/41-node-memory-engine.md) phase 1; the "off" column is the
+former database-only path. A small props edit on the same fixture now commits in about 36 ms.
 These are single runs on a generated fixture, recorded in the repository; read them as orders of
 magnitude. Method, flags and the backend and viewer benchmarks: [Performance](docs/PERFORMANCE.md).
 
