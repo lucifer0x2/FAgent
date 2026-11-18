@@ -111,12 +111,12 @@ async fn one_bad_item_fails_the_whole_call_and_names_it() {
         (
             json!({"path":"logo.png","base64":PNG,"mediaType":"image/png"}),
             "INVALID_REQUEST",
-            "items[1].source",
+            "items[1].base64",
         ),
         (
             json!({"sourceProjectId":"nope","assetId":"a","mediaType":"image/png"}),
             "INVALID_REQUEST",
-            "items[1].source",
+            "items[1].mediaType",
         ),
         (
             json!({"path":"logo.png","mediaType":"image/webp"}),

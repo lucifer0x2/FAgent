@@ -8,8 +8,7 @@ mod tool_names;
 use serde_json::{json, Value};
 use support::Server;
 
-const INVALID: &str =
-    "Arguments do not match the published tool schema; check required fields, types and limits";
+const INVALID: &str = "Arguments do not match the published tool schema";
 
 #[tokio::test]
 async fn every_published_input_schema_is_a_plain_object() {
@@ -53,7 +52,8 @@ async fn every_published_input_schema_is_a_plain_object() {
 async fn code(s: &Server, args: Value) -> Value {
     let result = s.call("render_frame", args.clone()).await;
     if result["error"]["code"] == "INVALID_REQUEST" {
-        assert_eq!(result["error"]["message"], INVALID, "{args}: {result}");
+        let message = result["error"]["message"].as_str().unwrap();
+        assert!(message.starts_with(INVALID), "{args}: {result}");
     }
     result["error"]["code"].clone()
 }
@@ -102,4 +102,130 @@ async fn render_frame_modes_are_still_exclusive_at_runtime() {
     for args in rejected {
         assert_eq!(code(&s, args.clone()).await, "INVALID_REQUEST", "{args}");
     }
+}
+
+/// A rejection names the failing field (message, `field`, and `opIndex` for an operation),
+/// including the operations read from an `apply_batch_file` JSON file.
+#[tokio::test]
+async fn schema_rejections_name_the_failing_field() {
+    let s = Server::start().await;
+    let p = s.project().await;
+    let inbox = s.root.path().join("test-project/inbox");
+    let ops = r#"[{"op":"create_node","id":"pg","kind":"page","parentId":null,"props":{}},
+        {"op":"create_node","id":"f","kind":"fram","parentId":"pg","props":{}}]"#;
+    std::fs::write(inbox.join("ops.json"), ops).unwrap();
+    std::fs::write(inbox.join("op.json"), r#"[{"op":"create","id":"x"}]"#).unwrap();
+    let file = |key: &str, path: &str| json!({"projectId":p,"idempotencyKey":key,"path":path});
+    let cases = [
+        (
+            "apply_batch_file",
+            file("k", "ops.json"),
+            "operations[1].kind",
+            Some(1),
+        ),
+        (
+            "apply_batch_file",
+            file("k", "op.json"),
+            "operations[0].op",
+            Some(0),
+        ),
+        (
+            "apply_batch_file",
+            file("k.1", "ops.json"),
+            "idempotencyKey",
+            None,
+        ),
+        (
+            "apply_batch_file",
+            json!({"projectId":p,"idempotencyKey":"k"}),
+            "path",
+            None,
+        ),
+        (
+            "apply_batch",
+            json!({"projectId":p,"idempotencyKey":"k","operations":[{"op":"delete_subtree","id":"x","extra":1}]}),
+            "operations[0].extra",
+            Some(0),
+        ),
+        (
+            "import_asset",
+            json!({"projectId":p,"expectedRevision":0,"idempotencyKey":"k","path":"a.png","base64":"AAAA","mediaType":"image/png"}),
+            "base64",
+            None,
+        ),
+        (
+            "render_frame",
+            json!({"projectId":p,"jobId":"j","waitMs":10_001}),
+            "waitMs",
+            None,
+        ),
+        // The variant that accepts every field sent is the one blamed.
+        (
+            "apply_batch",
+            json!({"projectId":p,"idempotencyKey":"k.1","source":"page#a \"A\""}),
+            "idempotencyKey",
+            None,
+        ),
+        (
+            "import_asset",
+            json!({"projectId":p,"expectedRevision":0,"idempotencyKey":"k","base64":"AAAA"}),
+            "mediaType",
+            None,
+        ),
+        (
+            "import_asset",
+            json!({"projectId":p,"expectedRevision":0,"idempotencyKey":"k.1","sourceProjectId":"s","assetId":"a"}),
+            "idempotencyKey",
+            None,
+        ),
+        // A missing discriminator, and a value of the right type that breaks a limit.
+        (
+            "apply_batch",
+            json!({"projectId":p,"idempotencyKey":"k","operations":[{"id":"x"}]}),
+            "operations[0].op",
+            Some(0),
+        ),
+        (
+            "apply_batch",
+            json!({"projectId":p,"idempotencyKey":"k","operations":[{"op":"upsert_token","token":{"id":"t","name":"T","type":"color","value":"#0123456789abcdef0123"}}]}),
+            "operations[0].token.value",
+            Some(0),
+        ),
+    ];
+    for (tool, args, field, op_index) in cases {
+        let error = &s.call(tool, args.clone()).await["error"];
+        assert_eq!(error["code"], "INVALID_REQUEST", "{tool} {args}: {error}");
+        assert_eq!(error["field"], field, "{tool} {args}: {error}");
+        let message = error["message"].as_str().unwrap();
+        assert!(
+            message.starts_with(&format!("{INVALID} at {field}: ")),
+            "{message}"
+        );
+        assert_eq!(error["opIndex"], json!(op_index), "{tool} {args}: {error}");
+    }
+    let message = |error: &Value| error["error"]["message"].as_str().unwrap().to_owned();
+    // Tied variants name what each needs; a missing op lists the accepted ones.
+    let neither = s
+        .call("apply_batch", json!({"projectId":p,"idempotencyKey":"k"}))
+        .await;
+    assert!(neither["error"].get("field").is_none(), "{neither}");
+    assert!(message(&neither).ends_with(": is missing fields; send one of operations, source"));
+    let no_op = json!({"projectId":p,"idempotencyKey":"k","operations":[{"id":"x"}]});
+    let no_op = s.call("apply_batch", no_op).await;
+    assert!(
+        message(&no_op).contains("op: is required: one of \"create_node\""),
+        "{no_op}"
+    );
+    let token = json!({"projectId":p,"idempotencyKey":"k","operations":[{"op":"upsert_token","token":{"id":"t","name":"T","type":"color","value":"#0123456789abcdef0123"}}]});
+    let token = s.call("apply_batch", token).await;
+    assert!(
+        message(&token).ends_with("must have at most 16 characters"),
+        "{token}"
+    );
+    // Caller-chosen key names are echoed at most 64 characters long.
+    let long = "x".repeat(5000);
+    let unknown = s.call("list_projects", json!({ long.clone(): 1 })).await;
+    let field = unknown["error"]["field"].as_str().unwrap();
+    assert_eq!(field, format!("{}…", &long[..64]));
+    assert!(message(&unknown).len() < 200, "{unknown}");
 }
