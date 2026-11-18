@@ -107,14 +107,6 @@ fn load_rejects_structural_errors() {
         (
             vec![
                 page.clone(),
-                node("i", "instance", Some("p"), json!({"componentId":"p"})),
-            ],
-            "VALIDATION_FAILED",
-            "props.componentId",
-        ),
-        (
-            vec![
-                page.clone(),
                 node("a", "frame", Some("b"), json!({})),
                 node("b", "frame", Some("a"), json!({})),
             ],

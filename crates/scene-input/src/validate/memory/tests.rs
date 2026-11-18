@@ -180,3 +180,52 @@ fn memory_delta_nested_master_chain_updates_transitive_users_and_budget_twice() 
         before = after;
     }
 }
+
+fn corrupt(id: &str, props: Value) -> ReadView {
+    let mut snapshot = fixture();
+    let node = snapshot.nodes.iter_mut().find(|n| n.id == id).unwrap();
+    node.props = props;
+    ReadView::new(snapshot)
+}
+
+#[test]
+fn admission_certifies_an_invalid_revision_whose_instances_expand() {
+    let before = corrupt("u", json!({"width":false,"height":10}));
+    let error = admit(&before).unwrap_err();
+    assert_eq!(error.field.as_deref(), Some("width"));
+    assert!(certified(&before));
+    // An unrelated batch stays local; one touching the invalid node fails as Candidate.
+    let operations = ops(json!([{"op":"update_node","id":"r","props":{"fill":"#ff0000"}}]));
+    let (after, changed, _) = advance(&before, &operations);
+    assert!(validate_delta(&before, &after, &operations, &changed)
+        .unwrap()
+        .is_some());
+    let operations = ops(json!([{"op":"update_node","id":"u","props":{"fill":"#ff0000"}}]));
+    let mut candidate = Candidate::from_snapshot(&before.to_snapshot());
+    let expected = candidate
+        .apply(&operations[0], &mut BTreeSet::new())
+        .map_err(|e| e.at(0))
+        .unwrap_err();
+    let after = ReadView::new(before.to_snapshot());
+    let error = validate_delta(&before, &after, &operations, &["u".into()])
+        .err()
+        .expect("rejected");
+    assert_eq!(
+        serde_json::to_value(&error).unwrap(),
+        serde_json::to_value(&expected).unwrap()
+    );
+}
+
+#[test]
+fn admission_leaves_no_certificate_when_instances_do_not_expand() {
+    let before = corrupt("i", json!({"componentId":"g"}));
+    let error = admit(&before).unwrap_err();
+    assert_eq!(error.field.as_deref(), Some("props.componentId"));
+    assert!(!certified(&before));
+    let operations = ops(json!([{"op":"update_node","id":"r","props":{"fill":"#ff0000"}}]));
+    let (after, changed, _) = advance(&before, &operations);
+    assert!(validate_delta(&before, &after, &operations, &changed)
+        .unwrap()
+        .is_none());
+    assert!(!certified(&before));
+}

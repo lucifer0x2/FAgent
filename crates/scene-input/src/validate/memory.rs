@@ -1,6 +1,7 @@
 //! Validation of an exact staged revision. A bounded candidate is deliberately
 //! never treated as a complete project. The certificate is attached to one
 //! immutable ReadView; structure-only loads cannot grant incremental trust.
+mod admit;
 mod classify;
 mod closure;
 #[cfg(test)]
@@ -12,6 +13,8 @@ use crate::{
     NodeKind, Operation, Result, StorageError, MAX_NODES,
 };
 use std::collections::{BTreeMap, BTreeSet};
+
+pub use admit::{admit, certified};
 
 #[derive(Clone)]
 pub(crate) struct Certificate {
@@ -30,8 +33,9 @@ pub fn supports(before: &ReadView, operations: &[Operation]) -> bool {
 }
 
 /// Validate only the affected authored/instance closure, using the exact delta's
-/// changed IDs. Returns None if the loaded before revision is not fully valid or
-/// replay disagrees with staged rows; callers must use the full reference path.
+/// changed IDs. Returns None if `before` holds no certificate and is not fully valid,
+/// or replay disagrees with staged rows; callers must use the full reference path.
+/// A revision admitted with [`admit`] holds a certificate even when it is invalid.
 /// Both views must belong to the same builtin project/incarnation write boundary.
 pub fn validate_delta(
     before: &ReadView,
@@ -48,12 +52,7 @@ pub fn validate_delta(
             if Candidate::from_snapshot(&snapshot).validate().is_err() {
                 return Ok(None);
             }
-            let placed = crate::instances::expand(&snapshot.nodes)?;
-            let extra = extras(placed.iter().map(|n| &n.id));
-            Ok::<_, StorageError>(Some(Certificate {
-                extra,
-                total: placed.len(),
-            }))
+            admit::certify(&snapshot).map(Some)
         })?;
         let Some(certificate) = admission else {
             return Ok(None);

@@ -92,6 +92,18 @@ fn sqlite_scoped_reads_come_from_memory_when_current() {
     assert!(stats.read_hits >= 4, "{stats:?}");
     assert!(stats.read_loads >= 1, "{stats:?}");
     assert!(stats.write_loads >= 1 && stats.write_hits >= 1, "{stats:?}");
+    // Every load is admitted (fully validated once); the counters are serialized.
+    assert_eq!(stats.memory.admissions, stats.memory.loads, "{stats:?}");
+    assert_eq!(stats.memory.admission_failures, 0, "{stats:?}");
+    let json = serde_json::to_value(stats).unwrap();
+    for key in [
+        "admissions",
+        "admission_failures",
+        "admission_micros",
+        "rejected_direct",
+    ] {
+        assert!(json["memory"].get(key).is_some(), "{key} in {json}");
+    }
 }
 
 #[test]
