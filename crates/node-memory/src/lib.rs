@@ -18,6 +18,7 @@
 //! Only structural validation runs here; property, token and style validation stays
 //! in `fagent-scene-input`.
 mod checks;
+mod engine;
 mod limits;
 mod ops;
 mod props;
@@ -25,10 +26,12 @@ mod registry;
 mod state;
 mod store;
 
+pub use engine::{HotProject, MemoryConfig, MemoryStats, NodeMemory};
 pub use fagent_scene_input::Operation;
 pub use limits::Limits;
 pub use ops::{Delta, RowChanges};
 pub use registry::{
-    Clock, Eviction, ManualClock, ProjectHandle, ProjectInfo, Registry, RegistryConfig, SystemClock,
+    Clock, Eviction, LoadId, ManualClock, ProjectHandle, ProjectInfo, Registry, RegistryConfig,
+    SystemClock,
 };
 pub use state::{IndexDump, ProjectState, Staged, Subtree, Written};
