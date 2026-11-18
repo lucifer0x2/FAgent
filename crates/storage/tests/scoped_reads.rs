@@ -43,6 +43,18 @@ fn parity(shared: &SharedSnapshot) -> Vec<ScopeStats> {
         .collect()
 }
 
+/// Every scope's resolved nodes, from a database or memory snapshot.
+fn resolved(shared: &SharedSnapshot) -> Vec<Vec<Node>> {
+    let scoped = shared.trusted_scoped().unwrap().expect("builtin source");
+    SCOPES
+        .into_iter()
+        .map(|(scope, definitions)| {
+            let mut nodes = scoped.expand(scope, definitions).unwrap();
+            scoped.resolve(&mut nodes, "night").unwrap()
+        })
+        .collect()
+}
+
 fn exercise(storage: &Storage, p: &ProjectHandle) {
     seed(p);
     let old = storage.shared_snapshot(p.id()).unwrap();
@@ -65,6 +77,12 @@ fn exercise(storage: &Storage, p: &ProjectHandle) {
     strict(p, "sparse", vec![update("r1", json!({"width":21}))]);
     let next = storage.shared_snapshot(p.id()).unwrap();
     parity(&next);
+    // Node memory is always on: the commit left the project resident, and its view
+    // resolves every scope as the database snapshot does.
+    let resident = storage.scoped_snapshot(p.id(), "r1").unwrap();
+    assert!(resident.from_memory);
+    assert_eq!(resident.shared.snapshot.revision, next.snapshot.revision);
+    assert_eq!(resolved(&resident.shared), resolved(&next));
     assert_eq!(parity(&old), original);
     let mut swapped = storage.shared_snapshot(p.id()).unwrap();
     swapped.snapshot = Arc::new((*swapped.snapshot).clone());

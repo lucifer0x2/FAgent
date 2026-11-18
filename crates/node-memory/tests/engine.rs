@@ -26,7 +26,7 @@ fn memory(ttl_secs: u64, budget: usize) -> (NodeMemory, Arc<ManualClock>) {
 }
 
 #[test]
-fn defaults_follow_the_shadow_constants() {
+fn defaults_are_a_one_hour_ttl_and_a_two_gib_budget() {
     let config = MemoryConfig::default();
     assert_eq!(config.ttl, Duration::from_secs(3600));
     assert_eq!(config.budget_bytes, 2 << 30);
