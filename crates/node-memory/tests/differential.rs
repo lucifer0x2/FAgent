@@ -21,6 +21,9 @@ struct Mix {
     extended: bool,
     /// Property errors.
     invalid: bool,
+    /// Overrides, animations with triggers, deep chains, dimension tokens with themes,
+    /// theme-scoped instances and master edits (`random_cases`).
+    cases: bool,
 }
 
 fn gen<'a>(rng: &'a mut Rng, mix: Mix) -> Gen<'a> {
@@ -29,6 +32,7 @@ fn gen<'a>(rng: &'a mut Rng, mix: Mix) -> Gen<'a> {
         counter: 0,
         extended: mix.extended,
         invalid: mix.invalid,
+        cases: mix.cases,
     }
 }
 
@@ -95,6 +99,18 @@ fn random_property_batches_match_candidate() {
     ] {
         assert!(property(field), "no rejection on {field}");
     }
+}
+
+/// The delta-rule cases on the state alone.
+#[test]
+fn random_case_batches_match_candidate() {
+    let mix = Mix {
+        extended: true,
+        cases: true,
+        ..Mix::default()
+    };
+    let tally = state_run(201..=212, mix);
+    assert!(tally.accepted > 600 && tally.rejected.len() >= 15);
 }
 
 /// `HotProject::begin` against the reference for `seeds`.
@@ -187,4 +203,17 @@ fn begin_property_errors_match_candidate() {
         stats.rejected as usize,
         totals.rejected.values().sum::<usize>()
     );
+}
+
+/// Overrides, animation triggers, deep chains repaired later, dimension tokens with
+/// theme branches, theme-scoped instances and master edits (`random_cases`).
+#[test]
+fn begin_cases_match_candidate() {
+    let mix = Mix {
+        extended: true,
+        invalid: false,
+        cases: true,
+    };
+    let (totals, _) = begin_run(201..=224, mix);
+    assert!(totals.accepted > 1500 && totals.rejected.len() >= 50);
 }
