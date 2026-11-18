@@ -1,9 +1,7 @@
 use super::*;
 use serde_json::json;
 
-#[allow(dead_code)]
-#[path = "../reads/scoped_tree_fixture.rs"]
-mod fixture;
+use crate::reads::scoped_tree_fixture as fixture;
 
 #[test]
 fn scoped_export_targets_match_full_root_frames_settings_names_and_errors() {

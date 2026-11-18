@@ -16,7 +16,7 @@ pub(crate) mod pagination;
 #[cfg(test)]
 mod scoped_tree_bounds_tests;
 #[cfg(test)]
-mod scoped_tree_fixture;
+pub(crate) mod scoped_tree_fixture;
 #[cfg(test)]
 mod scoped_tree_tests;
 mod states;

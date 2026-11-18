@@ -3,9 +3,7 @@ use fagent_storage::{BatchRequest, SharedSnapshot};
 use serde_json::json;
 use std::sync::Arc;
 
-#[allow(dead_code)]
-#[path = "../reads/scoped_tree_fixture.rs"]
-mod fixture;
+use crate::reads::scoped_tree_fixture as fixture;
 
 fn config() -> Config {
     Config {

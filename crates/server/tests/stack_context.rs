@@ -1,5 +1,7 @@
 //! P08a over MCP: per-side padding/align/justify read back and observable reflow.
+#[allow(dead_code)]
 mod multi_support;
+#[allow(dead_code)]
 mod support;
 use multi_support::settled;
 use serde_json::{json, Value};
