@@ -105,8 +105,8 @@ impl Candidate {
         for theme in &themes {
             time("validate.theme", || -> Result<()> {
                 let context = Resolver {
-                    candidate: self,
-                    nodes: &self.nodes,
+                    lookup: self,
+                    overlay: None,
                     theme,
                 };
                 // Unchanged styles already passed every theme; resource writes fall back.

@@ -15,6 +15,7 @@ mod keyframes;
 mod layout;
 mod layout_rule;
 mod links;
+mod lookup;
 pub mod memory;
 mod navigation;
 mod node;
@@ -40,10 +41,13 @@ pub use candidate::Candidate;
 pub use font_references::{referenced_font_ids, FontReferences};
 pub use incremental::{ValidationStats, ValidationWork};
 pub use index::NodeIndex;
+pub use lookup::Lookup;
 pub use refs::{
     resolved_expanded_nodes, resolved_nodes, resolved_nodes_for_theme, resolved_tokens_for_theme,
 };
+pub use scope::{check_node, check_style};
 pub use scoped::resource_builds;
 pub(crate) use scoped::ScopedResources;
+pub use tokens::{token_value, validate_tokens};
 pub use topology::NodeTopology;
 pub use values::{valid_id, validate_slug};

@@ -16,7 +16,7 @@ impl Resolver<'_> {
         if n.kind == NodeKind::Instance {
             let master = n.props["componentId"]
                 .as_str()
-                .and_then(|id| self.nodes.get(id))
+                .and_then(|id| self.find(id))
                 .filter(|n| n.kind == NodeKind::Frame && n.props.get("component").is_some())
                 .ok_or_else(|| {
                     StorageError::validation("props.componentId", "Expected a component frame")
@@ -96,7 +96,7 @@ impl Resolver<'_> {
                     }
                 }
                 "fontId" => {
-                    if !self.fonts.contains_key(v.as_str().unwrap_or("")) {
+                    if self.lookup.font(v.as_str().unwrap_or("")).is_none() {
                         return Err(StorageError::validation(
                             k,
                             "Referenced font does not exist",
@@ -104,7 +104,7 @@ impl Resolver<'_> {
                     }
                 }
                 "assetId" => {
-                    if !self.assets.contains_key(v.as_str().unwrap_or("")) {
+                    if self.lookup.asset(v.as_str().unwrap_or("")).is_none() {
                         return Err(StorageError::validation(
                             k,
                             "Referenced asset does not exist",
@@ -127,7 +127,7 @@ impl Resolver<'_> {
             let asset = p
                 .get("assetId")
                 .and_then(Value::as_str)
-                .and_then(|a| self.assets.get(a))
+                .and_then(|a| self.lookup.asset(a))
                 .ok_or_else(|| {
                     StorageError::validation("assetId", "Image requires an existing asset")
                 })?;
@@ -142,7 +142,7 @@ impl Resolver<'_> {
             && n.props.get("component").is_none()
             && n.parent_id
                 .as_ref()
-                .and_then(|p| self.nodes.get(p))
+                .and_then(|p| self.find(p))
                 .is_some_and(|p| p.kind == NodeKind::Page)
         {
             super::root_size::check_root_size(p)?;

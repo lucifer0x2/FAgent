@@ -112,8 +112,8 @@ impl Candidate {
                             .expect("master descendant has an expanded placement");
                         for theme in themes {
                             Resolver {
-                                candidate: self,
-                                nodes: &placed,
+                                lookup: self,
+                                overlay: Some(&placed),
                                 theme,
                             }
                             .properties(child)
@@ -147,8 +147,8 @@ impl Candidate {
             // The bounded expander rejects direct/indirect cycles and depth explosions.
             for theme in themes {
                 let context = Resolver {
-                    candidate: self,
-                    nodes: &placed,
+                    lookup: self,
+                    overlay: Some(&placed),
                     theme,
                 };
                 // Preserve the expander's authored-ID/depth-first order, rather than

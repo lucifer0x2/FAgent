@@ -1,30 +1,28 @@
 use super::{
     tokens::{alias, branches, MAX_ALIAS_DEPTH},
-    Candidate,
+    Lookup,
 };
 use crate::error::*;
 use std::collections::{BTreeMap, BTreeSet};
 
-impl Candidate {
-    /// Check the union of every branch, including unused themes and tokens.
-    /// This deliberately rejects cross-theme cycles too, before resolution.
-    pub(super) fn validate_token_graph(&self) -> Result<()> {
-        let mut graph = BTreeMap::new();
-        for token in self.tokens.values() {
-            let mut edges = BTreeSet::new();
-            for (_, value) in branches(token)? {
-                if let Some(target) = alias(value)? {
-                    edges.insert(target);
-                }
+/// Check the union of every branch, including unused themes and tokens.
+/// This deliberately rejects cross-theme cycles too, before resolution.
+pub(super) fn validate_token_graph(lookup: &dyn Lookup) -> Result<()> {
+    let mut graph = BTreeMap::new();
+    for token in lookup.tokens() {
+        let mut edges = BTreeSet::new();
+        for (_, value) in branches(token)? {
+            if let Some(target) = alias(value)? {
+                edges.insert(target);
             }
-            graph.insert(token.id.as_str(), edges);
         }
-        let mut heights = BTreeMap::new();
-        for id in graph.keys() {
-            visit(id, &graph, &mut BTreeSet::new(), &mut heights)?;
-        }
-        Ok(())
+        graph.insert(token.id.as_str(), edges);
     }
+    let mut heights = BTreeMap::new();
+    for id in graph.keys() {
+        visit(id, &graph, &mut BTreeSet::new(), &mut heights)?;
+    }
+    Ok(())
 }
 
 fn visit<'a>(

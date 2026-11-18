@@ -1,4 +1,4 @@
-use super::{values::*, Candidate};
+use super::{token_graph::validate_token_graph, values::*, Candidate, Lookup};
 use crate::{error::*, model::Token};
 use serde_json::Value;
 use std::collections::BTreeSet;
@@ -63,57 +63,95 @@ pub(super) fn alias(value: &Value) -> Result<Option<&str>> {
     Ok(target)
 }
 
+/// Check every token in id order, then the alias graph; returns the declared themes.
+pub fn validate_tokens(lookup: &dyn Lookup) -> Result<BTreeSet<String>> {
+    if lookup.token_count() > MAX_TOKENS {
+        return Err(StorageError::validation(
+            "tokens",
+            "At most 4096 tokens are supported",
+        ));
+    }
+    let mut themes = BTreeSet::from(["default".into()]);
+    for token in lookup.tokens() {
+        id(&token.id)?;
+        if token.name.len() > 256 {
+            return Err(StorageError::validation(
+                "token.name",
+                "Name exceeds 256 bytes",
+            ));
+        }
+        if !matches!(token.token_type.as_str(), "color" | "dimension" | "number") {
+            return Err(StorageError::validation(
+                "token.type",
+                "Only color, dimension and number tokens are supported",
+            ));
+        }
+        for (theme, value) in branches(token)? {
+            themes.insert(theme.into());
+            if let Some(target_id) = alias(value)? {
+                let target = lookup.token(target_id).ok_or_else(|| {
+                    StorageError::validation(
+                        "token.aliasId",
+                        "Alias target does not exist; forward references are not supported",
+                    )
+                })?;
+                if target.token_type != token.token_type {
+                    return Err(StorageError::validation(
+                        "token.aliasId",
+                        "Alias target must have the same token type",
+                    ));
+                }
+            } else {
+                literal(value, &token.token_type)?;
+            }
+        }
+    }
+    if themes.len() > MAX_THEMES + 1 {
+        return Err(StorageError::validation(
+            "token.themes",
+            "At most 32 named themes per project are supported",
+        ));
+    }
+    validate_token_graph(lookup)?;
+    Ok(themes)
+}
+
+/// The literal value of token `id` at `theme`, following aliases.
+pub fn token_value(lookup: &dyn Lookup, id: &str, theme: &str) -> Result<Value> {
+    let mut current = id;
+    let mut seen = BTreeSet::new();
+    for _ in 0..=MAX_ALIAS_DEPTH {
+        if !seen.insert(current) {
+            return Err(StorageError::validation(
+                "token.aliasId",
+                "Token alias cycle detected",
+            ));
+        }
+        let token = lookup.token(current).ok_or_else(|| {
+            StorageError::validation("token.aliasId", "Alias target does not exist")
+        })?;
+        let choices = branches(token)?;
+        let value = choices
+            .iter()
+            .find(|(name, _)| *name == theme)
+            .unwrap_or(&choices[0])
+            .1;
+        if let Some(target) = alias(value)? {
+            current = target;
+        } else {
+            literal(value, &token.token_type)?;
+            return Ok(value.clone());
+        }
+    }
+    Err(StorageError::validation(
+        "token.aliasId",
+        "Token alias depth exceeds 32",
+    ))
+}
+
 impl Candidate {
     pub(super) fn validate_tokens(&self) -> Result<BTreeSet<String>> {
-        if self.tokens.len() > MAX_TOKENS {
-            return Err(StorageError::validation(
-                "tokens",
-                "At most 4096 tokens are supported",
-            ));
-        }
-        let mut themes = BTreeSet::from(["default".into()]);
-        for token in self.tokens.values() {
-            id(&token.id)?;
-            if token.name.len() > 256 {
-                return Err(StorageError::validation(
-                    "token.name",
-                    "Name exceeds 256 bytes",
-                ));
-            }
-            if !matches!(token.token_type.as_str(), "color" | "dimension" | "number") {
-                return Err(StorageError::validation(
-                    "token.type",
-                    "Only color, dimension and number tokens are supported",
-                ));
-            }
-            for (theme, value) in branches(token)? {
-                themes.insert(theme.into());
-                if let Some(target_id) = alias(value)? {
-                    let target = self.tokens.get(target_id).ok_or_else(|| {
-                        StorageError::validation(
-                            "token.aliasId",
-                            "Alias target does not exist; forward references are not supported",
-                        )
-                    })?;
-                    if target.token_type != token.token_type {
-                        return Err(StorageError::validation(
-                            "token.aliasId",
-                            "Alias target must have the same token type",
-                        ));
-                    }
-                } else {
-                    literal(value, &token.token_type)?;
-                }
-            }
-        }
-        if themes.len() > MAX_THEMES + 1 {
-            return Err(StorageError::validation(
-                "token.themes",
-                "At most 32 named themes per project are supported",
-            ));
-        }
-        self.validate_token_graph()?;
-        Ok(themes)
+        validate_tokens(self)
     }
 
     pub(super) fn select_theme(&mut self, theme: &str) -> Result<()> {
@@ -125,35 +163,7 @@ impl Candidate {
     }
 
     pub(super) fn token_value(&self, id: &str, theme: &str) -> Result<Value> {
-        let mut current = id;
-        let mut seen = BTreeSet::new();
-        for _ in 0..=MAX_ALIAS_DEPTH {
-            if !seen.insert(current) {
-                return Err(StorageError::validation(
-                    "token.aliasId",
-                    "Token alias cycle detected",
-                ));
-            }
-            let token = self.tokens.get(current).ok_or_else(|| {
-                StorageError::validation("token.aliasId", "Alias target does not exist")
-            })?;
-            let choices = branches(token)?;
-            let value = choices
-                .iter()
-                .find(|(name, _)| *name == theme)
-                .unwrap_or(&choices[0])
-                .1;
-            if let Some(target) = alias(value)? {
-                current = target;
-            } else {
-                literal(value, &token.token_type)?;
-                return Ok(value.clone());
-            }
-        }
-        Err(StorageError::validation(
-            "token.aliasId",
-            "Token alias depth exceeds 32",
-        ))
+        token_value(self, id, theme)
     }
 }
 

@@ -59,8 +59,8 @@ impl Candidate {
         for theme in &themes {
             time("validate.theme", || -> Result<()> {
                 let context = super::scope::Resolver {
-                    candidate: self,
-                    nodes: &self.nodes,
+                    lookup: self,
+                    overlay: None,
                     theme,
                 };
                 for style in self.styles.values() {
