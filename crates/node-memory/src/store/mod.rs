@@ -1,32 +1,31 @@
-//! Slot arena of nodes plus every structural index, keyed by compact `u32` slots.
-//! Reads live here; logged mutations in `mutate`, their inverses in `undo`, the
-//! props-derived reference indexes in `refs`, resources in `resources` and per-property
-//! write revisions in `stamps`.
+//! One persistent project state: nodes and every structural index in radix tries
+//! keyed by interned ids. Cloning a [`Store`] is O(1) (a handful of `Arc` bumps); a
+//! batch writes on its clone, copying only the trie paths and nodes it touches, and
+//! is either kept whole or dropped whole, so no undo log exists. Reads live here;
+//! mutations in `mutate`, sibling order in `order`, the props-derived reference
+//! indexes in `refs`, resources in `resources` and per-property write revisions in
+//! `stamps`.
 mod derive;
+mod intern;
 mod mutate;
 mod order;
 mod refs;
 mod resources;
 mod stamps;
-mod undo;
+pub(crate) mod trie;
 
 use crate::props;
 use fagent_scene_input::Node;
-pub(crate) use mutate::Log;
-pub(crate) use resources::{ResUndo, Resources};
+use intern::Interner;
+pub(crate) use resources::Resources;
 pub(crate) use stamps::{Prop, Stamps};
-use std::collections::{BTreeSet, HashMap};
-pub(crate) use undo::Undo;
+use std::collections::BTreeSet;
+use std::sync::Arc;
+use trie::Trie;
 
-/// Compact node handle: an index into the slot arena. Reused after delete.
+/// Compact node handle: the interned id. Never reused for another id.
 #[derive(Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord, Debug)]
 pub(crate) struct Key(u32);
-
-impl Key {
-    pub(crate) fn index(self) -> usize {
-        self.0 as usize
-    }
-}
 
 /// Ancestor-derived indexes of one node, a pure function of its ancestors' values.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
@@ -39,74 +38,86 @@ pub(crate) struct Derived {
     pub master: Option<Key>,
 }
 
-/// One live node with its links and derived indexes.
+/// One live node with its links and derived indexes. `node` and `children` are shared
+/// with every state version that did not rewrite them.
 #[derive(Clone, Debug)]
 pub(crate) struct Slot {
-    pub node: Node,
+    pub node: Arc<Node>,
     pub parent: Option<Key>,
     /// Children ordered by `(sort_key, id)`, the stored sibling order.
-    pub children: Vec<Key>,
+    pub children: Arc<Vec<Key>>,
     pub derived: Derived,
     /// Revisions of writes since load, per property; empty until the first write.
     pub stamps: Stamps,
 }
 
-/// Bytes of one arena slot.
-pub(crate) const SLOT_SIZE: usize = std::mem::size_of::<Option<Slot>>();
+pub(crate) type Set = Arc<BTreeSet<Key>>;
 
-#[derive(Default)]
+#[derive(Clone, Default)]
 pub(crate) struct Store {
-    slots: Vec<Option<Slot>>,
-    free: Vec<Key>,
-    ids: HashMap<String, Key>,
+    /// Node ids, and ids named by `componentId` or `links[].to` (live or not).
+    ids: Arc<Interner>,
+    /// Reference keys (`token:<id>`, `style:<id>`, ...) for `refs`.
+    ref_keys: Arc<Interner>,
+    /// Top-level props keys for stamps.
+    props: Arc<stamps::PropNames>,
+    slots: Trie<Slot>,
     /// Pages (children of no parent), ordered like any sibling list.
-    pages: Vec<Key>,
-    /// Instances by their `props.componentId` (the id string, live master or not).
-    users: HashMap<String, BTreeSet<Key>>,
-    /// Nodes by the ids their `props.links[].to` name.
-    links: HashMap<String, BTreeSet<Key>>,
-    /// Interned top-level props keys for stamps (never shrinks; not in `bytes`).
-    props: stamps::Interner,
+    pages: Arc<Vec<Key>>,
+    /// Instances by the interned `props.componentId` (live master or not).
+    users: Trie<Set>,
+    /// Nodes by the interned ids their `props.links[].to` name.
+    links: Trie<Set>,
+    /// Nodes by the interned reference keys their props name (nested included).
+    refs: Trie<Set>,
     pub(crate) res: Resources,
-    len: usize,
+    /// Estimated bytes of nodes, stamps and index entries (not trie nodes or names).
     bytes: usize,
 }
 
 impl Store {
     pub(crate) fn len(&self) -> usize {
-        self.len
+        self.slots.len()
     }
 
+    /// Estimated bytes of this version, counting shared parts in full.
     pub(crate) fn bytes(&self) -> usize {
-        self.bytes + self.slots.len() * std::mem::size_of::<Option<Slot>>()
+        self.bytes
+            + self.slots.node_bytes()
+            + self.users.node_bytes()
+            + self.links.node_bytes()
+            + self.refs.node_bytes()
+            + self.ids.bytes()
+            + self.ref_keys.bytes()
     }
 
-    /// Estimated node bytes without the slot arena.
+    /// Estimated node bytes without trie nodes and interned names.
     pub(crate) fn content_bytes(&self) -> usize {
         self.bytes
     }
 
     pub(crate) fn key(&self, id: &str) -> Option<Key> {
-        self.ids.get(id).copied()
+        let key = Key(self.ids.get(id)?);
+        self.slots.contains(key.0).then_some(key)
     }
 
     pub(crate) fn contains(&self, id: &str) -> bool {
-        self.ids.contains_key(id)
+        self.key(id).is_some()
     }
 
-    /// The slot of a live key. Keys handed out by this store are always live
-    /// until removed, so a dead key is an internal invariant violation.
+    /// The slot of a live key. Keys handed out by this store are live until removed,
+    /// so a dead key is an internal invariant violation.
     pub(crate) fn slot(&self, key: Key) -> &Slot {
-        self.slots[key.index()].as_ref().expect("live node key")
+        self.slots.get(key.0).expect("live node key")
     }
 
-    /// The slot of `key` when it is live (keys of deleted nodes may be reused).
+    /// The slot of `key` when it is live.
     pub(crate) fn live(&self, key: Key) -> Option<&Slot> {
-        self.slots.get(key.index()).and_then(Option::as_ref)
+        self.slots.get(key.0)
     }
 
     pub(crate) fn get(&self, id: &str) -> Option<&Slot> {
-        self.key(id).map(|key| self.slot(key))
+        self.slots.get(self.ids.get(id)?)
     }
 
     pub(crate) fn node(&self, key: Key) -> &Node {
@@ -121,26 +132,38 @@ impl Store {
         }
     }
 
+    fn members<'a>(
+        &'a self,
+        index: &'a Trie<Set>,
+        key: Option<u32>,
+    ) -> impl Iterator<Item = Key> + 'a {
+        key.and_then(|k| index.get(k))
+            .into_iter()
+            .flat_map(|s| s.iter().copied())
+    }
+
     /// Instances whose `props.componentId` is `master`.
     pub(crate) fn users(&self, master: &str) -> impl Iterator<Item = Key> + '_ {
-        self.users.get(master).into_iter().flatten().copied()
+        self.members(&self.users, self.ids.get(master))
     }
 
     pub(crate) fn has_users(&self, master: &str) -> bool {
-        self.users.contains_key(master)
+        self.users(master).next().is_some()
     }
 
     /// Nodes with a `props.links` entry whose `to` is `target`.
     pub(crate) fn linking(&self, target: &str) -> impl Iterator<Item = Key> + '_ {
-        self.links.get(target).into_iter().flatten().copied()
+        self.members(&self.links, self.ids.get(target))
     }
 
-    /// Live slots in arena order.
+    /// Nodes whose props reference `key` (`token:<id>`, `component:<id>`, ...).
+    pub(crate) fn referencing(&self, key: &str) -> impl Iterator<Item = Key> + '_ {
+        self.members(&self.refs, self.ref_keys.get(key))
+    }
+
+    /// Live slots in key order.
     pub(crate) fn iter(&self) -> impl Iterator<Item = (Key, &Slot)> {
-        self.slots
-            .iter()
-            .enumerate()
-            .filter_map(|(i, slot)| slot.as_ref().map(|s| (Key(i as u32), s)))
+        self.slots.iter().map(|(k, slot)| (Key(k), slot))
     }
 
     /// Strict ancestors of `key`, nearest first.
@@ -158,19 +181,38 @@ impl Store {
         }
         out
     }
+
+    /// Slots whose entry differs between `self` and `base` (an ancestor version),
+    /// found by pointer: shared trie nodes are skipped, and a slot counts as changed
+    /// when its node, links or derived values were rewritten.
+    pub(crate) fn changed_since(&self, base: &Store) -> Vec<Key> {
+        let same = |a: &Slot, b: &Slot| {
+            Arc::ptr_eq(&a.node, &b.node)
+                && Arc::ptr_eq(&a.children, &b.children)
+                && (a.parent, a.derived) == (b.parent, b.derived)
+        };
+        self.slots
+            .diff(&base.slots, same)
+            .into_iter()
+            .map(Key)
+            .collect()
+    }
 }
 
-/// Estimated heap bytes of one node beyond its arena slot: id (in the node and as the
-/// id-map key), parent id, id-map entry, its entry in a sibling list and props.
+/// Estimated heap bytes of one node beyond its trie slot: the shared `Node`
+/// allocation, id, parent id, its entry in a sibling list and props.
 pub(crate) fn node_bytes(node: &Node) -> usize {
-    2 * string_bytes(&node.id)
+    std::mem::size_of::<Node>()
+        + props::ALLOC
+        + string_bytes(&node.id)
         + node.parent_id.as_deref().map_or(0, string_bytes)
-        // Id-map slot at about 7/8 load, plus amortized sibling-list growth.
-        + std::mem::size_of::<(String, Key)>() + 8
-        + 2 * std::mem::size_of::<Key>()
+        + std::mem::size_of::<Key>()
         + props::heap_bytes(&node.props)
 }
 
 pub(crate) fn string_bytes(s: &str) -> usize {
     s.len() + props::ALLOC
 }
+
+/// Bytes of one trie slot.
+pub(crate) const SLOT_SIZE: usize = std::mem::size_of::<Option<Slot>>();

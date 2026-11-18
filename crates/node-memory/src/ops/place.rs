@@ -33,13 +33,12 @@ impl Txn<'_> {
         index: Option<usize>,
     ) -> Result<()> {
         let at = self.check_index(&self.store.node(key).id, parent, index)?;
-        self.store
-            .renumber(parent, at, &mut self.renumbered, &mut self.log);
+        self.store.renumber(parent, at, &mut self.renumbered);
         if self.store.node(key).sort_key != at as i64 {
-            self.store.set_sort_key(key, at as i64, &mut self.log);
+            self.store.set_sort_key(key, at as i64);
         }
         // Under the new keys the list is still sorted and `key` lands at `at`.
-        self.store.link(parent, key, &mut self.log);
+        self.store.link(parent, key);
         Ok(())
     }
 }

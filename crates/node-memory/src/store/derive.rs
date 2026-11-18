@@ -1,6 +1,6 @@
 //! Rules for the ancestor-derived indexes (page, root frame, master) and their
 //! incremental refresh, which visits only the part of a subtree whose values change.
-use super::{Derived, Key, Log, Store};
+use super::{Derived, Key, Store};
 use crate::props::is_master;
 use fagent_scene_input::NodeKind;
 
@@ -29,14 +29,14 @@ impl Store {
 
     /// Recomputes `key` and descendants top-down. A node whose values are unchanged
     /// keeps its whole subtree unchanged, so the walk stops there.
-    pub(crate) fn refresh(&mut self, key: Key, log: &mut Log) {
+    pub(crate) fn refresh(&mut self, key: Key) {
         let mut stack = vec![key];
         while let Some(key) = stack.pop() {
             let derived = self.derive(key);
             if derived == self.slot(key).derived {
                 continue;
             }
-            self.set_derived(key, derived, log);
+            self.set_derived(key, derived);
             stack.extend_from_slice(&self.slot(key).children);
         }
     }

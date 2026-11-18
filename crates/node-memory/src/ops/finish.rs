@@ -37,8 +37,8 @@ impl Txn<'_> {
             let Some(next) = pruned_links(props, |to| gone.contains(to)) else {
                 continue;
             };
-            self.store.set_props(key, next, &mut self.log);
-            self.store.stamp_key(key, "links", self.rev, &mut self.log);
+            self.store.set_props(key, next);
+            self.store.stamp_key(key, "links", self.rev);
             self.touch_key(key);
         }
     }

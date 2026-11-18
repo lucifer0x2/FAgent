@@ -34,14 +34,14 @@ impl Txn<'_> {
             .map(str::to_owned)
             .collect();
         for note in notes {
-            self.store.put_note(&note, None, &mut self.log);
+            self.store.put_note(&note, None);
             self.touch_note(&note, true);
         }
         let parent = self.store.slot(root).parent;
-        self.store.unlink(parent, root, &mut self.log);
+        self.store.unlink(parent, root);
         for &key in removed.iter().rev() {
             let id = self.store.node(key).id.clone();
-            self.store.remove(key, &mut self.log);
+            self.store.remove(key);
             self.touch_owned(id, true);
         }
         Ok(())

@@ -34,11 +34,11 @@ pub struct ProjectHandle {
 
 impl ProjectHandle {
     pub(super) fn new(state: ProjectState, clock: Arc<dyn Clock>, load_id: LoadId) -> Self {
-        let view = Arc::new(ReadView::new(state.to_snapshot()));
+        let view = Arc::new(state.view());
         let handle = Self {
             id: state.project_id().to_owned(),
             load_id,
-            bytes: AtomicUsize::new(state.estimated_bytes() + view.estimated_bytes()),
+            bytes: AtomicUsize::new(state.estimated_bytes()),
             state: RwLock::new(state),
             published: RwLock::new(view),
             last_access_nanos: AtomicU64::new(0),
@@ -94,13 +94,13 @@ impl ProjectHandle {
     /// other writers wait until the result is committed, aborted or dropped.
     pub fn begin(&self, ops: &[Operation]) -> Result<Staged<'_>> {
         self.touch();
-        let mut state = self.state.write().unwrap_or_else(PoisonError::into_inner);
-        let (log, delta) = state.stage(ops)?;
+        let state = self.state.write().unwrap_or_else(PoisonError::into_inner);
+        let (next, delta) = state.stage(ops)?;
         Ok(Staged::locked(
             state,
             &self.bytes,
             &self.published,
-            log,
+            next,
             delta,
         ))
     }
@@ -115,7 +115,7 @@ impl ProjectHandle {
         ops: &[Operation],
     ) -> Option<(Arc<ReadView>, Result<Staged<'_>>)> {
         self.touch();
-        let mut state = self.state.write().unwrap_or_else(PoisonError::into_inner);
+        let state = self.state.write().unwrap_or_else(PoisonError::into_inner);
         if state.revision() != expected {
             return None;
         }
@@ -126,7 +126,7 @@ impl ProjectHandle {
             .clone();
         let staged = state
             .stage(ops)
-            .map(|(log, delta)| Staged::locked(state, &self.bytes, &self.published, log, delta));
+            .map(|(next, delta)| Staged::locked(state, &self.bytes, &self.published, next, delta));
         Some((before, staged))
     }
 

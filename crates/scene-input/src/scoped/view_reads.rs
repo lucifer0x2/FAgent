@@ -1,33 +1,34 @@
-//! Scoped traversal over persistent IDs, without slice or positional-map rebuilds.
+//! Scoped traversal over a view's ids, without slice or positional-map rebuilds.
 use super::{ReadScope, ReadView, ScopeStats, ScopedNodes, ScopedSnapshot};
 use crate::{Node, NodeKind, Result, StorageError};
 use std::collections::BTreeSet;
 
 impl ReadView {
-    fn descendants(&self, id: &str, selected: &mut BTreeSet<String>) {
-        let mut pending = vec![id.to_owned()];
-        while let Some(id) = pending.pop() {
-            if !selected.insert(id.clone()) {
+    fn descendants<'a>(&'a self, id: &str, selected: &mut BTreeSet<&'a str>) {
+        let Some(root) = self.node(id) else {
+            return;
+        };
+        let mut pending = vec![root];
+        while let Some(node) = pending.pop() {
+            if !selected.insert(node.id.as_str()) {
                 continue;
             }
-            if let Some(children) = self.index.children.get(&id) {
-                pending.extend(children.iter().map(|(_, id)| id.clone()));
-            }
+            pending.extend(self.source.children(&node.id));
         }
     }
 
-    fn ancestors(&self, id: &str, selected: &mut BTreeSet<String>) {
+    fn ancestors<'a>(&'a self, id: &str, selected: &mut BTreeSet<&'a str>) {
         let mut node = self.node(id);
         for _ in 0..=128 {
             let Some(current) = node else {
                 break;
             };
-            selected.insert(current.id.clone());
+            selected.insert(current.id.as_str());
             node = current.parent_id.as_deref().and_then(|id| self.node(id));
         }
     }
 
-    fn select(&self, scope: ReadScope<'_>) -> Result<BTreeSet<String>> {
+    fn select(&self, scope: ReadScope<'_>) -> Result<BTreeSet<&str>> {
         let (id, is_page) = match scope {
             ReadScope::Page(id) => (id, true),
             ReadScope::Target(id) => (id, false),
@@ -49,17 +50,17 @@ impl ReadView {
         Ok(selected)
     }
 
-    fn masters(&self, selected: &BTreeSet<String>) -> BTreeSet<String> {
+    fn masters<'a>(&'a self, selected: &BTreeSet<&'a str>) -> BTreeSet<&'a str> {
         let mut closure = selected.clone();
         let mut scanned = BTreeSet::new();
         loop {
-            let pending: Vec<_> = closure.difference(&scanned).cloned().collect();
+            let pending: Vec<&str> = closure.difference(&scanned).copied().collect();
             if pending.is_empty() {
                 return closure;
             }
             for id in pending {
-                scanned.insert(id.clone());
-                if let Some(master) = self.index.masters.get(&id) {
+                scanned.insert(id);
+                if let Some(master) = self.master(id) {
                     self.descendants(master, &mut closure);
                     self.ancestors(master, &mut closure);
                 }
@@ -76,24 +77,10 @@ impl ReadView {
                 }
             }
         }
-        for source in self
-            .index
-            .incoming
-            .get(frame)
-            .into_iter()
-            .flat_map(|ids| ids.iter())
-        {
+        for source in self.source.linking(frame) {
             self.ancestors(source, &mut selected);
         }
-        self.ordered_ids(&selected)
-    }
-
-    fn ordered_ids<'a>(&'a self, ids: &BTreeSet<String>) -> Vec<&'a Node> {
-        let mut nodes: Vec<_> = ids.iter().filter_map(|id| self.node(id)).collect();
-        nodes.sort_by(|a, b| {
-            (&a.parent_id, a.sort_key, &a.id).cmp(&(&b.parent_id, b.sort_key, &b.id))
-        });
-        nodes
+        self.ordered(selected)
     }
 }
 
@@ -106,8 +93,11 @@ impl<'a> ScopedSnapshot<'a> {
     ) -> Result<ScopedNodes<'a>> {
         let selected = view.select(scope)?;
         let closure = view.masters(&selected);
-        let authored = view.ordered_ids(if definitions { &closure } else { &selected });
-        let dependencies = view.ordered_ids(&closure);
+        let authored = view.ordered(match definitions {
+            true => closure.iter().copied(),
+            false => selected.iter().copied(),
+        });
+        let dependencies = view.ordered(closure.iter().copied());
         let expanded = self.expand_authored(scope_id(scope), &authored)?;
         let stats = ScopeStats {
             closure_nodes: closure.len(),
@@ -128,7 +118,7 @@ impl<'a> ScopedSnapshot<'a> {
         scope: ReadScope<'_>,
     ) -> Result<(Vec<Node>, ScopeStats)> {
         let selected = view.select(scope)?;
-        let authored = view.ordered_ids(&selected);
+        let authored = view.ordered(selected.iter().copied());
         let expanded = self.expand_authored(scope_id(scope), &authored)?;
         let stats = ScopeStats {
             closure_nodes: selected.len(),

@@ -2,7 +2,7 @@
 //! an incrementally maintained project with a from-scratch rebuild.
 use super::ProjectState;
 use crate::store::Key;
-use std::collections::{BTreeMap, BTreeSet};
+use std::collections::BTreeMap;
 
 /// Every index of a project keyed by node id. Children keep sibling order; pages are
 /// listed under the empty parent id `""`.
@@ -18,11 +18,13 @@ pub struct IndexDump {
     pub instances_of: BTreeMap<String, Vec<String>>,
     /// Linking nodes by link target id, sorted.
     pub linked_from: BTreeMap<String, Vec<String>>,
+    /// Referencing nodes by reference key (`token:<id>`, ...), sorted.
+    pub referenced_by: BTreeMap<String, Vec<String>>,
     /// Note ids by anchor node id.
     pub notes_on: BTreeMap<String, Vec<String>>,
     pub len: usize,
-    /// Estimated node bytes without write stamps, excluding the slot arena (which
-    /// keeps freed slots).
+    /// Estimated node and index-entry bytes without write stamps, trie nodes or
+    /// interned names.
     pub node_bytes: usize,
     /// Estimated bytes of write stamps (zero right after a load).
     pub stamp_bytes: usize,
@@ -35,8 +37,8 @@ impl ProjectState {
         let store = &self.store;
         let id = |key: Key| store.node(key).id.clone();
         let ids = |keys: &[Key]| keys.iter().map(|k| id(*k)).collect::<Vec<_>>();
-        let sorted = |keys: &BTreeSet<Key>| {
-            let mut out: Vec<String> = keys.iter().map(|k| id(*k)).collect();
+        let sorted = |keys: Vec<Key>| {
+            let mut out: Vec<String> = keys.into_iter().map(id).collect();
             out.sort();
             out
         };
@@ -64,10 +66,13 @@ impl ProjectState {
         }
         dump.node_bytes = store.content_bytes() - dump.stamp_bytes;
         for (master, users) in store.usage_index() {
-            dump.instances_of.insert(master.clone(), sorted(users));
+            dump.instances_of.insert(master, sorted(users));
         }
         for (target, sources) in store.link_index() {
-            dump.linked_from.insert(target.clone(), sorted(sources));
+            dump.linked_from.insert(target, sorted(sources));
+        }
+        for (name, users) in store.reference_index() {
+            dump.referenced_by.insert(name, sorted(users));
         }
         dump
     }

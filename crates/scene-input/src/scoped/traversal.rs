@@ -10,7 +10,7 @@ impl<'a> ScopedSnapshot<'a> {
 
     pub fn child_count(&self, id: &str) -> usize {
         match self.view {
-            Some(view) => view.index.children.get(id).map_or(0, |ids| ids.len()),
+            Some(view) => view.source.child_count(id),
             None => self.index.children.get(id).map_or(0, Vec::len),
         }
     }
@@ -39,11 +39,9 @@ impl<'a> ScopedSnapshot<'a> {
             return Vec::new();
         };
         let mut nodes: Vec<_> = view
-            .index
-            .incoming
-            .get(frame)
+            .source
+            .linking(frame)
             .into_iter()
-            .flat_map(|ids| ids.iter())
             .filter_map(|id| view.node(id))
             .collect();
         let path = |node: &'a Node| {

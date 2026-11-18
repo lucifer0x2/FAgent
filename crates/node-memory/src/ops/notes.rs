@@ -39,13 +39,13 @@ impl Txn<'_> {
 
     fn existing_note(&self, id: &str) -> Result<Note> {
         let note = self.store.res.notes.get(id);
-        note.cloned()
+        note.map(|n| n.as_ref().clone())
             .ok_or_else(|| invalid("id", "Note does not exist"))
     }
 
     fn put(&mut self, id: &str, note: Option<Note>) {
         let existed = self.store.res.notes.contains_key(id);
-        self.store.put_note(id, note, &mut self.log);
+        self.store.put_note(id, note);
         self.touch_note(id, existed);
     }
 

@@ -40,7 +40,7 @@ impl Txn<'_> {
         checks::instance_target(self.store, &node)?;
         self.check_index(id, parent, index)?;
         let stamps = Stamps::created(self.rev);
-        let key = self.store.insert(node, parent, stamps, &mut self.log);
+        let key = self.store.insert(node, parent, stamps);
         let derived = self.store.derive(key);
         self.store.init(key, derived);
         self.touch(id, false);
