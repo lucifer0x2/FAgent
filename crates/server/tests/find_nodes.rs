@@ -1,6 +1,7 @@
 mod find_support;
 #[allow(dead_code)] // Only `sample` is used here.
 mod multi_support;
+#[allow(dead_code)]
 mod support;
 use find_support::{all_pages, find, fixture, ids};
 use serde_json::{json, Value};

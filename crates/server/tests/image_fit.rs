@@ -1,5 +1,6 @@
 //! B05: import_asset answers with apply_batch's top-level commit fields, and image `fit`
 //! keeps one vocabulary from authored props through resolvedProps to a rendered scene.
+#[allow(dead_code)]
 mod support;
 use fagent_storage::IMAGE_FITS;
 use serde_json::{json, Value};

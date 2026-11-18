@@ -3,9 +3,7 @@ use super::ScenesQuery;
 use fagent_storage::BatchRequest;
 use serde_json::json;
 
-#[allow(dead_code)]
-#[path = "reads/scoped_tree_fixture.rs"]
-mod fixture;
+use crate::reads::scoped_tree_fixture as fixture;
 
 #[test]
 fn shared_frames_match_full_frames_order_offsets_and_errors() {

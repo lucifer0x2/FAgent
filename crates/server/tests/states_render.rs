@@ -64,7 +64,13 @@ async fn states_real_png_pixels_cache_diagnostics_and_no_layout_shift() {
         bounds["height"].as_f64().unwrap(),
     );
     let mut changed = 0;
-    for (i, (a, b)) in a.chunks_exact(4).zip(b.chunks_exact(4)).enumerate() {
+    for (i, (a, b)) in a
+        .as_chunks::<4>()
+        .0
+        .iter()
+        .zip(b.as_chunks::<4>().0)
+        .enumerate()
+    {
         if a != b {
             changed += 1;
             let (px, py) = ((i % 320) as f64, (i / 320) as f64);

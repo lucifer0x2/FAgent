@@ -26,8 +26,8 @@ fn two_hundred_thousand_nodes_remain_cacheable_above_payload_limit() {
             props: json!({"width":10,"height":10,"name":"x".repeat(100)}),
         });
     }
-    // The names alone exceed payload admission; never encode/hash the snapshot.
-    assert!(200_000 * 100 > 16 * 1024 * 1024);
+    // The names alone (200k x 100 bytes, about 20 MB) exceed the 16 MiB payload
+    // admission; never encode/hash the snapshot.
     let identity = SnapshotCacheIdentity {
         project_id: snapshot.project_id.clone(),
         schema_version: snapshot.schema_version,

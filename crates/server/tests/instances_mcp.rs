@@ -148,7 +148,6 @@ async fn instances_mcp_context_reference_expand_find_and_bounds() {
         .find(|n| n["id"] == "row3")
         .unwrap();
     assert!(instance["computed"]["children"]["row3/cmpRow-q"]["lines"][0].is_array());
-    let mut args = args;
     args["instances"] = json!("expand");
     let expanded = context(&s, args).await;
     let child = expanded["nodes"]

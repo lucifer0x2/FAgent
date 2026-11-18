@@ -1,5 +1,6 @@
 //! Task 07F item 4: a commit prerenders the frames that contain its changed nodes (at most 4),
 //! not the first four frames in storage order. Observed through `scene_ready` events.
+#[allow(dead_code)]
 mod support;
 use serde_json::{json, Value};
 use std::{collections::HashSet, time::Duration};

@@ -1,4 +1,6 @@
+#[allow(dead_code)]
 mod multi_support;
+#[allow(dead_code)]
 mod support;
 use multi_support::{overflow, overflow_bytes, sample, settled, viewports, wait_context};
 use serde_json::{json, Value};

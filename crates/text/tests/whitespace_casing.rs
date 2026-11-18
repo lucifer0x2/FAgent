@@ -49,7 +49,11 @@ fn casing_has_expansions_context_and_preserves_authored_source() {
         "ος οσα ος\u{301} i\u{307}"
     );
     assert_eq!(
-        transform_text("Straße crème brûlée\nhello-world o'neil", Some("capitalize")).unwrap(),
+        transform_text(
+            "Straße crème brûlée\nhello-world o'neil",
+            Some("capitalize")
+        )
+        .unwrap(),
         "Straße Crème Brûlée\nHello-World O'neil"
     );
     assert_eq!(

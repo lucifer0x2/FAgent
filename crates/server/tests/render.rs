@@ -1,3 +1,4 @@
+#[allow(dead_code)]
 mod support;
 use serde_json::{json, Value};
 use support::{design, Server};
@@ -87,7 +88,7 @@ async fn missing_image_has_diagnosable_scene_and_strict_failure_then_recovers() 
     let job = s.wait_job(pending["jobId"].as_str().unwrap()).await;
     assert_eq!(job["status"], "ready", "{job}");
     assert!(job["error"].is_object(), "{job}");
-    assert!(job["diagnostics"].as_array().unwrap().len() > 0);
+    assert!(!job["diagnostics"].as_array().unwrap().is_empty());
     assert!(job.get("imageUrl").is_none());
     assert_eq!(
         s.get(&format!(

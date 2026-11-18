@@ -1,5 +1,6 @@
 #[allow(dead_code)]
 mod multi_support;
+#[allow(dead_code)]
 mod support;
 use multi_support::settled;
 use serde_json::{json, Value};
