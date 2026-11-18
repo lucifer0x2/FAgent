@@ -103,11 +103,12 @@ impl Memory {
         {
             return;
         }
-        // A newer revision of the same incarnation may have been loaded since this
-        // read probed: keep it rather than replacing it with an older snapshot.
+        // The same or a newer revision of this incarnation may have been loaded or
+        // committed since this read probed: keep it rather than replacing it with an
+        // equal or older snapshot (a writer may be publishing into it).
         if let Some(current) = engine.project(&id) {
             if tags.tagged(&id, current.load_id(), &identity)
-                && current.view().metadata().revision > identity.revision
+                && current.view().metadata().revision >= identity.revision
             {
                 return;
             }

@@ -133,6 +133,14 @@ impl StorageBackend for SqliteBackend {
         self.store.root.memory.read_failed()
     }
 
+    fn evict_memory(&self, project_id: &str) {
+        self.store.root.memory.evict(project_id)
+    }
+
+    fn memory_snapshot(&self, project_id: &str) -> Option<Snapshot> {
+        self.store.root.memory.snapshot(project_id)
+    }
+
     fn snapshot_with_cache_identity(
         &self,
         project: &str,

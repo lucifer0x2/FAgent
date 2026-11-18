@@ -17,6 +17,8 @@ mod reads;
 mod reads_tests;
 mod stats;
 mod writes;
+#[cfg(test)]
+mod writes_tests;
 
 use crate::{SharedSnapshot, SnapshotCacheIdentity};
 use fagent_node_memory::{MemoryConfig, NodeMemory, SystemClock};
@@ -84,6 +86,11 @@ impl Memory {
         let counters = &self.inner.counters;
         bump(&counters.read_errors);
         bump(&counters.read_fallbacks);
+    }
+
+    /// The resident project's latest published revision as a full snapshot.
+    pub fn snapshot(&self, project: &str) -> Option<crate::Snapshot> {
+        self.inner.engine.to_snapshot(project)
     }
 
     pub fn stats(&self) -> NodeMemoryStats {
