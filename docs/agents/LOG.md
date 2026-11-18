@@ -57,3 +57,8 @@ Append-only. Rules for entries:
 
 - README restructured after well-known open-source READMEs: hero GIF, tagline, quick links, gallery, one-line highlights, short quick start, agent connection, performance summary. Reference sections moved verbatim to `docs/GETTING-STARTED.md`, `docs/ARCHITECTURE.md` and `docs/PERFORMANCE.md` with relative links fixed.
 - Closes the open screenshot item above: `docs/assets/readme/` holds `viewer-frame.png`, `all-pages-board.png`, `viewer-inspector.png`, `motion-preview.gif` and `motion-orbit.gif`, captured from a demo project authored through MCP.
+
+### Task 41 — Node-memory engine — 2026-11-18
+
+- Packaged [Task 41](../../tasks/41-node-memory-engine.md) at the user's request after the commit-path review: one self-contained engine struct in `crates/node-memory` with no database knowledge, always on (no `FAGENT_NODE_MEMORY_*` flags or modes), full validation once at load (warm | cold), diff-only validation per commit with per-op checks kept, error order among end-of-batch errors allowed to change, no pre-expanded instances.
+- Open: not assigned; admission behavior for invalid stored data to confirm in phase 2.
