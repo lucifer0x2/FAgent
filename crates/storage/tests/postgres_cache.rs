@@ -52,11 +52,12 @@ fn independent_and_shared_caches_follow_another_backends_commit() {
     let mut control = sql();
     let lock = lock_entity_tables(&mut control);
     assert_eq!(p.snapshot().unwrap_err().code, "STORAGE_BUSY");
-    // Only the writer's own cache was filled by its commit.
+    // The writer's commit evicted its own cache entry: its next read loads too.
+    assert_eq!(other.snapshot(p.id()).unwrap_err().code, "STORAGE_BUSY");
+    lock.rollback().unwrap();
     let written = other.snapshot(p.id()).unwrap();
     assert_eq!(written.revision, 2);
     assert_eq!(written.nodes[0].props["name"], "New");
-    lock.rollback().unwrap();
 
     let shared = PostgresBackend::with_config(config())
         .unwrap()

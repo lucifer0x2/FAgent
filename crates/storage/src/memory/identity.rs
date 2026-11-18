@@ -73,6 +73,7 @@ impl Tags {
     }
 
     /// Whether `load` of `project` carries a tag of any incarnation.
+    #[cfg(test)]
     pub fn tags_load(&self, project: &str, load: LoadId) -> bool {
         self.lock()
             .get(project)

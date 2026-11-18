@@ -120,6 +120,8 @@ fn history_writes(
 }
 
 /// Reports what a commit based on `base` overwrote; nothing when it is current.
+/// The candidate-path oracle for `memory::guard::result` (phase 4 removes it).
+#[cfg(test)]
 pub(crate) fn fill(
     result: &mut BatchResult,
     base: Base,

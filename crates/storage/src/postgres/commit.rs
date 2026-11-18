@@ -1,11 +1,9 @@
-//! One PostgreSQL commit as the adapter runs it: the database path, then the
-//! project leaves node memory and the write-through cache is filled.
+//! One PostgreSQL commit as the adapter runs it: the batch staged in node memory
+//! and persisted on a pool worker, then the snapshot cache entry is evicted.
 use super::*;
 use crate::{BatchRequest, BatchResult};
 
 impl PostgresBackend {
-    /// Commits do not stage in memory yet: a new commit evicts the project inside
-    /// the pool job, and the next read reloads it at the new revision.
     pub(super) fn commit(
         &self,
         project: &str,
@@ -13,16 +11,31 @@ impl PostgresBackend {
         pages: Option<Vec<String>>,
     ) -> Result<BatchResult> {
         let key = project.to_owned();
-        let indexes = self.indexes.clone();
         let memory = self.memory.clone();
         let (result, committed) = self.pool.run(move |session| {
-            let memory = Some(&memory);
-            match batch::apply_mode(session, &key, request, false, pages, &indexes, memory)? {
+            match batch::apply_mode(session, &key, request, false, pages, &memory)? {
                 batch::Outcome::Commit(result, committed) => Ok((result, committed)),
                 _ => unreachable!("commit operation"),
             }
         })?;
-        self.fill(committed);
+        self.evict_cached(committed);
         Ok(result)
+    }
+
+    /// A preview stages the batch in memory and rolls it back.
+    pub(super) fn preview(
+        &self,
+        project: &str,
+        request: BatchRequest,
+        pages: Option<Vec<String>>,
+    ) -> Result<crate::DryRunResult> {
+        let key = project.to_owned();
+        let memory = self.memory.clone();
+        self.pool.run(move |session| {
+            match batch::apply_mode(session, &key, request, true, pages, &memory)? {
+                batch::Outcome::Preview(result) => Ok(result),
+                _ => unreachable!("preview operation"),
+            }
+        })
     }
 }

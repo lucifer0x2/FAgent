@@ -8,7 +8,7 @@ use serde_json::Value;
 use std::sync::Arc;
 
 impl PostgresBackend {
-    /// One import commit: the transaction, then the write-through cache fill.
+    /// One import commit: the transaction, then memory and cache evictions.
     fn import(
         &self,
         project: &str,
@@ -20,7 +20,7 @@ impl PostgresBackend {
             .pool
             .run(move |session| resources::import(session, &key, request, fields))?;
         self.memory.evict(&result.result.project_id);
-        self.fill(committed);
+        self.evict_cached(committed);
         Ok(result)
     }
     /// One worker checkout: the probe and, on a miss, the repeatable-read load.
@@ -55,11 +55,11 @@ impl PostgresBackend {
         ))
     }
 
-    /// Write-through runs on the caller after the worker reported a commit, so
-    /// assembling the snapshot never holds a pool worker. Replays carry nothing.
-    pub(super) fn fill(&self, committed: Option<Box<write_through::Committed>>) {
+    /// Drops the committed project's snapshot cache entry after the worker reported
+    /// a commit. Replays carry nothing.
+    pub(super) fn evict_cached(&self, committed: Option<Box<write_through::Committed>>) {
         if let Some(committed) = committed {
-            crate::bench_phase::time("cache.fill", || committed.fill(self.cache.as_ref()));
+            committed.evict(self.cache.as_ref());
         }
     }
 }
@@ -78,15 +78,8 @@ impl StorageBackend for PostgresBackend {
         project: &str,
         request: crate::ScopedBatchRequest,
     ) -> Result<DryRunResult> {
-        let key = project.to_owned();
         let (request, pages) = request.split();
-        let indexes = self.indexes.clone();
-        self.pool.run(move |session| {
-            match batch::apply_mode(session, &key, request, true, Some(pages), &indexes, None)? {
-                batch::Outcome::Preview(result) => Ok(result),
-                _ => unreachable!(),
-            }
-        })
+        self.preview(project, request, Some(pages))
     }
     fn viewer_auth(&self) -> Option<&dyn crate::ViewerAuthStore> {
         Some(self)
@@ -182,9 +175,6 @@ impl StorageBackend for PostgresBackend {
             .claim_cache_cleanup(&read.shared.snapshot.project_id)
         {
             self.indexes.evict(&read.shared.snapshot.project_id);
-            if let Some(cache) = &self.cache {
-                cache.evict(&read.shared.snapshot.project_id);
-            }
         }
         Ok(read)
     }
@@ -202,14 +192,7 @@ impl StorageBackend for PostgresBackend {
     }
 
     fn dry_run_batch(&self, project: &str, request: BatchRequest) -> Result<DryRunResult> {
-        let key = project.to_owned();
-        let indexes = self.indexes.clone();
-        self.pool.run(
-            move |session| match batch::apply(session, &key, request, true, &indexes)? {
-                batch::Outcome::Preview(result) => Ok(result),
-                _ => unreachable!("preview operation"),
-            },
-        )
+        self.preview(project, request, None)
     }
 
     fn commits_after(&self, project: &str, revision: u64, limit: usize) -> Result<Vec<Commit>> {

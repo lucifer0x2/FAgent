@@ -34,7 +34,7 @@ pub(super) fn build(state: &ProjectState, delta: &Delta, before: &ReadView) -> R
         .upserted
         .iter()
         .filter_map(|id| state.node(id))
-        .filter(|node| before.node(&node.id) != Some(node))
+        .filter(|node| !crate::props::same(before.node(&node.id), Some(node)))
         .cloned()
         .collect();
     let notes = delta
@@ -42,7 +42,7 @@ pub(super) fn build(state: &ProjectState, delta: &Delta, before: &ReadView) -> R
         .upserted
         .iter()
         .filter_map(|id| state.note(id))
-        .filter(|note| before.note(&note.id) != Some(note))
+        .filter(|note| !crate::props::same(before.note(&note.id), Some(note)))
         .cloned()
         .collect();
     let meta = before.metadata();
@@ -68,7 +68,7 @@ pub(super) fn build(state: &ProjectState, delta: &Delta, before: &ReadView) -> R
 
 /// The rows of `after` named by `ids` that differ from the base rows. One pass over
 /// each side, and only when some id was written.
-fn changed<'a, T: PartialEq + Clone + HasId + 'a>(
+fn changed<'a, T: PartialEq + Clone + HasId + serde::Serialize + 'a>(
     after: impl Iterator<Item = &'a T>,
     ids: &[String],
     base: impl Iterator<Item = (&'a str, &'a T)>,
@@ -80,7 +80,7 @@ fn changed<'a, T: PartialEq + Clone + HasId + 'a>(
     let base: HashMap<&str, &T> = base.filter(|(id, _)| wanted.contains(id)).collect();
     after
         .filter(|row| wanted.contains(row.id()))
-        .filter(|row| base.get(row.id()) != Some(row))
+        .filter(|row| !crate::props::same(base.get(row.id()).copied(), Some(row)))
         .cloned()
         .collect()
 }

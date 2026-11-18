@@ -16,6 +16,7 @@ mod reference_history;
 pub(crate) use history::coverage;
 pub(crate) use history::envelope_with_scopes;
 pub(crate) use history::{envelope, operations, request_value, scrub};
+#[cfg(test)]
 pub(crate) use index::BatchScope;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -81,6 +82,9 @@ pub(crate) fn edit_context_response(
         "dependenciesTruncated":dependencies.len()>100})
 }
 
+/// The candidate-path page guard, kept as the oracle for `memory::guard` until
+/// phase 4; commits run `memory::guard::check`.
+#[cfg(test)]
 pub(crate) fn check(
     before: &Snapshot,
     candidate: &Candidate,
@@ -220,6 +224,7 @@ pub(crate) fn check(
     Ok(())
 }
 
+#[cfg(test)]
 fn unsupported(message: &str) -> StorageError {
     StorageError::new("SCOPED_OPERATION_UNSUPPORTED", message)
 }

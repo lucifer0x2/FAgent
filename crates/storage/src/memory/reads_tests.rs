@@ -165,13 +165,9 @@ fn snapshots_the_engine_rejects_are_not_retried() {
 }
 
 #[test]
-fn ownership_suppresses_late_cache_fills_and_releases_on_eviction() {
-    use crate::SnapshotCache;
+fn ownership_and_cleanup_claims_follow_loads_and_evictions() {
     let memory = Memory::default();
-    let cache = SnapshotCache::new("test").with_owner(memory.clone());
     let snapshot = Arc::new(snapshot(1, None));
-    cache.put(&snapshot, 1);
-    assert!(cache.get("proj", 1, 1).is_some());
     let read = memory
         .scoped_read(
             "",
@@ -183,9 +179,6 @@ fn ownership_suppresses_late_cache_fills_and_releases_on_eviction() {
     assert!(memory.owns_project("proj"));
     assert!(memory.claim_cache_cleanup("proj"));
     assert!(!memory.claim_cache_cleanup("proj"));
-    cache.evict("proj");
-    cache.put(&snapshot, 1); // a read/commit begun before admission finishes late
-    assert!(cache.get("proj", 1, 1).is_none());
     let retained = memory
         .scoped_read(
             "",
@@ -197,8 +190,6 @@ fn ownership_suppresses_late_cache_fills_and_releases_on_eviction() {
     memory.evict("proj");
     assert!(!memory.owns_project("proj"));
     assert!(retained.shared.scoped().unwrap().node("a").is_some());
-    cache.put(&snapshot, 1);
-    assert!(cache.get("proj", 1, 1).is_some());
     memory
         .scoped_read(
             "",

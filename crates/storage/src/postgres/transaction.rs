@@ -1,5 +1,5 @@
 use super::*;
-use crate::{BatchResult, Snapshot, StorageError};
+use crate::{BatchResult, StorageError};
 use ::postgres::GenericClient;
 use serde_json::Value;
 
@@ -56,31 +56,33 @@ pub(super) struct Written {
 
 /// Writes one commit's entity rows, revision, history and replay response in
 /// a single statement inside the caller's transaction. `rows` comes from
-/// `Stored::delta`; its deleted and upserted keys are disjoint.
+/// `Stored::delta` or `memory_write::written`; its deleted and upserted keys are
+/// disjoint. `base` is the revision the commit is based on.
 #[allow(clippy::too_many_arguments)]
 pub(super) fn persist<C: GenericClient>(
     tx: &mut Db<'_, C>,
-    before: &Snapshot,
+    project: &str,
+    base: u64,
     rows: Written,
     key: &str,
     hash: &str,
     operations: &Value,
     result: &BatchResult,
     imported: Option<&Value>,
-) -> Result<Written> {
+) -> Result<()> {
     let revision = i64::try_from(result.committed_revision)
         .map_err(|_| StorageError::new("STORAGE_FAILED", "Project revision limit reached"))?;
     tx.execute(
         WRITE,
         &[
-            &before.project_id,
+            &project,
             &rows.removed_kinds,
             &rows.removed_ids,
             &rows.kinds,
             &rows.ids,
             &rows.payloads,
             &revision,
-            &(before.revision as i64),
+            &(base as i64),
             &key,
             &serde_json::to_string(operations)?,
             &serde_json::to_string(&result.changed_ids)?,
@@ -89,5 +91,5 @@ pub(super) fn persist<C: GenericClient>(
             &imported.map(serde_json::to_string).transpose()?,
         ],
     )?;
-    Ok(rows)
+    Ok(())
 }

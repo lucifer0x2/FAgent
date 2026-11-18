@@ -82,6 +82,15 @@ impl Memory {
             .retag(project.id(), project.load_id(), identity);
     }
 
+    /// Whether the resident project is past `revision`: a preview on an older
+    /// database snapshot would reload it backwards.
+    pub(crate) fn ahead_of(&self, project_id: &str, revision: u64) -> bool {
+        self.inner
+            .engine
+            .project(project_id)
+            .is_some_and(|project| project.view().metadata().revision > revision)
+    }
+
     /// Persisting a prepared batch failed. Drop the prepared batch first (it rolls
     /// back); the database may still have committed, so the project leaves memory.
     pub(crate) fn write_failed(&self, project_id: &str) {

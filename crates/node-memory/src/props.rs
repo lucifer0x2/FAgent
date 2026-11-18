@@ -134,3 +134,10 @@ mod tests {
         );
     }
 }
+
+/// Equality as stored text sees it: equal values that serialize differently
+/// (`0.0` and `-0.0`) differ, as the database's text comparison and history treat
+/// them. Value equality is checked first, so only equal values are serialized.
+pub(crate) fn same<T: PartialEq + serde::Serialize>(a: Option<&T>, b: Option<&T>) -> bool {
+    a == b && serde_json::to_vec(&a).ok() == serde_json::to_vec(&b).ok()
+}

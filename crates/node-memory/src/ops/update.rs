@@ -23,11 +23,11 @@ impl Txn<'_> {
         // leaves props and stamps alone but still counts as a changed id.
         let written: Vec<bool> = patch
             .keys()
-            .map(|name| next.get(name) != node.props.get(name))
+            .map(|name| !props::same(next.get(name), node.props.get(name)))
             .collect();
         let was_master = is_master(&node.kind, &node.props);
         let now_master = is_master(&node.kind, &next);
-        if next != node.props {
+        if !props::same(Some(&next), Some(&node.props)) {
             self.store.set_props(key, next, &mut self.log);
         }
         checks::instance_target(self.store, self.store.node(key))?;

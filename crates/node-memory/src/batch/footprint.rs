@@ -19,7 +19,7 @@ pub(super) fn build<'m>(
     }
     for id in ids {
         let (old, new) = (before.node(id), after.node(id));
-        if old != new {
+        if !crate::props::same(old, new) {
             keys.insert(format!("node:{id}"));
             // Appending a page may compact other pages' sort keys; with order
             // preserved (no wildcard) their content and guards are unaffected.
@@ -33,7 +33,7 @@ pub(super) fn build<'m>(
             }
         }
         let (old, new) = (before.note(id), after.note(id));
-        if old != new {
+        if !crate::props::same(old, new) {
             keys.insert(format!("note:{id}"));
             for (note, view) in [(old, before), (new, after)] {
                 if let Some(page) = note.and_then(|n| view.page(&n.node_id)) {
@@ -55,7 +55,7 @@ pub(super) fn build<'m>(
 }
 
 /// Adds `kind:id` for every written resource whose row differs between the views.
-fn resources<'m, T: PartialEq + 'm>(
+fn resources<'m, T: PartialEq + serde::Serialize + 'm>(
     ids: &[String],
     kind: &str,
     keys: &mut BTreeSet<String>,
@@ -63,7 +63,7 @@ fn resources<'m, T: PartialEq + 'm>(
 ) {
     for id in ids {
         let (old, new) = pair(id);
-        if old != new {
+        if !crate::props::same(old, new) {
             keys.insert(format!("{kind}:{id}"));
         }
     }
@@ -80,7 +80,10 @@ fn only_page_sort_key(old: Option<&Node>, new: Option<&Node>) -> bool {
 fn same_page(old: Option<&Node>, new: Option<&Node>) -> bool {
     match (old, new) {
         (Some(a), Some(b)) => {
-            a.id == b.id && a.kind == b.kind && a.parent_id == b.parent_id && a.props == b.props
+            a.id == b.id
+                && a.kind == b.kind
+                && a.parent_id == b.parent_id
+                && crate::props::same(Some(&a.props), Some(&b.props))
         }
         _ => false,
     }

@@ -96,8 +96,9 @@ impl PageIndex {
     }
 }
 
-/// Reused by scoped checks and durable history. Changed IDs include apply cascades
-/// and pruned links; resource import callers retain the full-diff entry point.
+/// The candidate path's page indexes and footprint, kept as the oracle for
+/// `memory::guard` until phase 4. Changed IDs include apply cascades and pruned links.
+#[cfg(test)]
 pub(crate) struct BatchScope {
     pub before: Arc<PageIndex>,
     pub after: Arc<PageIndex>,
@@ -106,6 +107,7 @@ pub(crate) struct BatchScope {
     pub new_indexes: Arc<crate::RevisionIndexes>,
 }
 
+#[cfg(test)]
 impl BatchScope {
     #[cfg(test)]
     pub fn new(before: &Snapshot, after: &Candidate, changed: &[String]) -> Result<Self> {

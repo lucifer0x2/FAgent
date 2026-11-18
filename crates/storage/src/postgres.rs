@@ -73,7 +73,7 @@ impl PostgresBackend {
                 "Snapshot cache namespace does not match this database",
             ));
         }
-        self.cache = Some(cache.with_owner(self.memory.clone()));
+        self.cache = Some(cache);
         Ok(self)
     }
 }

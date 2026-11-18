@@ -53,6 +53,7 @@ impl Default for Memory {
 impl Memory {
     /// Whether a tagged load of `project` is resident. Cache policy only, never
     /// authority to serve data: reads still require a fresh database identity probe.
+    #[cfg(test)]
     pub fn owns_project(&self, project: &str) -> bool {
         let inner = &self.inner;
         inner

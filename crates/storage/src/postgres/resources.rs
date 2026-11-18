@@ -57,8 +57,8 @@ pub(super) fn import(
     if project.meta.revision != request.expected_revision {
         return Err(StorageError::conflict(project.meta.revision));
     }
-    let identity = (project.generation, project.namespace.clone());
-    let (before, mut binaries, stored) = snapshot::entities_for_write(&mut db, project)?;
+    let namespace = project.namespace.clone();
+    let (before, _, stored) = snapshot::entities_for_write(&mut db, project)?;
     let mut candidate = Candidate::from_snapshot(&before);
     let changed_ids = asset_import::apply(&mut candidate, &request, &assets, fields)?;
     candidate.validate()?;
@@ -81,7 +81,6 @@ pub(super) fn import(
         } else {
             db.execute(INSERT_BINARY, &[&before.project_id, content_hash, &bytes])?;
         }
-        binaries.insert(content_hash.clone());
     }
     let result = BatchResult {
         project_id: before.project_id.clone(),
@@ -103,9 +102,10 @@ pub(super) fn import(
         [one] => serde_json::to_value(one)?,
         all => serde_json::to_value(all)?,
     };
-    let written = transaction::persist(
+    transaction::persist(
         &mut db,
-        &before,
+        &before.project_id,
+        before.revision,
         rows,
         &request.idempotency_key,
         &hash,
@@ -114,8 +114,7 @@ pub(super) fn import(
         Some(&manifest),
     )?;
     tx.commit().map_err(sql)?;
-    let revision = result.committed_revision;
-    let committed = Committed::new(before, Some(binaries), written, revision, identity);
+    let committed = Committed::new(before.project_id, namespace);
     Ok((
         ImportAssetsResult { assets, result },
         Some(Box::new(committed)),
