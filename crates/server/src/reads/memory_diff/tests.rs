@@ -3,7 +3,7 @@
 use super::fixture::{generate, sqlite_pair};
 use super::queries::{edges, edits, inner, roots, Caps, Targets};
 use super::{timing, Pair};
-use fagent_storage::{node_memory_shadow_stats, NodeKind, Snapshot};
+use fagent_storage::{NodeKind, Snapshot};
 use serde_json::{json, Value};
 
 async fn run(pair: &mut Pair, snapshot: &Snapshot, caps: Caps, enrich: Vec<Value>) {
@@ -69,7 +69,7 @@ async fn committed_fixture_reads_from_memory_match_today() {
     let temp = tempfile::tempdir().unwrap();
     let (on, off, id) = sqlite_pair(temp.path(), "fixture", &snapshot);
     let mut pair = Pair::new(on, off, &id);
-    let start = node_memory_shadow_stats();
+    let start = pair.on.store.memory_stats();
     let caps = Caps {
         nested: 50,
         instances: 50,
@@ -98,7 +98,7 @@ async fn generated_5k_reads_from_memory_match_today() {
     let snapshot = generate(5_000, temp.path());
     let (on, off, id) = sqlite_pair(temp.path(), "gen5k", &snapshot);
     let mut pair = Pair::new(on, off, &id);
-    let start = node_memory_shadow_stats();
+    let start = pair.on.store.memory_stats();
     let caps = Caps {
         nested: 60,
         instances: 60,

@@ -99,18 +99,11 @@ fn scoped_prepared_input_keys_resources_and_errors_match_full_reference() {
 
 #[test]
 fn i5_persistent_preparation_preserves_revision_resources_and_note_intent() {
-    use fagent_storage::{ReadsMode, ShadowMode, Storage, Store, WritesMode};
+    use fagent_storage::{Storage, Store};
     let (root, store, id) = fixture::fixture();
     let full = store.shared_snapshot(&id).unwrap();
     drop(store);
-    let store: Storage = Store::open_with_node_memory_writes(
-        root.path(),
-        ShadowMode::Off,
-        ReadsMode::On,
-        WritesMode::Off,
-    )
-    .unwrap()
-    .into();
+    let store: Storage = Store::open(root.path()).unwrap().into();
     store.scoped_snapshot(&id, "frame").unwrap();
     let memory = store.scoped_snapshot(&id, "frame").unwrap();
     assert!(memory.from_memory);

@@ -8,7 +8,7 @@ use super::fixture::generate;
 use super::queries::{Caps, Targets};
 use super::realdata::storage;
 use super::{timing, Pair};
-use fagent_storage::{ReadsMode, ShadowMode, Snapshot};
+use fagent_storage::Snapshot;
 use serde_json::json;
 
 fn seed(url: &str, project: &str, snapshot: &Snapshot) {
@@ -68,7 +68,7 @@ async fn generated_200k_frame_context_timing_postgres() {
     let nodes = std::env::var("MEMORY_DIFF_NODES").map_or(200_000, |v| v.parse().unwrap());
     let temp = tempfile::tempdir().unwrap();
     let snapshot = generate(nodes, temp.path());
-    let setup = storage(&url, ReadsMode::Off, ShadowMode::Off);
+    let setup = storage(&url);
     let id = setup
         .create_project("gen200k", "Generated")
         .unwrap()
@@ -84,8 +84,8 @@ async fn generated_200k_frame_context_timing_postgres() {
         },
     );
     let frame = timing::normal_root(&snapshot, &targets.plain);
-    let on = storage(&url, ReadsMode::On, ShadowMode::On);
-    let mut pair = Pair::new(on, storage(&url, ReadsMode::Off, ShadowMode::Off), &id);
+    let on = storage(&url);
+    let mut pair = Pair::new(on, storage(&url), &id);
     let mut report = timing::frame_context(&mut pair, &frame).await;
     report["afterWrite"] = timing::after_writes(&mut pair, &frame, true).await;
     let summary = json!({"authoredNodes": snapshot.nodes.len(), "timing": report});

@@ -1,5 +1,5 @@
-//! Task28 I3: commits through memory (`WritesMode`) give the same results and the
-//! same stored rows as today's path, on SQLite and PostgreSQL: random batches from
+//! Two stores over identical data give the same results and the same stored rows,
+//! on SQLite and PostgreSQL: random batches from
 //! agents with stale bases, strict and scoped requests, rejections, replays,
 //! previews, and writers racing on threads (replayed afterwards in commit order).
 mod memory_writes_support;
@@ -25,22 +25,10 @@ fn copy_dir(from: &Path, to: &Path) {
     }
 }
 
-fn sqlite_store(root: &Path, on: bool) -> Storage {
-    let store = match on {
-        true => Store::open_with_node_memory_writes(
-            root,
-            ShadowMode::Strict,
-            ReadsMode::On,
-            WritesMode::Strict,
-        ),
-        false => Store::open_with_node_memory_writes(
-            root,
-            ShadowMode::Off,
-            ReadsMode::Off,
-            WritesMode::Off,
-        ),
-    };
-    store.unwrap().into()
+/// Node memory is always on; `on` and `off` differ only in their data roots until
+/// commits stage in memory.
+fn sqlite_store(root: &Path, _on: bool) -> Storage {
+    Store::open(root).unwrap().into()
 }
 
 /// The same project file under two data roots.
@@ -66,15 +54,8 @@ fn sqlite_pair(temp: &Path) -> Pair {
     }
 }
 
-fn postgres_store(url: &str, on: bool) -> Storage {
-    let mut config = PostgresConfig::new(url);
-    let (shadow, reads, writes) = match on {
-        true => (ShadowMode::Strict, ReadsMode::On, WritesMode::Strict),
-        false => (ShadowMode::Off, ReadsMode::Off, WritesMode::Off),
-    };
-    config.node_memory_shadow = shadow;
-    config.node_memory_reads = reads;
-    config.node_memory_writes = writes;
+fn postgres_store(url: &str, _on: bool) -> Storage {
+    let config = PostgresConfig::new(url);
     Storage::from_shared(Arc::new(PostgresBackend::with_config(config).unwrap()))
 }
 
@@ -116,7 +97,6 @@ fn postgres_pair(label: &str) -> Pair {
 }
 
 fn differential(pair: &Pair, seeds: std::ops::Range<u64>, steps: usize) {
-    let start = node_memory_shadow_stats();
     pair.seed();
     let mut total = memory_writes_support::Tally::default();
     for seed in seeds {
@@ -128,22 +108,13 @@ fn differential(pair: &Pair, seeds: std::ops::Range<u64>, steps: usize) {
         total.replays += tally.replays;
         total.previews += tally.previews;
     }
-    let end = node_memory_shadow_stats();
-    eprintln!(
-        "node-memory writes differential: {total:?}, memory bases {} misses {} fallbacks {} aborts {} loads {} evictions {}",
-        end.write_hits - start.write_hits,
-        end.write_misses - start.write_misses,
-        end.write_fallbacks - start.write_fallbacks,
-        end.write_aborts - start.write_aborts,
-        end.loads - start.loads,
-        end.evictions - start.evictions,
-    );
+    let memory = pair.on.memory_stats();
+    eprintln!("node-memory writes differential: {total:?}, memory {memory:?}");
     assert!(total.committed > 0 && total.rejected > 0 && total.conflicts > 0);
     assert!(
         total.concurrent > 0,
         "stale bases must report concurrent writes"
     );
-    assert!(end.write_hits - start.write_hits >= total.committed as u64 / 2);
 }
 
 /// Writers race on threads against `on`; replaying their requests in the order

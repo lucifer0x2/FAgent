@@ -5,7 +5,7 @@ pub(crate) struct Root {
     pub(crate) projects: Mutex<BTreeMap<String, Weak<Project>>>,
     pub(crate) viewer_db: Mutex<Option<Connection>>,
     pub(crate) indexes: crate::revision_indexes::IndexCache,
-    pub(crate) shadow: crate::shadow::Shadow,
+    pub(crate) memory: crate::memory::Memory,
 }
 impl Root {
     pub(crate) fn check_path(&self) -> Result<()> {
@@ -26,30 +26,6 @@ pub struct Store {
 impl Store {
     /// Explicit root selection. Does not create any project or touch a default home.
     pub fn open(data_root: impl AsRef<Path>) -> Result<Self> {
-        Self::open_with_shadow(data_root, crate::ShadowMode::from_env())
-    }
-    /// [`Self::open`] with an explicit Task28 node-memory shadow mode.
-    pub fn open_with_shadow(
-        data_root: impl AsRef<Path>,
-        shadow: crate::ShadowMode,
-    ) -> Result<Self> {
-        Self::open_with_node_memory(data_root, shadow, crate::ReadsMode::from_env())
-    }
-    /// [`Self::open`] with explicit Task28 shadow and memory-read modes.
-    pub fn open_with_node_memory(
-        data_root: impl AsRef<Path>,
-        shadow: crate::ShadowMode,
-        reads: crate::ReadsMode,
-    ) -> Result<Self> {
-        Self::open_with_node_memory_writes(data_root, shadow, reads, crate::WritesMode::from_env())
-    }
-    /// [`Self::open`] with explicit Task28 shadow, memory-read and memory-write modes.
-    pub fn open_with_node_memory_writes(
-        data_root: impl AsRef<Path>,
-        shadow: crate::ShadowMode,
-        reads: crate::ReadsMode,
-        writes: crate::WritesMode,
-    ) -> Result<Self> {
         version_check()?;
         fs::create_dir_all(data_root.as_ref())?;
         let path = fs::canonicalize(data_root.as_ref())?;
@@ -64,15 +40,15 @@ impl Store {
         lock.try_lock_exclusive().map_err(|_| {
             StorageError::new("DATA_ROOT_LOCKED", "Another backend owns this data root")
         })?;
-        let shadow = crate::shadow::Shadow::new(shadow, reads, writes);
+        let memory = crate::memory::Memory::default();
         Ok(Self {
             root: Arc::new(Root {
                 path,
                 _lock: lock,
                 projects: Mutex::new(BTreeMap::new()),
                 viewer_db: Mutex::new(None),
-                indexes: crate::revision_indexes::IndexCache::default().with_owner(shadow.clone()),
-                shadow,
+                indexes: crate::revision_indexes::IndexCache::default().with_owner(memory.clone()),
+                memory,
             }),
         })
     }
@@ -196,7 +172,7 @@ impl Store {
         }
         // A (re)opened file may hold rows written outside this process's batches:
         // migrations, bundle import or restore.
-        self.root.shadow.evict(&meta.project_id);
+        self.root.memory.evict(&meta.project_id);
         let project = Arc::new(Project {
             root: self.root.clone(),
             file_identity: project::file_identity(&path.join("db.sql"))?,

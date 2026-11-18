@@ -110,14 +110,14 @@ fn exercise(storage: &Storage, p: &ProjectHandle) {
 
 #[test]
 fn sqlite_commits_reads_previews_replays_and_old_readers_share_revision_indexes() {
-    let (_temp, storage, p) = sqlite_legacy("revision-index");
+    let (_temp, storage, p) = sqlite("revision-index");
     exercise(&storage, &p);
 }
 
 #[test]
 #[ignore = "fresh temporary PostgreSQL via scripts/task19-check.sh"]
 fn postgres_commits_reads_previews_replays_and_old_readers_share_revision_indexes() {
-    let (backend, _) = postgres_support::cached_legacy();
+    let (backend, _) = postgres_support::cached();
     let storage = Storage::new(backend);
     let p = postgres_support::project(&storage, "revision-index");
     exercise(&storage, &p);

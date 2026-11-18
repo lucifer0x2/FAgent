@@ -54,21 +54,6 @@ pub(super) struct Written {
     pub removed_ids: Vec<String>,
 }
 
-impl Written {
-    /// The rows for the node-memory shadow, parsed from the stored text.
-    pub fn shadow_rows(&self) -> crate::shadow::Rows {
-        let mut rows = crate::shadow::Rows::default();
-        let upserts = self.kinds.iter().zip(&self.ids).zip(&self.payloads);
-        for ((kind, id), text) in upserts {
-            rows.upsert_text(kind, id, text);
-        }
-        for (kind, id) in self.removed_kinds.iter().zip(&self.removed_ids) {
-            rows.delete_text(kind, id);
-        }
-        rows
-    }
-}
-
 /// Writes one commit's entity rows, revision, history and replay response in
 /// a single statement inside the caller's transaction. `rows` comes from
 /// `Stored::delta`; its deleted and upserted keys are disjoint.

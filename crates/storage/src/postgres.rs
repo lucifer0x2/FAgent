@@ -17,7 +17,6 @@ mod projects;
 mod resources;
 mod schema;
 mod schema_name;
-mod shadow_hook;
 mod snapshot;
 mod statements;
 #[cfg(test)]
@@ -38,7 +37,7 @@ pub struct PostgresBackend {
     namespace: Arc<str>,
     cache: Option<SnapshotCache>,
     indexes: crate::revision_indexes::IndexCache,
-    shadow: crate::shadow::Shadow,
+    memory: crate::memory::Memory,
 }
 
 impl PostgresBackend {
@@ -47,11 +46,7 @@ impl PostgresBackend {
     }
 
     pub fn with_config(config: PostgresConfig) -> Result<Self> {
-        let shadow = crate::shadow::Shadow::new(
-            config.node_memory_shadow,
-            config.node_memory_reads,
-            config.node_memory_writes,
-        );
+        let memory = crate::memory::Memory::default();
         let runtime_schema = config.schema.clone();
         let pool = Arc::new(pool::Pool::new(config)?);
         let namespace =
@@ -60,8 +55,8 @@ impl PostgresBackend {
             pool,
             namespace: namespace.into(),
             cache: None,
-            indexes: crate::revision_indexes::IndexCache::default().with_owner(shadow.clone()),
-            shadow,
+            indexes: crate::revision_indexes::IndexCache::default().with_owner(memory.clone()),
+            memory,
         })
     }
 
@@ -78,7 +73,7 @@ impl PostgresBackend {
                 "Snapshot cache namespace does not match this database",
             ));
         }
-        self.cache = Some(cache.with_owner(self.shadow.clone()));
+        self.cache = Some(cache.with_owner(self.memory.clone()));
         Ok(self)
     }
 }

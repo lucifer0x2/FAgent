@@ -8,6 +8,7 @@ mod instances;
 mod memory;
 #[cfg(test)]
 mod memory_diff;
+#[cfg(test)]
 mod memory_verify;
 mod navigation;
 mod notes;
@@ -84,6 +85,18 @@ enum NodeFormat {
 }
 
 pub async fn read(state: &AppState, name: &str, args: Value) -> Result<Value> {
+    let req = request(name, args)?;
+    memory::read(state, name, req).await
+}
+
+/// [`read`] on the database snapshot only, never on a node-memory view.
+#[cfg(test)]
+pub(crate) async fn read_database(state: &AppState, name: &str, args: Value) -> Result<Value> {
+    let req = request(name, args)?;
+    memory::read_database(state, name, req).await
+}
+
+fn request(name: &str, args: Value) -> Result<ReadRequest> {
     let mut req: ReadRequest = serde_json::from_value(args)?;
     if req.node_format.is_some() && name != "get_design_context" {
         return Err(crate::ApiError::invalid(
@@ -94,7 +107,7 @@ pub async fn read(state: &AppState, name: &str, args: Value) -> Result<Value> {
     req.notes = req.notes.filter(|f| *f != notes::Filter::Open);
     req.instances = req.instances.filter(|mode| mode != "reference");
     req.states_mode = req.states_mode.filter(|mode| mode != "none");
-    memory::read(state, name, req).await
+    Ok(req)
 }
 
 fn list(

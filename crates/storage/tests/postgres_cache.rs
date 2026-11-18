@@ -6,7 +6,7 @@ use std::sync::Barrier;
 #[test]
 #[ignore = "requires fresh PostgreSQL via scripts/task19-check.sh"]
 fn hot_read_uses_canonical_identity_and_skips_locked_entity_tables() {
-    let (backend, _) = cached_legacy();
+    let (backend, _) = cached();
     let storage = Storage::new(backend);
     let p = project(&storage, "hot");
     let mut seed = page("Cold\0then hot");
@@ -25,7 +25,7 @@ fn hot_read_uses_canonical_identity_and_skips_locked_entity_tables() {
         hot.tokens[0].value.as_f64().unwrap().to_bits(),
         (-0.0_f64).to_bits()
     );
-    let (empty, _) = cached_legacy();
+    let (empty, _) = cached();
     let error = empty.snapshot(p.id()).unwrap_err();
     assert_eq!(error.code, "STORAGE_BUSY");
     lock.rollback().unwrap();
@@ -35,14 +35,14 @@ fn hot_read_uses_canonical_identity_and_skips_locked_entity_tables() {
 #[test]
 #[ignore = "requires fresh PostgreSQL via scripts/task19-check.sh"]
 fn independent_and_shared_caches_follow_another_backends_commit() {
-    let (backend, cache) = cached_legacy();
+    let (backend, cache) = cached();
     let storage = Storage::new(backend);
     let p = project(&storage, "cache-race");
     p.apply_batch(request(p.id(), 0, "seed", page("Old")))
         .unwrap();
     let old = p.snapshot().unwrap();
 
-    let (other, _) = cached_legacy();
+    let (other, _) = cached();
     assert_eq!(other.snapshot(p.id()).unwrap(), old);
     let write = other
         .apply_batch(p.id(), request(p.id(), 1, "new", rename("New")))
@@ -58,7 +58,7 @@ fn independent_and_shared_caches_follow_another_backends_commit() {
     assert_eq!(written.nodes[0].props["name"], "New");
     lock.rollback().unwrap();
 
-    let shared = PostgresBackend::with_config(legacy_config())
+    let shared = PostgresBackend::with_config(config())
         .unwrap()
         .with_cache(cache)
         .unwrap();
@@ -93,7 +93,7 @@ fn independent_and_shared_caches_follow_another_backends_commit() {
 #[test]
 #[ignore = "requires fresh PostgreSQL via scripts/task19-check.sh"]
 fn project_deletion_and_recreation_block_a_warm_previous_generation() {
-    let (backend, _) = cached_legacy();
+    let (backend, _) = cached();
     let storage = Storage::new(backend);
     let p = project(&storage, "generation");
     let old = p.snapshot().unwrap();

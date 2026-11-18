@@ -61,18 +61,11 @@ fn shared_frames_match_full_frames_order_offsets_and_errors() {
 
 #[test]
 fn i5_hot_scene_fonts_and_prerender_consumers_match_full() {
-    use fagent_storage::{ReadsMode, ShadowMode, Storage, Store, WritesMode};
+    use fagent_storage::{Storage, Store};
     let (root, storage, id) = fixture::fixture();
     let full = storage.shared_snapshot(&id).unwrap();
     drop(storage);
-    let hot: Storage = Store::open_with_node_memory_writes(
-        root.path(),
-        ShadowMode::Off,
-        ReadsMode::On,
-        WritesMode::Off,
-    )
-    .unwrap()
-    .into();
+    let hot: Storage = Store::open(root.path()).unwrap().into();
     hot.reader_snapshot(&id).unwrap();
     let memory = hot.reader_snapshot(&id).unwrap();
     assert!(memory.from_memory && memory.shared.snapshot.nodes.is_empty());

@@ -1,32 +1,21 @@
 //! Real-data differential and timing on a disposable restore of a native backup
-//! (never the live cluster). Both states share the restored database: memory reads
-//! on (strict shadow) and off, each with its own snapshot cache as in production.
-//! Commits alternate between the two, so memory also sees writes it did not mirror
-//! (another writer) and must catch up through the freshness probe.
+//! (never the live cluster). Both states share the restored database, each with its
+//! own node memory and snapshot cache as in production; `off` reads the database
+//! snapshot only. Commits alternate between the two, so `on` also sees writes of
+//! another writer and must catch up through the freshness probe.
 //!
 //! `MEMORY_DIFF_REALDATA_URL='host=127.0.0.1 port=<port> dbname=<db>' cargo test \
 //!   --release -p fagent-server --lib memory_diff::realdata -- --ignored --nocapture`
 use super::queries::{edges, edits, inner, roots, Caps, Targets};
 use super::{timing, Pair};
-use fagent_storage::{
-    node_memory_shadow_stats, PostgresBackend, PostgresConfig, ReadsMode, ShadowMode,
-    SnapshotCache, Storage,
-};
+use fagent_storage::{PostgresBackend, PostgresConfig, SnapshotCache, Storage};
 use serde_json::json;
 
-pub(super) fn storage(url: &str, reads: ReadsMode, shadow: ShadowMode) -> Storage {
-    let mut config = PostgresConfig::new(url);
-    config.node_memory_shadow = shadow;
-    config.node_memory_reads = reads;
+pub(super) fn storage(url: &str) -> Storage {
+    let config = PostgresConfig::new(url);
     let backend = PostgresBackend::with_config(config).unwrap();
     let cache = SnapshotCache::new(backend.cache_namespace());
     Storage::new(backend.with_cache(cache).unwrap())
-}
-
-fn pair(url: &str, project: &str) -> Pair {
-    let on = storage(url, ReadsMode::On, ShadowMode::Strict);
-    let off = storage(url, ReadsMode::Off, ShadowMode::Off);
-    Pair::new(on, off, project)
 }
 
 #[tokio::test(flavor = "multi_thread")]
@@ -34,17 +23,12 @@ fn pair(url: &str, project: &str) -> Pair {
 async fn real_projects_read_from_memory_match_today() {
     let url = std::env::var("MEMORY_DIFF_REALDATA_URL").expect("MEMORY_DIFF_REALDATA_URL");
     assert!(!url.contains("2703"), "never the live cluster");
-    let start = node_memory_shadow_stats();
-    let projects = storage(&url, ReadsMode::Off, ShadowMode::Off)
-        .list_projects()
-        .unwrap();
-    let mut total = Pair::new(
-        storage(&url, ReadsMode::Off, ShadowMode::Off),
-        storage(&url, ReadsMode::Off, ShadowMode::Off),
-        "",
-    );
+    let (on, off) = (storage(&url), storage(&url));
+    let start = on.memory_stats();
+    let projects = off.list_projects().unwrap();
+    let mut total = Pair::new(on.clone(), off.clone(), "");
     for (i, meta) in projects.iter().enumerate() {
-        let mut pair = pair(&url, &meta.project_id);
+        let mut pair = Pair::new(on.clone(), off.clone(), &meta.project_id);
         let snapshot = pair.off.store.snapshot(&meta.project_id).unwrap();
         let caps = Caps {
             nested: 80,

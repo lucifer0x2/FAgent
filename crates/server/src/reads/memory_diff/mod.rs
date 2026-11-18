@@ -1,6 +1,6 @@
-//! Task28 I2 differential: every read through a state with memory reads on must
-//! equal, byte for byte, the same read through a state with them off, on the same
-//! data. Reports counts and at most the first differing scopes and JSON paths.
+//! Node-memory read differential: every read through `on` (memory views when
+//! current) must equal, byte for byte, the same read through `off` on the database
+//! snapshot only, on the same data. Reports counts and at most the first differing scopes and JSON paths.
 mod fixture;
 mod pg_large;
 mod queries;
@@ -10,10 +10,11 @@ mod timing;
 
 use super::memory_verify::first_difference;
 use crate::state::{AppState, Config};
-use fagent_storage::{BatchRequest, NodeMemoryShadowStats, Storage};
+use fagent_storage::{BatchRequest, NodeMemoryStats, Storage};
 use serde_json::{json, Value};
 
-/// Two application states over identical data: memory reads on and off.
+/// Two application states over identical data: `on` reads through memory, `off`
+/// reads the database snapshot only.
 pub(super) struct Pair {
     pub on: AppState,
     pub off: AppState,
@@ -38,6 +39,12 @@ async fn call(state: &AppState, name: &str, args: &Value) -> Value {
         .unwrap_or_else(|e| e.value())
 }
 
+pub(super) async fn call_database(state: &AppState, name: &str, args: &Value) -> Value {
+    super::read_database(state, name, args.clone())
+        .await
+        .unwrap_or_else(|e| e.value())
+}
+
 impl Pair {
     pub fn new(on: Storage, off: Storage, project: &str) -> Self {
         Self {
@@ -54,7 +61,7 @@ impl Pair {
     pub async fn one(&mut self, name: &str, mut args: Value) -> Value {
         args["projectId"] = json!(self.project);
         let on = call(&self.on, name, &args).await;
-        let off = call(&self.off, name, &args).await;
+        let off = call_database(&self.off, name, &args).await;
         self.compared += 1;
         if serde_json::to_vec(&on).unwrap() != serde_json::to_vec(&off).unwrap() {
             let scope = args["frameId"].as_str().or(args["nodeId"].as_str());
@@ -109,8 +116,9 @@ impl Pair {
         committed[0]
     }
 
-    pub fn assert_identical(&self, label: &str, start: NodeMemoryShadowStats) {
-        let end = fagent_storage::node_memory_shadow_stats();
+    /// `start` is `on`'s counters before the run.
+    pub fn assert_identical(&self, label: &str, start: NodeMemoryStats) {
+        let end = self.on.store.memory_stats();
         let summary = json!({
             "compared": self.compared, "differences": self.differences.len(),
             "readHits": end.read_hits - start.read_hits,
@@ -118,11 +126,9 @@ impl Pair {
             "readLoads": end.read_loads - start.read_loads,
             "readReloads": end.read_reloads - start.read_reloads,
             "readErrors": end.read_errors - start.read_errors,
-            "shadowMismatches": end.mismatches - start.mismatches,
         });
         println!("memory-diff {label} {summary}");
         assert!(self.differences.is_empty(), "{:?}", self.differences);
-        assert_eq!(end.mismatches, start.mismatches);
         assert!(end.read_hits > start.read_hits, "memory served no read");
     }
 }

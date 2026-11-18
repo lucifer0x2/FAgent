@@ -2,15 +2,9 @@ use super::*;
 #[test]
 fn actual_sqlite_commit_reuses_topology_and_lazy_read_dependencies() {
     let temp = tempfile::tempdir().unwrap();
-    // The legacy revision-index cache serves only projects that are not HOT.
-    let storage: Storage = Store::open_with_node_memory_writes(
-        temp.path(),
-        crate::ShadowMode::Off,
-        crate::ReadsMode::Off,
-        crate::WritesMode::Off,
-    )
-    .unwrap()
-    .into();
+    // The revision-index cache serves projects memory does not hold; shared
+    // snapshots never load memory.
+    let storage: Storage = Store::open(temp.path()).unwrap().into();
     let p = storage.create_project("topology", "Topology").unwrap();
     let mut request = BatchRequest { project_id:p.id().into(), expected_revision: Some(0), strict: false, idempotency_key:"seed".into(), operations:serde_json::from_value(json!([
         {"op":"create_node","id":"page","kind":"page","parentId":null,"props":{}},

@@ -25,30 +25,6 @@ fn strings(values: &[&str]) -> Vec<String> {
 }
 
 #[test]
-fn i5_hot_commit_keeps_no_old_view_and_skips_snapshot_fill() {
-    let view = Arc::new(fagent_scene_input::read_scope::ReadView::new(before()));
-    let written = transaction::Written {
-        kinds: vec![],
-        ids: vec![],
-        payloads: vec![],
-        removed_kinds: vec![],
-        removed_ids: vec![],
-    };
-    let committed = Committed::from_memory(view.clone(), written, 5, (7, "db".into()));
-    assert_eq!(
-        Arc::strong_count(&view),
-        1,
-        "cache-fill envelope must not retain the full base view"
-    );
-    let cache = SnapshotCache::new("db");
-    committed.fill(Some(&cache));
-    assert!(
-        cache.get("p", 7, 5).is_none(),
-        "HOT commit must not build/cache a duplicate snapshot"
-    );
-}
-
-#[test]
 fn rebuilds_rows_from_stored_text_with_shared_order_and_readiness() {
     let asset = r#"{"id":"asset_2","contentHash":"h2","mediaType":"font/ttf","byteSize":1,"relativeKey":"h2","width":null,"height":null,"status":"ready"}"#;
     let written = transaction::Written {

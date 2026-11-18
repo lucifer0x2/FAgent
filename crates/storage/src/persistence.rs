@@ -1,19 +1,5 @@
-use crate::shadow::{Kind, Rows};
 use crate::*;
 mod memory;
-
-/// Records a written row for the shadow only when it is on.
-fn upserted<T: serde::Serialize>(sink: &mut Option<&mut Rows>, kind: Kind, id: &str, row: &T) {
-    if let Some(rows) = sink {
-        rows.upsert(kind, id, row);
-    }
-}
-
-fn deleted(sink: &mut Option<&mut Rows>, kind: Kind, id: &str) {
-    if let Some(rows) = sink {
-        rows.delete(kind, id);
-    }
-}
 
 impl Project {
     #[allow(clippy::too_many_arguments)]
@@ -27,14 +13,12 @@ impl Project {
         ops: &Value,
         result: &BatchResult,
         metrics: &mut BatchMetrics,
-        mut sink: Option<&mut Rows>,
     ) -> Result<()> {
         let time = Instant::now();
         let tx = begin(conn, before.revision)?;
         let old = Candidate::from_snapshot(before);
         for id in old.nodes.keys().filter(|id| !after.nodes.contains_key(*id)) {
             tx.execute("DELETE FROM nodes WHERE id=?1", [id])?;
-            deleted(&mut sink, Kind::Node, id);
         }
         {
             let mut stmt=tx.prepare_cached("INSERT INTO nodes(id,parent_id,sort_key,kind,props_json) VALUES(?1,?2,?3,?4,?5) ON CONFLICT(id) DO UPDATE SET parent_id=excluded.parent_id,sort_key=excluded.sort_key,kind=excluded.kind,props_json=excluded.props_json")?;
@@ -50,7 +34,6 @@ impl Project {
                     n.kind.as_str(),
                     serde_json::to_string(&n.props)?
                 ])?;
-                upserted(&mut sink, Kind::Node, &n.id, n);
             }
         }
         for t in after
@@ -59,7 +42,6 @@ impl Project {
             .filter(|t| old.tokens.get(&t.id) != Some(*t))
         {
             tx.execute("INSERT INTO tokens(id,data_json) VALUES(?1,?2) ON CONFLICT(id) DO UPDATE SET data_json=excluded.data_json",params![t.id,serde_json::to_string(t)?])?;
-            upserted(&mut sink, Kind::Token, &t.id, t);
         }
         for s in after
             .styles
@@ -67,7 +49,6 @@ impl Project {
             .filter(|s| old.styles.get(&s.id) != Some(*s))
         {
             tx.execute("INSERT INTO styles(id,data_json) VALUES(?1,?2) ON CONFLICT(id) DO UPDATE SET data_json=excluded.data_json",params![s.id,serde_json::to_string(s)?])?;
-            upserted(&mut sink, Kind::Style, &s.id, s);
         }
         for a in after
             .assets
@@ -75,7 +56,6 @@ impl Project {
             .filter(|a| old.assets.get(&a.id) != Some(*a))
         {
             tx.execute("INSERT INTO assets(id,content_hash,relative_key,data_json) VALUES(?1,?2,?3,?4) ON CONFLICT(id) DO UPDATE SET data_json=excluded.data_json",params![a.id,a.content_hash,a.relative_key,serde_json::to_string(a)?])?;
-            upserted(&mut sink, Kind::Asset, &a.id, a);
         }
         for f in after
             .fonts
@@ -83,11 +63,9 @@ impl Project {
             .filter(|f| old.fonts.get(&f.id) != Some(*f))
         {
             tx.execute("INSERT INTO fonts(id,data_json) VALUES(?1,?2) ON CONFLICT(id) DO UPDATE SET data_json=excluded.data_json",params![f.id,serde_json::to_string(f)?])?;
-            upserted(&mut sink, Kind::Font, &f.id, f);
         }
         for id in old.notes.keys().filter(|id| !after.notes.contains_key(*id)) {
             tx.execute("DELETE FROM notes WHERE id=?1", [id])?;
-            deleted(&mut sink, Kind::Note, id);
         }
         for n in after
             .notes
@@ -95,7 +73,6 @@ impl Project {
             .filter(|n| old.notes.get(&n.id) != Some(*n))
         {
             tx.execute("INSERT INTO notes(id,data_json) VALUES(?1,?2) ON CONFLICT(id) DO UPDATE SET data_json=excluded.data_json",params![n.id,serde_json::to_string(n)?])?;
-            upserted(&mut sink, Kind::Note, &n.id, n);
         }
         finish(
             tx,

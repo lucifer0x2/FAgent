@@ -26,7 +26,7 @@ impl SqliteBackend {
     }
 
     /// Today's shared snapshot with the identity of the same read.
-    fn shared_with_identity(&self, project: &str) -> Result<crate::shadow::Loaded> {
+    fn shared_with_identity(&self, project: &str) -> Result<crate::memory::Loaded> {
         let (snapshot, identity) = self.snapshot_with_cache_identity(project)?;
         let indexes = self
             .store
@@ -106,7 +106,7 @@ impl StorageBackend for SqliteBackend {
     }
 
     fn scoped_snapshot(&self, project: &str, target: &str) -> Result<crate::ScopedRead> {
-        let read = self.store.root.shadow.scoped_read(
+        let read = self.store.root.memory.scoped_read(
             target,
             || self.snapshot_cache_identity(project),
             || self.shared_with_identity(project),
@@ -114,7 +114,7 @@ impl StorageBackend for SqliteBackend {
         if self
             .store
             .root
-            .shadow
+            .memory
             .claim_cache_cleanup(&read.shared.snapshot.project_id)
         {
             self.store
@@ -123,6 +123,14 @@ impl StorageBackend for SqliteBackend {
                 .evict(&read.shared.snapshot.project_id);
         }
         Ok(read)
+    }
+
+    fn memory_stats(&self) -> crate::NodeMemoryStats {
+        self.store.root.memory.stats()
+    }
+
+    fn memory_read_failed(&self) {
+        self.store.root.memory.read_failed()
     }
 
     fn snapshot_with_cache_identity(
