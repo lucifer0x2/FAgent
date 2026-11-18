@@ -305,9 +305,11 @@ check: without `pageIds` the revision must be current, with `pageIds` the page g
 `changedSince`. Without `strict`, `pageIds` is recorded but guards nothing. A revision
 ahead of the project is a conflict in both modes. Idempotent replay precedes every check
 and returns the stored result, `concurrent` included. `import_asset` keeps its exact
-`expectedRevision`. With `FAGENT_NODE_MEMORY_WRITES=on` storage stages the batch in the
-in-memory project and persists its rows before the response; results and stored rows are
-identical to the default path.
+`expectedRevision`. Storage stages every batch in the in-memory project (`NodeMemory`, always
+on), checks the page guard and history on its views, and persists only the rows that changed
+before publishing; a cold project is loaded on first access. When a batch has several
+end-of-batch errors, which one is reported first may differ from the full validator; per-op
+errors keep their op index.
 
 Start with `create_project`, then `apply_batch`, and read `get_outline` before requesting a scoped `get_subtree` or `get_design_context`. Use `find_nodes` to locate a node by name, text, kind, ID or parent in one call; `get_outline {nodeId:<page>, depth:1}` or `find_nodes {parentId:<page>, kinds:["frame"]}` lists a page's root frames in one call. Text requires explicit font/style properties as described by storage validation; the bundled font ID is `font_bundled`. Mutations require a stable `idempotencyKey` and ordered operations; send `expectedRevision` from the read the batch is based on (see "`apply_batch` concurrency" above). Retry exactly the original body after a lost response. A changed body with the same key receives `IDEMPOTENCY_KEY_REUSED`; with `strict:true`, a stale revision with a new key receives `REVISION_CONFLICT` and `currentRevision`, plus `changedSince` (see "Changes since a revision" below). `apply_batch` takes JSON `operations`, OCD `source` (`skill://fagent/ocd.md`), or both: the compiled source runs first in the same atomic batch, within the 500-operation and 2 MiB limits, and the result lists generated node IDs as `autoIds` (`{"<line>":"<id>"}`). `update_node` sets top-level props; with `merge:true` its `props` are a JSON merge patch (RFC 7386: objects merge, `null` deletes, other values replace; an object holding `tokenId`, `styleId` or `type` replaces as one value).
 

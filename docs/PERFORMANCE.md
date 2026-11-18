@@ -26,11 +26,12 @@ The 30× responses stay the same size as at 1× (outline 72 KB, context 92 KB): 
 with the project, but the answer does not. Write latency at 30× is still above the ~1.5 s target
 recorded in the report; validation dominates it.
 
-**Node-memory (experimental, off by default).** [Task28](../tasks/28-node-memory-integration.md)
-keeps hot projects in RAM (`crates/node-memory`), with indexes updated per operation and the
-database still the source of truth. It sits behind three flags, `FAGENT_NODE_MEMORY_SHADOW`,
-`FAGENT_NODE_MEMORY_READS` and `FAGENT_NODE_MEMORY_WRITES`. Each defaults to `off`; set one to `on`
-to enable it (`strict` is for tests, and `WRITES=on` also turns on reads and the mirror). The figures below were measured on a
+**Node-memory (always on).** [Task28](../tasks/28-node-memory-integration.md) introduced it and
+[Task41](../tasks/41-node-memory-engine.md) phase 1 made it the only path: hot projects stay in RAM
+(`crates/node-memory`, struct `NodeMemory`) with indexes updated per operation, every latest-revision
+read and every batch goes through it, and the database stays the source of truth. There are no
+flags or modes any more; the "Flag off" and "Flag on" columns below are the Task28 measurements of
+the former database-only path and the opt-in memory path. The figures below were measured on a
 generated 200k-node fixture with PostgreSQL and a release build; the source does not record the
 hardware. This fixture differs from the Task24 project, so do not compare it with the table
 above.
@@ -41,6 +42,14 @@ above.
 | Page-scoped commit, median of 30 (`WRITES`) | 636 ms (load 200, persist 34) | **468 ms** (load 29, persist 3) |
 | Same commit, real project of 7,025 nodes | 28.5 ms | **22.5 ms** |
 | Shadow mirror cost per commit (`SHADOW`) | – | 114 µs (17–26 µs on real projects); first load 76 ms |
+
+Task41 phase 1 (always on, same 200k fixture: 178,604 nodes, PostgreSQL, release, median of 30, run
+back to back on an idle machine): a small props edit commits in **36.5 ms** (`memory.begin` 30.4,
+persist 4.8), against 55.9 ms for the former opt-in memory path and 988 ms for the former default
+path in the same session. The first commit on a cold project loads and admits it under the row lock
+(about 3.8 s at 200k). Ops the delta validator does not cover yet (pages, root ops, tokens, styles,
+notes, `theme`/`links`/`flowStart`/`animations`) still validate the whole project, in memory.
+See [TASK41-REPORT.md](TASK41-REPORT.md).
 
 In-memory operations on the 200k fixture take well under a millisecond: a props update takes
 584 ns, and a begin + commit takes 542 ns. Memory use is about 1.3 KB of RAM per authored node.

@@ -2,7 +2,7 @@
 
 **Priority (2026-11-18):** requested by the user after the Task 28 commit-path review; not yet placed in the order
 34 → 36 → 37 → 31/35 → 33.
-**Status:** Phase 1 in progress (2026-11-18, `feat/task-41-node-memory-engine`). Phases run in order; each phase ends with a report to the user, and the next phase starts only
+**Status:** Phase 1 done (2026-11-18, `feat/task-41-node-memory-engine`, see `docs/TASK41-REPORT.md`); spike 1b next. Phases run in order; each phase ends with a report to the user, and the next phase starts only
 after the user's go-ahead.
 **Depends on:** Task 28 code as it is on `main` (I0–I5 implemented; I4/I5 deep tests and benchmarks were deferred).
 Supersedes the open parts of Task 28 (flags, shadow modes, I5 cleanup) once this task is accepted.
