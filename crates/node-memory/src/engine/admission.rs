@@ -34,9 +34,17 @@ pub(crate) fn event(project: &str, error: &StorageError) -> Value {
         "event": "node_memory_admission",
         "project": project,
         "code": error.code,
-        "field": error.field,
+        "field": error.field.as_deref().map(field_head),
         "node": error.node.as_ref().and_then(|n| n.node_id.as_deref()),
     })
+}
+
+/// The fixed leading segment of an error field (`props`, `states`, `links`, ...).
+/// Later segments can be names the user wrote (`props.{unknown key}`,
+/// `props.overrides.{target}`, `states[{name}]`, `layout.{key}`), which are content
+/// and stay out of logs.
+fn field_head(field: &str) -> &str {
+    field.split(['.', '[']).next().unwrap_or_default()
 }
 
 #[cfg(test)]
@@ -54,5 +62,24 @@ mod tests {
                 "field":"width","node":"n1"})
         );
         assert!(!line.to_string().contains("secret"));
+    }
+
+    #[test]
+    fn the_event_keeps_only_the_fixed_head_of_the_field() {
+        for (field, head) in [
+            ("props.privateKeyName", "props"),
+            ("props.overrides.customer-target.text", "props"),
+            ("states[secretState].fill", "states"),
+            ("layout.userKey", "layout"),
+            ("links[0].to", "links"),
+            ("width", "width"),
+        ] {
+            let error = StorageError::validation(field, "bad").on_node("n1", "frame");
+            let line = event("p1", &error);
+            assert_eq!(line["field"], head, "{field}");
+            for secret in ["privateKeyName", "customer", "secretState", "userKey"] {
+                assert!(!line.to_string().contains(secret), "{field}");
+            }
+        }
     }
 }
