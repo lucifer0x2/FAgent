@@ -20,8 +20,18 @@ pub use admit::{admit, certified};
 pub(crate) struct Certificate {
     extra: Map<usize>,
     total: usize,
+    /// False for a revision [`admit`] certified although it failed validation (and
+    /// for the revisions committed on top of it): it may still hold stored errors.
+    valid: bool,
 }
 impl Certificate {
+    fn invalid(self) -> Self {
+        Self {
+            valid: false,
+            ..self
+        }
+    }
+
     pub(crate) fn estimated_bytes(&self) -> usize {
         self.extra.estimated_bytes()
     }
@@ -60,6 +70,11 @@ pub fn validate_delta(
         let _ = before.validation.set(certificate);
     }
     let certificate = before.validation.get().expect("validated admission");
+    // A delete that cascades to notes makes the reference validate the whole project
+    // (`resources_changed`), which reports any stored error again.
+    if !certificate.valid && changed.iter().any(|id| before.note(id).is_some()) {
+        return Ok(None);
+    }
     let affected = closure::affected(before, after, operations, changed);
     let support = closure::support(before, after, &affected);
     // Prefix replay preserves Candidate::apply's validation, public error fields
