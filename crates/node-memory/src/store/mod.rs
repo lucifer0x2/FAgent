@@ -13,6 +13,7 @@ mod order;
 mod refs;
 mod resources;
 mod stamps;
+mod token_index;
 pub(crate) mod trie;
 
 use crate::props;

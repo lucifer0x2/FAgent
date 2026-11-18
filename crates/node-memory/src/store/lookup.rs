@@ -22,9 +22,18 @@ impl Lookup for Store {
         self.len()
     }
 
+    fn pages(&self) -> Vec<&Node> {
+        let keys = Store::children(self, None);
+        keys.iter().map(|&k| Store::node(self, k)).collect()
+    }
+
     fn children(&self, id: &str) -> Vec<&Node> {
         let keys = self.get(id).map_or(&[][..], |slot| &slot.children[..]);
         keys.iter().map(|&k| Store::node(self, k)).collect()
+    }
+
+    fn referencing(&self, key: &str) -> Vec<&str> {
+        self.ids_of(Store::referencing(self, key))
     }
 
     fn token(&self, id: &str) -> Option<&Token> {
@@ -37,6 +46,18 @@ impl Lookup for Store {
 
     fn token_count(&self) -> usize {
         self.res.tokens.len()
+    }
+
+    fn theme_declared(&self, name: &str) -> bool {
+        self.res.token_index.theme_declared(name)
+    }
+
+    fn named_themes(&self) -> usize {
+        self.res.token_index.named_themes()
+    }
+
+    fn aliasers(&self, token: &str) -> Vec<&str> {
+        self.res.token_index.aliasers(token).collect()
     }
 
     fn style(&self, id: &str) -> Option<&Style> {
@@ -57,6 +78,10 @@ impl Lookup for Store {
 
     fn note(&self, id: &str) -> Option<&Note> {
         self.res.note(id)
+    }
+
+    fn note_count(&self) -> usize {
+        self.res.notes.len()
     }
 
     fn notes_on(&self, node: &str) -> Vec<&Note> {

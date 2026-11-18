@@ -1,7 +1,9 @@
 //! Snapshot resources held next to the nodes: tokens, styles, assets, fonts and notes,
 //! each by id (the stored `ORDER BY id`), plus notes by anchor node. Each map is
 //! shared between versions and copied on the first write of a batch; notes are
-//! shared individually, so copying the note map never copies note text.
+//! shared individually, so copying the note map never copies note text. Token
+//! writes keep the token index (`token_index`) in step.
+use super::token_index::TokenIndex;
 use super::Store;
 use fagent_scene_input::{Asset, Font, Note, Snapshot, Style, Token};
 use std::collections::{BTreeMap, BTreeSet, HashMap};
@@ -22,6 +24,8 @@ pub(crate) struct Resources {
     pub notes: Arc<BTreeMap<String, Arc<Note>>>,
     /// Note ids by anchor node id.
     anchors: Arc<HashMap<String, BTreeSet<String>>>,
+    /// Theme names and alias edges of `tokens`.
+    pub token_index: TokenIndex,
 }
 
 fn by_id<T>(items: Vec<T>, id: impl Fn(&T) -> &String) -> Arc<BTreeMap<String, T>> {
@@ -37,8 +41,10 @@ impl Resources {
             let set = anchors.entry(note.node_id.clone()).or_default();
             set.insert(note.id.clone());
         }
+        let tokens = by_id(std::mem::take(&mut snapshot.tokens), |t| &t.id);
         Self {
-            tokens: by_id(std::mem::take(&mut snapshot.tokens), |t| &t.id),
+            token_index: TokenIndex::build(tokens.values()),
+            tokens,
             styles: by_id(std::mem::take(&mut snapshot.styles), |s| &s.id),
             assets: by_id(std::mem::take(&mut snapshot.assets), |a| &a.id),
             fonts: by_id(std::mem::take(&mut snapshot.fonts), |f| &f.id),
@@ -99,8 +105,13 @@ impl Resources {
 }
 
 impl Store {
-    pub(crate) fn put_token(&mut self, token: Token) {
-        Arc::make_mut(&mut self.res.tokens).insert(token.id.clone(), token);
+    /// Inserts or replaces a token; returns the token it replaced.
+    pub(crate) fn put_token(&mut self, token: Token) -> Option<Token> {
+        let id = token.id.clone();
+        let tokens = Arc::make_mut(&mut self.res.tokens);
+        let old = tokens.insert(id.clone(), token);
+        self.res.token_index.replace(old.as_ref(), &tokens[&id]);
+        old
     }
 
     pub(crate) fn put_style(&mut self, style: Style) {
