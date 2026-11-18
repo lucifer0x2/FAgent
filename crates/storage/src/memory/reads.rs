@@ -129,11 +129,7 @@ impl Memory {
                 Tag::failed(&identity)
             }
         };
-        let mut all = tags.lock();
-        all.retain(|project, tag| {
-            tag.failed || tag.load_id.is_some() && engine.resident(project) == tag.load_id
-        });
-        all.insert(id, tag);
+        tags.insert(engine, id, tag);
     }
 }
 

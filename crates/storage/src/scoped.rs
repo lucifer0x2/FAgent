@@ -10,7 +10,7 @@ pub(crate) mod index;
 mod navigation;
 mod notes;
 #[cfg(test)]
-mod parity;
+pub(crate) mod parity;
 #[cfg(test)]
 mod reference_history;
 pub(crate) use history::coverage;

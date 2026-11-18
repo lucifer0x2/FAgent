@@ -23,6 +23,14 @@ pub struct NodeMemoryStats {
     pub read_reloads: u64,
     /// Memory-read failures: panics, rejected loads, reader errors on a view.
     pub read_errors: u64,
+    /// Batches and previews that found the project resident at the database's
+    /// revision and incarnation.
+    pub write_hits: u64,
+    /// Batches and previews that (re)loaded the project from the database first.
+    pub write_loads: u64,
+    /// Prepared batches dropped because persisting them failed; the project was
+    /// evicted.
+    pub write_aborts: u64,
 }
 
 #[derive(Default)]
@@ -32,6 +40,9 @@ pub(super) struct Counters {
     pub read_loads: AtomicU64,
     pub read_reloads: AtomicU64,
     pub read_errors: AtomicU64,
+    pub write_hits: AtomicU64,
+    pub write_loads: AtomicU64,
+    pub write_aborts: AtomicU64,
 }
 
 impl Counters {
@@ -45,6 +56,9 @@ impl Counters {
             read_loads: get(&self.read_loads),
             read_reloads: get(&self.read_reloads),
             read_errors: get(&self.read_errors),
+            write_hits: get(&self.write_hits),
+            write_loads: get(&self.write_loads),
+            write_aborts: get(&self.write_aborts),
         }
     }
 }

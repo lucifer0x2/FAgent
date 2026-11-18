@@ -6,7 +6,7 @@ mod guard;
 #[path = "parity_notes_pages.rs"]
 mod notes_pages;
 
-fn seed() -> Snapshot {
+pub(crate) fn seed() -> Snapshot {
     let temp = tempfile::tempdir().unwrap();
     let store = Store::open(temp.path()).unwrap();
     let p = store.create_project("parity", "Parity").unwrap();
@@ -59,7 +59,7 @@ fn i5_persistent_dependency_adapter_matches_legacy() {
     }
 }
 
-fn snapshot(before: &Snapshot, candidate: &Candidate) -> Snapshot {
+pub(crate) fn snapshot(before: &Snapshot, candidate: &Candidate) -> Snapshot {
     let mut after = before.clone();
     after.nodes = candidate.nodes.values().cloned().collect();
     after.tokens = candidate.tokens.values().cloned().collect();
