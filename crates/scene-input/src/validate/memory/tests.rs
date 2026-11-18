@@ -119,6 +119,7 @@ fn memory_delta_expansion_budget_includes_unaffected_instances() {
         .set(Certificate {
             extra: Map::default(),
             total: MAX_NODES,
+            valid: true,
         })
         .ok()
         .unwrap();

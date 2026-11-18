@@ -143,3 +143,86 @@ fn a_broken_component_id_leaves_no_certificate() {
     );
     assert_eq!(memory.stats().divergences, 0);
 }
+
+fn with_note(mut snapshot: Snapshot, node: &str, text: &str) -> Snapshot {
+    let note = json!({"id":"n1","nodeId":node,"text":text});
+    snapshot.notes.push(serde_json::from_value(note).unwrap());
+    snapshot
+}
+
+/// Local-class batches that do not touch the corrupted rows.
+fn unrelated_batches() -> Vec<Vec<Operation>> {
+    use fagent_scene_input::NodeKind;
+    vec![
+        vec![update("b", json!({"name":"B"}), true)],
+        vec![create("x", NodeKind::Rectangle, "f1", json!({}))],
+        vec![reorder("b", 1)],
+        vec![reparent("b", "g")],
+        vec![delete("b")],
+    ]
+}
+
+/// Begins `ops` on a fresh load of `snapshot`; the outcome must be the reference's.
+fn judged_like_reference(case: &str, snapshot: &Snapshot, ops: &[Operation]) {
+    let (memory, project) = setup(snapshot.clone());
+    let expected = reference(&project.view().to_snapshot(), ops);
+    match (project.begin(snapshot.revision, ops), expected) {
+        (Ok(Begin::Ready(prepared)), Ok(changed)) => {
+            assert_eq!(prepared.changed_ids(), changed.as_slice(), "{case}");
+        }
+        (Err(actual), Err(expected)) => {
+            assert_eq!(json_of(&actual), json_of(&expected), "{case}");
+        }
+        (Ok(Begin::Ready(_)), Err(expected)) => {
+            panic!("{case}: only the reference rejects {ops:?}: {expected:?}")
+        }
+        (Err(actual), Ok(_)) => panic!("{case}: only the engine rejects {ops:?}: {actual:?}"),
+        (Ok(_), _) => panic!("{case}: stale"),
+    }
+    assert_eq!(memory.stats().divergences, 0, "{case}");
+}
+
+#[test]
+fn a_base_failing_a_project_wide_check_is_judged_like_the_reference() {
+    let frame = |extra: Value| {
+        let mut props = json!({"width":100,"height":100});
+        props
+            .as_object_mut()
+            .unwrap()
+            .extend(extra.as_object().unwrap().clone());
+        props
+    };
+    let mut flows = corrupt("f1", frame(json!({"flowStart":"x"})));
+    flows.nodes.iter_mut().find(|n| n.id == "f2").unwrap().props = frame(json!({"flowStart":"x"}));
+    let mut link = text("T");
+    link["links"] = json!([{"to":"a"}]);
+    let cases = [
+        ("an empty note", with_note(small(), "t2", "")),
+        ("a link to a non-root frame", corrupt("c", link)),
+        (
+            "a trigger that is not an ancestor",
+            corrupt("a", json!({"animations":[{"triggerNodeId":"b"}]})),
+        ),
+        ("a duplicate flow start", flows),
+    ];
+    for (case, snapshot) in &cases {
+        let (_, project) = setup(snapshot.clone());
+        assert!(!certified(&project.view()), "{case}");
+        for ops in unrelated_batches() {
+            judged_like_reference(case, snapshot, &ops);
+        }
+    }
+}
+
+#[test]
+fn a_note_cascade_on_an_invalid_base_takes_the_reference_path() {
+    // The reference re-validates the whole project when a delete removes a note, and
+    // so reports the stored error again; the delta path must not accept that batch.
+    let snapshot = with_note(corrupt("t2", json!({"width":false})), "gt", "Hello");
+    let (_, project) = setup(snapshot.clone());
+    assert!(certified(&project.view()));
+    judged_like_reference("a note cascade", &snapshot, &[delete("g")]);
+    for ops in unrelated_batches() {
+        judged_like_reference("an invalid width", &snapshot, &ops);
+    }
+}
