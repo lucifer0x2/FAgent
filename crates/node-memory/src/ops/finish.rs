@@ -9,7 +9,13 @@ use fagent_scene_input::Result;
 use std::collections::{BTreeSet, HashSet};
 
 impl Txn<'_> {
+    /// The node cap is checked here, on the final state and without an operation
+    /// index, as `Candidate::validate` does: a batch may pass the cap mid-way and
+    /// delete back under it.
     pub(crate) fn finish(&mut self) -> Result<()> {
+        if self.store.len() > self.max_nodes {
+            return Err(checks::too_many(self.max_nodes));
+        }
         self.prune_links();
         self.check_masters()
     }
