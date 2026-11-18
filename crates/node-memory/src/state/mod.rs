@@ -19,6 +19,7 @@ use crate::Limits;
 pub use dump::IndexDump;
 use fagent_scene_input::{Operation, Result, Snapshot, StorageError};
 pub use staged::Staged;
+use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::Arc;
 pub use subtree::Subtree;
 pub use writes::Written;
@@ -114,18 +115,21 @@ impl ProjectState {
     /// upsert and repaired by a later one is accepted, and errors after a token upsert
     /// may differ from `Candidate`'s (the engine reports `Candidate`'s for both).
     pub fn begin(&mut self, ops: &[Operation]) -> Result<Staged<'_>> {
-        let (next, delta, names) = self.stage(ops).map_err(Rejection::into_error)?;
+        let (next, delta, names) = self.stage(ops, None).map_err(Rejection::into_error)?;
         Ok(Staged::direct(self, next, delta, names))
     }
 
     /// Runs the batch on a clone; on success returns the next version (revision
     /// incremented, with its own `meta`), its delta and the names it interned, which
     /// [`Staged`] keeps or discards. `self` never changes. A rejected batch removes
-    /// its names again (see `store::Interned`). An empty batch is the engine's own
-    /// input error, reported as is.
+    /// its names again (see `store::Interned`); the names that stay (another batch was
+    /// open meanwhile) are added to `bytes`, the owning handle's estimate, which
+    /// otherwise changes only on commit. An empty batch is the engine's own input
+    /// error, reported as is.
     pub(crate) fn stage(
         &self,
         ops: &[Operation],
+        bytes: Option<&AtomicUsize>,
     ) -> std::result::Result<(ProjectState, Delta, Interned), Rejection> {
         if ops.is_empty() {
             return Err(StorageError::validation(
@@ -141,7 +145,10 @@ impl ProjectState {
             Err(rejection) => {
                 // `Txn` only borrowed the clone: nothing else can hold its keys.
                 drop(next);
-                names.discard(true);
+                let stayed = names.discard(true);
+                if let Some(bytes) = bytes.filter(|_| stayed > 0) {
+                    bytes.fetch_add(stayed, Ordering::Relaxed);
+                }
                 Err(rejection)
             }
         }
