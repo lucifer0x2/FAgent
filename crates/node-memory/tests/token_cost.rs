@@ -1,5 +1,6 @@
-//! Cost of `upsert_token`, which revalidates every token and the alias graph per
-//! operation (as `Candidate::apply` does). Timing only; run with
+//! Cost of token upserts: `Candidate::apply` revalidates every token and the alias graph
+//! per operation; `Txn` once per batch, and `begin` adds the reference (token batches
+//! are never local). Timing only; run with
 //! `cargo test --release -p fagent-node-memory --test token_cost -- --ignored --nocapture`.
 mod support;
 

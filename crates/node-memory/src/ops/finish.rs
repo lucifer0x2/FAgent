@@ -5,6 +5,7 @@ use super::{Rejection, Txn};
 use crate::checks;
 use crate::props::{is_master, pruned_links};
 use crate::store::Key;
+use fagent_scene_input::validate::validate_tokens;
 use fagent_scene_input::Result;
 use std::collections::{BTreeSet, HashSet};
 
@@ -12,11 +13,17 @@ impl Txn<'_> {
     /// The node cap is checked here, on the final state and without an operation
     /// index, as `Candidate::validate` does: a batch may pass the cap mid-way and
     /// delete back under it.
+    /// The token set is validated here, once, when the batch upserted a token
+    /// ([`Txn::deferred`]).
     /// Every error here is [`Rejection::inexact`]: `Candidate` finds these during full
-    /// validation, in its own order, and the engine cap may be below its cap.
+    /// validation (or after a token upsert), in its own order, and the engine cap may
+    /// be below its cap.
     pub(crate) fn finish(&mut self) -> std::result::Result<(), Rejection> {
         if self.store.len() > self.max_nodes {
             return Err(Rejection::inexact(checks::too_many(self.max_nodes)));
+        }
+        if self.deferred() {
+            validate_tokens(&*self.store).map_err(Rejection::inexact)?;
         }
         self.prune_links();
         self.check_masters().map_err(Rejection::inexact)
