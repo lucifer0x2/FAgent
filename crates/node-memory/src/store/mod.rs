@@ -17,6 +17,7 @@ pub(crate) mod trie;
 
 use crate::props;
 use fagent_scene_input::Node;
+pub(crate) use intern::Interned;
 use intern::Interner;
 pub(crate) use resources::Resources;
 pub(crate) use stamps::{Prop, Stamps};
@@ -24,7 +25,8 @@ use std::collections::BTreeSet;
 use std::sync::Arc;
 use trie::Trie;
 
-/// Compact node handle: the interned id. Never reused for another id.
+/// Compact node handle: the interned id. Never reused for another id while a version
+/// that may hold it is alive (see `intern`).
 #[derive(Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord, Debug)]
 pub(crate) struct Key(u32);
 

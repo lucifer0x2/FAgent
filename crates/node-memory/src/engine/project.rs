@@ -53,7 +53,8 @@ impl HotProject {
         self.handle.diverged()
     }
 
-    /// Estimated bytes as of the last load or successful batch.
+    /// Estimated bytes as of the last load or successful batch, plus the names a
+    /// discarded batch left interned (see `Staged`).
     pub fn estimated_bytes(&self) -> usize {
         self.handle.estimated_bytes()
     }

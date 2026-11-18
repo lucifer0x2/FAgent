@@ -100,9 +100,8 @@ pub fn observe(state: &ProjectState) -> Observed {
 pub fn assert_unchanged(state: &ProjectState, before: &Observed) {
     let now = observe(state);
     assert!(now.snapshot == before.snapshot, "snapshot changed");
-    // Ids interned by a discarded batch stay interned (shared, append-only), so the
-    // total estimate may grow; nodes and index entries (`node_bytes`) may not.
-    assert!(now.bytes >= before.bytes, "estimated bytes shrank");
+    // A discarded batch also removes the ids it interned (no view of it survives).
+    assert_eq!(now.bytes, before.bytes, "estimated bytes changed");
     assert_eq!(now.revision, before.revision, "revision changed");
     assert_eq!(
         now.dump.stamp_bytes, before.dump.stamp_bytes,

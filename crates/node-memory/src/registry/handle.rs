@@ -96,13 +96,14 @@ impl ProjectHandle {
     pub fn begin(&self, ops: &[Operation]) -> Result<Staged<'_>> {
         self.touch();
         let state = self.state.write().unwrap_or_else(PoisonError::into_inner);
-        let (next, delta) = state.stage(ops).map_err(Rejection::into_error)?;
+        let (next, delta, names) = state.stage(ops).map_err(Rejection::into_error)?;
         Ok(Staged::locked(
             state,
             &self.bytes,
             &self.published,
             next,
             delta,
+            names,
         ))
     }
 
@@ -125,13 +126,14 @@ impl ProjectHandle {
             .read()
             .unwrap_or_else(PoisonError::into_inner)
             .clone();
-        let staged = state
-            .stage(ops)
-            .map(|(next, delta)| Staged::locked(state, &self.bytes, &self.published, next, delta));
+        let staged = state.stage(ops).map(|(next, delta, names)| {
+            Staged::locked(state, &self.bytes, &self.published, next, delta, names)
+        });
         Some((before, staged))
     }
 
-    /// Estimated bytes as of the last load or successful batch.
+    /// Estimated bytes as of the last load or successful batch, plus the names a
+    /// discarded batch left interned (see `Staged`).
     pub fn estimated_bytes(&self) -> usize {
         self.bytes.load(Ordering::Relaxed)
     }

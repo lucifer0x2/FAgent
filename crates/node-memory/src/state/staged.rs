@@ -4,9 +4,11 @@
 //! meanwhile, so no other writer races it and readers never see it before commit.
 use super::ProjectState;
 use crate::ops::Delta;
+use crate::store::Interned;
 use fagent_scene_input::read_scope::ReadView;
+use fagent_scene_input::Snapshot;
 use std::sync::atomic::{AtomicUsize, Ordering};
-use std::sync::{Arc, PoisonError, RwLock, RwLockWriteGuard};
+use std::sync::{Arc, PoisonError, RwLock, RwLockWriteGuard, Weak};
 
 enum Target<'a> {
     Direct(&'a mut ProjectState),
@@ -21,15 +23,25 @@ enum Target<'a> {
 /// (also during a panic) discards it.
 #[must_use = "a staged batch is discarded when dropped; call commit() to keep it"]
 pub struct Staged<'a> {
-    target: Target<'a>,
+    // Fields drop in order: the staged version and its preview go first, so `names`
+    // can tell whether any view of the batch survives, while `target` still holds the
+    // project.
     next: ProjectState,
-    delta: Delta,
     preview: Option<Arc<ReadView>>,
+    names: Names<'a>,
+    target: Target<'a>,
+    delta: Delta,
 }
 
 impl<'a> Staged<'a> {
-    pub(crate) fn direct(state: &'a mut ProjectState, next: ProjectState, delta: Delta) -> Self {
+    pub(crate) fn direct(
+        state: &'a mut ProjectState,
+        next: ProjectState,
+        delta: Delta,
+        names: Interned,
+    ) -> Self {
         Self {
+            names: Names::new(names, &next, None),
             target: Target::Direct(state),
             next,
             delta,
@@ -43,8 +55,10 @@ impl<'a> Staged<'a> {
         published: &'a RwLock<Arc<ReadView>>,
         next: ProjectState,
         delta: Delta,
+        names: Interned,
     ) -> Self {
         Self {
+            names: Names::new(names, &next, Some(bytes)),
             target: Target::Locked {
                 guard,
                 bytes,
@@ -86,6 +100,7 @@ impl<'a> Staged<'a> {
     /// Keeps the batch and returns its delta.
     pub fn commit(mut self) -> Delta {
         let view = self.preview();
+        self.names.keep();
         let next = self.next;
         match self.target {
             Target::Direct(state) => *state = next,
@@ -110,4 +125,44 @@ impl<'a> Staged<'a> {
 
     /// Discards the batch; the state is exactly as before `begin`.
     pub fn abort(self) {}
+}
+
+/// The names a staged batch interned, discarded with the batch when no view of the
+/// staged version survives. The staged version owns its `meta` (see
+/// `ProjectState::stage`), and every clone or view of it holds that `Arc`, so a dead
+/// `owner` proves no live version can hold the batch's keys. Names that stay (a view
+/// escaped, or another batch staged meanwhile) are added to the handle's estimate,
+/// which otherwise changes only on commit, so budget eviction sees them.
+struct Names<'a> {
+    names: Option<Interned>,
+    owner: Weak<Snapshot>,
+    bytes: Option<&'a AtomicUsize>,
+}
+
+impl<'a> Names<'a> {
+    fn new(names: Interned, next: &ProjectState, bytes: Option<&'a AtomicUsize>) -> Self {
+        Self {
+            names: Some(names),
+            owner: Arc::downgrade(&next.meta),
+            bytes,
+        }
+    }
+
+    fn keep(&mut self) {
+        if let Some(names) = self.names.take() {
+            names.keep();
+        }
+    }
+}
+
+impl Drop for Names<'_> {
+    fn drop(&mut self) {
+        let Some(names) = self.names.take() else {
+            return;
+        };
+        let stayed = names.discard(self.owner.strong_count() == 0);
+        if let Some(bytes) = self.bytes.filter(|_| stayed > 0) {
+            bytes.fetch_add(stayed, Ordering::Relaxed);
+        }
+    }
 }
