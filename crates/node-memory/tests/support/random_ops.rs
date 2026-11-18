@@ -1,8 +1,8 @@
 //! Random batches of stored `Operation`s over the current project, mixing valid and
 //! invalid choices: missing/virtual/taken ids, cycles, non-containers, out-of-bounds
 //! indexes, bad component targets, master changes, links to deleted nodes, notes,
-//! tokens and styles. Props stay valid for the node kind, so property validation does
-//! not decide outcomes.
+//! tokens and styles. Props stay valid for the node kind unless `invalid` adds the
+//! property cases of `random_props`.
 use super::{text, Rng};
 use fagent_node_memory::Operation;
 use fagent_scene_input::{NodeKind, Snapshot};
@@ -13,6 +13,8 @@ pub struct Gen<'a> {
     pub counter: usize,
     /// Also draw pages, root frames, tokens, styles, themes, flows and links.
     pub extended: bool,
+    /// Also draw operations whose outcome property validation decides.
+    pub invalid: bool,
 }
 
 /// Ids and kinds the generator picks from, refreshed per batch.
@@ -68,6 +70,9 @@ impl Gen<'_> {
     }
 
     fn op(&mut self, pool: &mut Pool) -> Operation {
+        if self.invalid && self.rng.chance(30) {
+            return self.invalid(pool);
+        }
         if self.extended && self.rng.chance(35) {
             return self.extra(pool);
         }

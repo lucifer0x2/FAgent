@@ -7,6 +7,7 @@ pub mod ops;
 pub mod oracle;
 pub mod random_extra;
 pub mod random_ops;
+pub mod random_props;
 pub mod random_resources;
 
 #[allow(unused_imports)]

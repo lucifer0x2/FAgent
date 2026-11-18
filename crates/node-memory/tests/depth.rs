@@ -2,9 +2,10 @@
 //! including the descendants a reparent moves deeper, so no stored node ever exceeds it.
 mod support;
 
-use fagent_node_memory::ProjectState;
+use fagent_node_memory::{ManualClock, MemoryConfig, NodeMemory, ProjectState};
 use fagent_scene_input::NodeKind;
 use serde_json::{json, Value};
+use std::sync::Arc;
 use support::*;
 
 /// Page `p` with a chain `c1`..`c{len}` of frames, plus page `q` with `g` > `h`.
@@ -51,4 +52,27 @@ fn depth_limit_on_load_create_and_reparent() {
     state.apply(&[reparent("h", "c126")]).unwrap();
     state.apply(&[reparent("g", "c125")]).unwrap();
     assert_rebuild_matches(&state);
+}
+
+/// Through `HotProject::begin`: the moved node's own depth is a per-operation error
+/// returned as is; its descendants' depth is not, so that error is the reference's.
+#[test]
+fn descendant_depth_takes_the_reference_error() {
+    let memory = NodeMemory::new(MemoryConfig::default(), Arc::new(ManualClock::default()));
+    let project = memory.load(snapshot(chain(127))).unwrap();
+    let error = project
+        .begin(1, &[create("x", NodeKind::Frame, "c127", json!({}))])
+        .err()
+        .unwrap();
+    assert_eq!(error.op_index, Some(0));
+    depth_error(error);
+    let stats = memory.stats();
+    assert_eq!((stats.rejected_direct, stats.rejected_routed), (1, 0));
+    let error = project.begin(1, &[reparent("g", "c126")]).err().unwrap();
+    assert_eq!(error.op_index, None, "found by full validation");
+    depth_error(error);
+    let stats = memory.stats();
+    assert_eq!((stats.rejected_direct, stats.rejected_routed), (1, 1));
+    assert_eq!((stats.rejected, stats.divergences), (2, 0));
+    assert!(!project.diverged());
 }

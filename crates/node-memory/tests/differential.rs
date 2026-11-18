@@ -5,22 +5,23 @@
 //! allowed difference is `oracle::lib_only`.
 mod support;
 
-use fagent_node_memory::{MemoryConfig, NodeMemory, SystemClock};
+use fagent_node_memory::{MemoryConfig, MemoryStats, NodeMemory, SystemClock};
 use std::sync::Arc;
 use support::batch_oracle::{round as batch_round, Totals};
 use support::oracle::{round, Tally};
 use support::random_ops::Gen;
 use support::*;
 
-#[test]
-fn random_batches_match_candidate() {
+/// `ProjectState::apply` (the `Txn` alone) against `Candidate` for `seeds`.
+fn state_run(seeds: std::ops::RangeInclusive<u64>, invalid: bool) -> Tally {
     let mut tally = Tally::default();
-    for seed in 1..=8 {
+    for seed in seeds {
         let mut rng = Rng::new(seed);
         let mut gen = Gen {
             rng: &mut rng,
             counter: 0,
             extended: false,
+            invalid,
         };
         let mut state = load(small());
         for n in 0..300 {
@@ -42,24 +43,46 @@ fn random_batches_match_candidate() {
     for (kind, count) in &tally.rejected {
         eprintln!("  {count:>4} {kind}");
     }
+    tally
+}
+
+#[test]
+fn random_batches_match_candidate() {
+    let tally = state_run(1..=8, false);
     assert!(tally.accepted > 600 && tally.rejected() > 300);
     assert!(tally.rejected.len() >= 8, "rejection kinds covered");
 }
 
-/// `HotProject::begin` against `Candidate` apply + `validate()` over generated batches
-/// that cover pages, root frames, tokens with themes and aliases, styles, links and
-/// flow starts besides the structural and note operations.
+/// Per-operation property errors come from the `Txn` itself and equal `Candidate`'s.
 #[test]
-fn begin_matches_candidate() {
+fn random_property_batches_match_candidate() {
+    let tally = state_run(1..=16, true);
+    assert!(tally.accepted > 600 && tally.rejected() > 1500);
+    let property = |field: &str| {
+        tally
+            .rejected
+            .keys()
+            .any(|kind| kind.contains(&format!("Some(\"{field}")))
+    };
+    for field in [
+        "props", "width", "color", "tokenId", "styleId", "token.", "style.",
+    ] {
+        assert!(property(field), "no rejection on {field}");
+    }
+}
+
+/// `HotProject::begin` against `Candidate` apply + `validate()` for `seeds`.
+fn begin_run(seeds: std::ops::RangeInclusive<u64>, invalid: bool) -> (Totals, MemoryStats) {
     let memory = NodeMemory::new(MemoryConfig::default(), Arc::new(SystemClock::new()));
     let mut totals = Totals::default();
-    for seed in 1..=12u64 {
+    for seed in seeds {
         let mut rng = Rng::new(seed);
         let mut pick = Rng::new(seed + 1000);
         let mut gen = Gen {
             rng: &mut rng,
             counter: 0,
             extended: true,
+            invalid,
         };
         let mut snapshot = small();
         snapshot.project_id = format!("diff{seed}");
@@ -85,6 +108,20 @@ fn begin_matches_candidate() {
         );
         assert!(!project.diverged(), "seed {seed}: diverged");
     }
+    report(&totals);
+    let stats = memory.stats();
+    eprintln!(
+        "per-op rejections: {} direct, {} routed; engine: {} direct, {} routed",
+        totals.per_op_direct, totals.per_op_routed, stats.rejected_direct, stats.rejected_routed
+    );
+    assert!(totals.differences.is_empty(), "differences found");
+    assert_eq!(stats.divergences, 0);
+    assert_eq!(stats.commits as usize, totals.committed);
+    assert_eq!(stats.rollbacks as usize, totals.dropped);
+    (totals, stats)
+}
+
+fn report(totals: &Totals) {
     eprintln!(
         "{} batches: accepted {} (committed {}, dropped {}; local {}, full {}), rejected {}",
         totals.batches,
@@ -109,14 +146,31 @@ fn begin_matches_candidate() {
     for line in &totals.differences {
         eprintln!("  {line}");
     }
-    assert!(totals.differences.is_empty(), "differences found");
-    let stats = memory.stats();
-    assert_eq!(stats.divergences, 0);
-    assert_eq!(stats.commits as usize, totals.committed);
-    assert_eq!(stats.rollbacks as usize, totals.dropped);
+}
+
+/// Generated batches that cover pages, root frames, tokens with themes and aliases,
+/// styles, links and flow starts besides the structural and note operations.
+#[test]
+fn begin_matches_candidate() {
+    let (totals, _) = begin_run(1..=24, false);
     assert!(
         totals.local > 100 && totals.full > 100,
         "both paths covered"
     );
-    assert!(totals.accepted > 1000 && totals.rejected.len() >= 12);
+    assert!(totals.accepted > 2000 && totals.rejected.len() >= 12);
+}
+
+/// The same with property errors: per-operation rejections are `Txn`'s own errors,
+/// returned without the reference, and equal `Candidate`'s.
+#[test]
+fn begin_property_errors_match_candidate() {
+    let (totals, stats) = begin_run(101..=116, true);
+    assert!(totals.accepted > 600 && totals.rejected.len() >= 20);
+    assert!(
+        totals.per_op_direct > 1000,
+        "per-op errors returned directly"
+    );
+    // Only a reparent moving a subtree too deep is per-op and still routed.
+    assert!(totals.per_op_routed * 100 <= totals.per_op_direct);
+    assert!(stats.rejected_direct >= totals.per_op_direct as u64);
 }
