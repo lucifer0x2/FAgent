@@ -49,6 +49,20 @@ fn candidate_oracle_orders() {
     assert_eq!(tokens, ["t1", "t2"]);
     assert!(lookup.theme_declared("dark") && !lookup.theme_declared("light"));
     assert_eq!((lookup.node_count(), lookup.token_count()), (6, 2));
+    assert_eq!(ids(lookup.pages()), ["p"]);
+    assert_eq!(lookup.referencing("link:m"), ["f", "g"]);
+    assert_eq!(lookup.referencing("component:m"), ["i", "j"]);
+    assert!(lookup.referencing("theme:dark").is_empty());
+    assert_eq!(lookup.aliasers("t1"), ["t2"]);
+    assert!(lookup.aliasers("t2").is_empty());
+    assert_eq!((lookup.named_themes(), lookup.note_count()), (1, 3));
+}
+
+#[test]
+fn reference_keys_add_the_own_theme() {
+    let props = json!({"theme":"dark","fill":{"tokenId":"t1"},"overrides":{"x":{"theme":"dim"}}});
+    let keys: Vec<String> = reference_keys(&props).into_iter().collect();
+    assert_eq!(keys, ["theme:dark", "token:t1"]);
 }
 
 #[test]

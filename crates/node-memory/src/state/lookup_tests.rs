@@ -1,7 +1,7 @@
 //! The store's `Lookup` answers every question exactly like the `Candidate` oracle.
 use super::ProjectState;
 use fagent_scene_input::validate::{Candidate, Lookup};
-use fagent_scene_input::Snapshot;
+use fagent_scene_input::{Operation, Snapshot};
 use serde_json::json;
 
 fn snapshot() -> Snapshot {
@@ -72,4 +72,90 @@ fn store_lookup_matches_candidate() {
         assert_eq!(store.font(id), oracle.font(id));
         assert_eq!(store.note(id), oracle.note(id));
     }
+}
+
+/// The questions end-of-batch validation asks, compared over every id and key the
+/// project names.
+fn assert_same_indexes(state: &ProjectState) {
+    let oracle = Candidate::from_snapshot(&state.to_snapshot());
+    let (store, oracle): (&dyn Lookup, &dyn Lookup) = (&state.store, &oracle);
+    let pages = |l: &dyn Lookup| ids(l.pages(), |n| &n.id);
+    assert_eq!(pages(store), pages(oracle));
+    assert_eq!(store.note_count(), oracle.note_count());
+    assert_eq!(store.named_themes(), oracle.named_themes());
+    let mut keys = std::collections::BTreeSet::new();
+    for node in oracle.tokens().map(|t| t.id.as_str()).chain(["missing"]) {
+        assert_eq!(
+            store.aliasers(node),
+            oracle.aliasers(node),
+            "aliasers {node}"
+        );
+    }
+    for theme in ["default", "dark", "dim", "night", "x", "missing"] {
+        assert_eq!(store.theme_declared(theme), oracle.theme_declared(theme));
+        keys.insert(format!("theme:{theme}"));
+    }
+    for id in ["t1", "t2", "t3", "t4", "font", "m", "f", "missing"] {
+        for kind in ["token", "style", "font", "asset", "component", "link"] {
+            keys.insert(format!("{kind}:{id}"));
+        }
+    }
+    for key in keys {
+        assert_eq!(store.referencing(&key), oracle.referencing(&key), "{key}");
+    }
+}
+
+#[test]
+fn store_indexes_match_candidate_across_writes() {
+    let mut snapshot = snapshot();
+    let tokens = json!([
+        {"id":"t1","name":"T1","type":"color","value":{"default":"#000000","themes":{"dark":"#ffffff","dim":"#777777"}}},
+        {"id":"t2","name":"T2","type":"color","value":{"default":{"aliasId":"t1"},"themes":{"dark":{"aliasId":"t1"}}}},
+        {"id":"t3","name":"T3","type":"number","value":4}
+    ]);
+    snapshot.tokens = serde_json::from_value(tokens).unwrap();
+    let page = json!({"id":"q","kind":"page","parentId":null,"sortKey":-1,"props":{}});
+    snapshot.nodes.push(serde_json::from_value(page).unwrap());
+    let mut state = ProjectState::from_snapshot(snapshot).expect("snapshot loads");
+    assert_same_indexes(&state);
+    let token = |id: &str, kind: &str, value| {
+        let token = json!({"id":id,"name":id,"type":kind,"value":value});
+        Operation::UpsertToken {
+            token: serde_json::from_value(token).unwrap(),
+        }
+    };
+    let update = |id: &str, props| Operation::UpdateNode {
+        id: id.into(),
+        props,
+        merge: true,
+    };
+    state
+        .apply(&[
+            token("t2", "color", json!("#101010")),
+            token(
+                "t4",
+                "color",
+                json!({"default":{"aliasId":"t1"},"themes":{"night":{"aliasId":"t1"}}}),
+            ),
+            token(
+                "t1",
+                "color",
+                json!({"default":"#000000","themes":{"dark":"#ffffff"}}),
+            ),
+            update("f", json!({"theme":"dark","fill":{"tokenId":"t1"}})),
+            update("m", json!({"theme":"night"})),
+        ])
+        .expect("batch applies");
+    assert_same_indexes(&state);
+    let store: &dyn Lookup = &state.store;
+    assert_eq!(store.aliasers("t1"), ["t4"]);
+    assert_eq!(store.referencing("theme:night"), ["m"]);
+    assert_eq!(store.named_themes(), 2);
+    state
+        .apply(&[
+            update("f", json!({"theme":null})),
+            Operation::DeleteSubtree { id: "q".into() },
+        ])
+        .expect("batch applies");
+    assert_same_indexes(&state);
 }

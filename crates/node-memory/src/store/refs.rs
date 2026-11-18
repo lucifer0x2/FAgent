@@ -1,12 +1,12 @@
 //! Reference indexes derived from one node's own kind and props: instance usage by
-//! `componentId`, incoming links by `links[].to`, and every reference key the props
-//! name (`token:`, `style:`, `font:`, `asset:`, `component:`, `link:`, nested
-//! overrides included). Every mutation that adds, removes or replaces props calls
-//! these.
+//! `componentId`, incoming links by `links[].to`, and every key `reference_keys`
+//! names (`token:`, `style:`, `font:`, `asset:`, `component:`, `link:`, nested
+//! overrides included, plus `theme:` for the node's own `theme`). Every mutation that
+//! adds, removes or replaces props calls these.
 use super::trie::Trie;
 use super::{Key, Set, Store};
 use crate::props::{component_id, link_targets};
-use fagent_scene_input::read_scope::references_of;
+use fagent_scene_input::validate::reference_keys;
 use fagent_scene_input::{Node, NodeKind};
 use serde_json::Value;
 use std::collections::BTreeSet;
@@ -75,7 +75,7 @@ impl Store {
         for target in link_targets(&node.props) {
             self.link_member(target, key, true);
         }
-        for name in references_of(&node.props) {
+        for name in reference_keys(&node.props) {
             self.ref_member(&name, key, true);
         }
     }
@@ -87,7 +87,7 @@ impl Store {
         for target in link_targets(&node.props) {
             self.link_member(target, key, false);
         }
-        for name in references_of(&node.props) {
+        for name in reference_keys(&node.props) {
             self.ref_member(&name, key, false);
         }
     }
@@ -114,7 +114,7 @@ impl Store {
                 self.link_member(new, key, true);
             }
         }
-        let (before, after) = (references_of(old), references_of(&node.props));
+        let (before, after) = (reference_keys(old), reference_keys(&node.props));
         for gone in before.difference(&after) {
             self.ref_member(gone, key, false);
         }
