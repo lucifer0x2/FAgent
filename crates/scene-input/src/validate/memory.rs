@@ -103,8 +103,8 @@ pub fn validate_delta(
     let themes = candidate.validate_tokens()?;
     for theme in &themes {
         let resolver = Resolver {
-            candidate: &candidate,
-            nodes: &candidate.nodes,
+            lookup: &candidate,
+            overlay: None,
             theme,
         };
         for id in &affected {

@@ -52,9 +52,9 @@ impl ScopedResources {
         self.check_theme(theme)?;
         let map: BTreeMap<_, _> = nodes.iter().map(|n| (n.id.clone(), n.clone())).collect();
         let resolver = Resolver {
-            candidate: &self.candidate,
+            lookup: &self.candidate,
+            overlay: Some(&map),
             theme,
-            nodes: &map,
         };
         nodes
             .iter()

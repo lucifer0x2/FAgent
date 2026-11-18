@@ -39,7 +39,7 @@ impl Resolver<'_> {
                     }
                 }
                 if v == "fill" && n.props.get("component").is_none() {
-                    if let Some(parent) = n.parent_id.as_ref().and_then(|id| self.nodes.get(id)) {
+                    if let Some(parent) = n.parent_id.as_ref().and_then(|id| self.find(id)) {
                         let props = self.resolve_scoped_props(parent)?;
                         if props.get(key).is_none() || props.get(key).is_some_and(|v| v == "hug") {
                             return Err(fill_in_hug(key, &props));
@@ -92,7 +92,7 @@ impl Resolver<'_> {
                 ));
             }
         }
-        if let Some(parent) = n.parent_id.as_ref().and_then(|id| self.nodes.get(id)) {
+        if let Some(parent) = n.parent_id.as_ref().and_then(|id| self.find(id)) {
             let parent = self.resolve_scoped_props(parent)?;
             if breakpoints::wraps(&parent["layout"])
                 && p.get("width").is_some_and(|v| v == "fill")

@@ -13,8 +13,8 @@ impl Resolver<'_> {
                 ));
             }
             let style = self
-                .styles
-                .get(id)
+                .lookup
+                .style(id)
                 .filter(|s| s.kind == "fill")
                 .ok_or_else(|| {
                     StorageError::validation(

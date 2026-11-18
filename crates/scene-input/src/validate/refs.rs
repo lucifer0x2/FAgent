@@ -11,7 +11,7 @@ impl Resolver<'_> {
                 ));
             }
             if let Some(t) = o.get("tokenId").and_then(Value::as_str) {
-                let token = self.tokens.get(t).ok_or_else(|| {
+                let token = self.lookup.token(t).ok_or_else(|| {
                     StorageError::validation(
                         "tokenId",
                         "Referenced token does not exist; forward references are not supported",
@@ -23,11 +23,11 @@ impl Resolver<'_> {
                         "Token type does not match this property",
                     ));
                 }
-                return self.token_value(&token.id, self.theme);
+                return super::tokens::token_value(self.lookup, &token.id, self.theme);
             }
             if expected == "color" {
                 if let Some(s) = o.get("styleId").and_then(Value::as_str) {
-                    let style = self.styles.get(s).ok_or_else(|| {
+                    let style = self.lookup.style(s).ok_or_else(|| {
                         StorageError::validation("styleId", "Referenced style does not exist")
                     })?;
                     if style.kind != "fill" {
@@ -70,8 +70,8 @@ impl Resolver<'_> {
         let mut out = Map::new();
         if let Some(style_id) = authored.get("styleId") {
             let style = self
-                .styles
-                .get(style_id.as_str().unwrap_or(""))
+                .lookup
+                .style(style_id.as_str().unwrap_or(""))
                 .ok_or_else(|| {
                     StorageError::validation("styleId", "Referenced style does not exist")
                 })?;

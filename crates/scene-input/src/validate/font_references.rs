@@ -69,8 +69,8 @@ impl<'a> FontReferences<'a> {
         let mut ids = BTreeSet::new();
         for theme in &self.themes {
             let resolver = Resolver {
-                candidate: &self.candidate,
-                nodes: self.expanded,
+                lookup: &*self.candidate,
+                overlay: Some(self.expanded),
                 theme,
             };
             for node in nodes.iter().filter(|n| n.kind == NodeKind::Text) {
