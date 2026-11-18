@@ -54,7 +54,8 @@ The active log is `docs/agents/LOG.md`; rejected technologies are listed in `doc
 | Path | Read when |
 | --- | --- |
 | `PLAN.md` | Before any implementation: product requirements and AC. |
-| `README.md` | Setting up, running the app or connecting MCP. |
+| `README.md`, `docs/GETTING-STARTED.md` | Setting up, running the app or connecting MCP (README is the overview; the guide has the details). |
+| `docs/ARCHITECTURE.md`, `docs/PERFORMANCE.md` | Crates and render/export backends; recorded benchmarks. |
 | `docs/ACCEPTANCE.md` | Accepting work; you need AC, check commands or published limits. |
 | `docs/REJECTED-APPROACHES.md` | Before adding a dependency, engine, renderer or storage design. |
 | `tasks/` | Before defining new work. 20/20b: local Kubernetes and public viewer; 21: text ink rounding; 22: fewer tokens per design session (inbox import, compact render, props by kind, compact reads); 23: implementation vs design conformance (expected spec + DOM measurements, expected/actual table); 24: large-project benchmark; 25: incremental validation; 26: compact authoring DSL; 27: native deploy with process-compose; 28: node memory; 29–33: Vello GPU viewer; 34: Vello export, dropping Chromium (first); 35: frame-scoped resolve; 36: fast cold load (web); 37: shape plan/paint caches (Rust); 38: Kubernetes smoke for `liveUpdates` (low priority, backlog); 39: render past revisions (backlog); 40: liquid glass shader (backlog). Order: 34 → 36 → 37 → 31/35 → 33. Status/AC at the top of each file. |
