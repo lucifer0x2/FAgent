@@ -135,6 +135,10 @@ async fn one_bad_item_fails_the_whole_call_and_names_it() {
         assert_eq!(failed["field"], field, "{failed}");
         let message = failed["message"].as_str().unwrap();
         assert!(message.starts_with("items[1]"), "{failed}");
+        // A schema rejection names the same full path in the message as in `field`.
+        if code == "INVALID_REQUEST" && field != "items[1].source" {
+            assert!(message.contains(&format!(" at {field}: ")), "{failed}");
+        }
     }
     // The same font ID from two items.
     fs::write(inbox(&s).join("brand.woff2"), woff2()).unwrap();

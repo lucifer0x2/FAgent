@@ -228,4 +228,34 @@ async fn schema_rejections_name_the_failing_field() {
     let field = unknown["error"]["field"].as_str().unwrap();
     assert_eq!(field, format!("{}…", &long[..64]));
     assert!(message(&unknown).len() < 200, "{unknown}");
+    // Keys that are empty or could read as several steps are quoted.
+    for (key, quoted) in [("", r#"[""]"#), ("a.b", r#"["a.b"]"#)] {
+        let error = s.call("list_projects", json!({ key: 1 })).await;
+        assert_eq!(error["error"]["field"], quoted, "{error}");
+    }
+    // A field every form needs is named; two sources sent together are both named.
+    let no_project = s.call("apply_batch", json!({"idempotencyKey":"k"})).await;
+    assert_eq!(no_project["error"]["field"], "projectId", "{no_project}");
+    assert!(message(&no_project).contains("send one of"), "{no_project}");
+    let both = json!({"projectId":p,"expectedRevision":0,"idempotencyKey":"k","path":"a.png","base64":"AAAA","mediaType":"image/png"});
+    let both = s.call("import_asset", both).await;
+    assert!(
+        message(&both).ends_with("send only one of base64, path"),
+        "{both}"
+    );
+    // An object value is blamed on the object form that accepts its known fields.
+    let alias = json!({"projectId":p,"idempotencyKey":"k","operations":[{"op":"upsert_token","token":{"id":"t","name":"T","type":"color","value":{"aliasId":"a","extra":true}}}]});
+    let alias = s.call("apply_batch", alias).await;
+    assert_eq!(
+        alias["error"]["field"], "operations[0].token.value.extra",
+        "{alias}"
+    );
+    // import_assets names the same full path in the message and `field`.
+    let items = json!({"projectId":p,"expectedRevision":0,"idempotencyKey":"k","items":[{"sourceProjectId":"s","assetId":"a","mediaType":"image/png"}]});
+    let items = s.call("import_assets", items).await;
+    assert_eq!(items["error"]["field"], "items[0].mediaType", "{items}");
+    assert!(
+        message(&items).contains(" at items[0].mediaType: "),
+        "{items}"
+    );
 }

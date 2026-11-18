@@ -13,6 +13,13 @@ pub fn validate(schema: &Value, value: &Value) -> Result<()> {
     check(schema, value, &mut Vec::new()).map_err(Failure::into_error)
 }
 
+/// Validates element `index` of the request array `list`, so the reported path is the
+/// request's (`items[1].mediaType`), never one relative to the element.
+pub fn validate_element(schema: &Value, value: &Value, list: &str, index: usize) -> Result<()> {
+    let mut path = vec![Step::key(list), Step::Index(index)];
+    check(schema, value, &mut path).map_err(Failure::into_error)
+}
+
 type Checked = std::result::Result<(), Failure>;
 
 fn check(schema: &Value, value: &Value, path: &mut Vec<Step>) -> Checked {
@@ -196,7 +203,7 @@ fn check_object(schema: &Value, object: &Map<String, Value>, path: &mut Vec<Step
         .flatten()
         .filter_map(|(key, field)| field.get("const").map(|c| (key, field, c)));
     for (key, field, expected) in discriminators {
-        let step = Step::Key(key.clone());
+        let step = Step::key(key);
         match object.get(key) {
             Some(item) => nested(path, step, |path| check(field, item, path))?,
             None if required.contains(&key.as_str()) => {
@@ -215,7 +222,7 @@ fn check_object(schema: &Value, object: &Map<String, Value>, path: &mut Vec<Step
     let known = |key: &String| properties.is_some_and(|p| p.contains_key(key));
     if schema["additionalProperties"] == false {
         if let Some(key) = object.keys().find(|key| !known(key)) {
-            let at = [path.as_slice(), &[Step::Key(key.clone())]].concat();
+            let at = [path.as_slice(), &[Step::key(key)]].concat();
             return Err(Failure::new(&at, "is not an accepted field", Kind::Unknown));
         }
     }
@@ -225,7 +232,7 @@ fn check_object(schema: &Value, object: &Map<String, Value>, path: &mut Vec<Step
         .map(|key| (*key).to_owned())
         .collect();
     if let Some(first) = missing.first() {
-        let at = [path.as_slice(), &[Step::Key(first.clone())]].concat();
+        let at = [path.as_slice(), &[Step::key(first)]].concat();
         let reason = match missing.len() {
             1 => "is required".to_owned(),
             _ => format!("is required (missing {})", missing.join(", ")),
@@ -233,7 +240,7 @@ fn check_object(schema: &Value, object: &Map<String, Value>, path: &mut Vec<Step
         return Err(Failure::new(&at, reason, Kind::Required(missing)));
     }
     for (key, item) in object {
-        let step = Step::Key(key.clone());
+        let step = Step::key(key);
         if let Some(field) = properties.and_then(|p| p.get(key)) {
             nested(path, step, |path| check(field, item, path))?;
         } else if schema["additionalProperties"].is_object() {

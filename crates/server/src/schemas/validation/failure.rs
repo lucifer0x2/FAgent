@@ -9,8 +9,39 @@ const KEY_ECHO: usize = 64;
 /// One step of a field path: an object key or an array index.
 #[derive(Clone, PartialEq)]
 pub(super) enum Step {
+    /// At most `KEY_ECHO + 1` characters: enough to echo the key and to know it was cut.
     Key(String),
     Index(usize),
+}
+
+impl Step {
+    /// A key step that never copies more of a caller-chosen key than can be echoed.
+    pub fn key(key: &str) -> Self {
+        Self::Key(key.chars().take(KEY_ECHO + 1).collect())
+    }
+    /// A key is written bare unless it is empty or could read as several steps.
+    fn write(&self, out: &mut String) {
+        match self {
+            Step::Index(i) => out.push_str(&format!("[{i}]")),
+            Step::Key(key) => {
+                let mut echoed: String = key.chars().take(KEY_ECHO).collect();
+                if key.chars().nth(KEY_ECHO).is_some() {
+                    echoed.push('…');
+                }
+                let bare = !echoed.is_empty() && !echoed.contains(['.', '[', ']', '"']);
+                if bare {
+                    if !out.is_empty() {
+                        out.push('.');
+                    }
+                    out.push_str(&echoed);
+                } else {
+                    out.push('[');
+                    out.push_str(&Value::String(echoed).to_string());
+                    out.push(']');
+                }
+            }
+        }
+    }
 }
 
 pub(super) enum Kind {
@@ -46,18 +77,7 @@ impl Failure {
     fn field(&self) -> String {
         let mut out = String::new();
         for step in &self.path {
-            match step {
-                Step::Key(key) => {
-                    if !out.is_empty() {
-                        out.push('.');
-                    }
-                    out.extend(key.chars().take(KEY_ECHO));
-                    if key.chars().nth(KEY_ECHO).is_some() {
-                        out.push('…');
-                    }
-                }
-                Step::Index(i) => out.push_str(&format!("[{i}]")),
-            }
+            step.write(&mut out);
         }
         out
     }
@@ -82,19 +102,37 @@ impl Failure {
     }
 }
 
-/// How close a variant came to matching, compared in order: it has the right kind (not a
-/// discriminator miss); it accepts more of the fields sent; it failed deeper in the value;
-/// it failed on a value rather than a missing field, an unknown field or a wrong type.
+/// How close a variant came to matching, compared in order: it has the kind the caller
+/// named (the operation `op` is their stated intent, so a variant of another kind never
+/// wins on field coverage); it accepts more of the fields sent; it failed deeper in the
+/// value; it failed on a value rather than a missing field, an unknown field or a wrong type.
 type Score = (bool, Reverse<usize>, usize, u8);
 
-fn score(choice: &Value, value: &Value, failure: &Failure) -> Score {
-    let strangers = match (value.as_object(), choice["additionalProperties"] == false) {
-        (Some(object), true) => object
-            .keys()
-            .filter(|key| choice["properties"].get(key.as_str()).is_none())
-            .count(),
-        _ => 0,
+/// How many of the fields sent this variant does not accept. A variant that cannot be an
+/// object accepts none of them.
+fn strangers(choice: &Value, value: &Value) -> usize {
+    let Some(object) = value.as_object() else {
+        return 0;
     };
+    let takes_object = match &choice["type"] {
+        Value::String(t) => t == "object",
+        Value::Array(types) => types.iter().any(|t| t == "object"),
+        _ => true,
+    };
+    if !takes_object {
+        return object.len();
+    }
+    if choice["additionalProperties"] != false {
+        return 0;
+    }
+    object
+        .keys()
+        .filter(|key| choice["properties"].get(key.as_str()).is_none())
+        .count()
+}
+
+fn score(choice: &Value, value: &Value, failure: &Failure) -> Score {
+    let strangers = strangers(choice, value);
     let kind = match failure.kind {
         Kind::Value => 3,
         Kind::Required(_) => 2,
@@ -180,8 +218,49 @@ pub(super) fn blame(path: &[Step], value: &Value, failures: Vec<(&Value, Failure
             if forms.len() == 1 {
                 return first;
             }
-            let reason = format!("is missing fields; send one of {}", forms.join(", "));
-            Failure::new(parent, reason, Kind::Required(forms))
+            let forms_text = forms.join(", ");
+            // A field every form needs is the one to name (`projectId`), with the forms.
+            let common = sets[0]
+                .iter()
+                .find(|key| sets.iter().all(|set| set.contains(key)));
+            match common {
+                Some(key) => {
+                    let at = [parent, &[Step::key(key)]].concat();
+                    let reason = format!("is required; then send one of {forms_text}");
+                    Failure::new(&at, reason, Kind::Required(forms))
+                }
+                None => {
+                    let reason = format!("is missing fields; send one of {forms_text}");
+                    Failure::new(parent, reason, Kind::Required(forms))
+                }
+            }
+        }
+        Kind::Unknown if !tied.is_empty() => {
+            // Each form rejects a field another form takes (two sources, say): name them all.
+            let parent = &first.path[..first.path.len() - 1];
+            let mut names: Vec<String> = Vec::new();
+            for failure in std::iter::once(&first).chain(&tied) {
+                let same_parent = failure.path.len() == first.path.len()
+                    && failure.path[..failure.path.len() - 1] == *parent;
+                if let (Kind::Unknown, true, Some(last)) =
+                    (&failure.kind, same_parent, failure.path.last())
+                {
+                    let mut name = String::new();
+                    last.write(&mut name);
+                    if !names.contains(&name) {
+                        names.push(name);
+                    }
+                }
+            }
+            if names.len() == 1 {
+                return first;
+            }
+            let others = names[1..].join(", ");
+            let reason = format!(
+                "cannot be sent with {others}; send only one of {}",
+                names.join(", ")
+            );
+            Failure::new(&first.path, reason, Kind::Unknown)
         }
         _ => first,
     }
