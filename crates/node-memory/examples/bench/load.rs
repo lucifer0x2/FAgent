@@ -7,10 +7,12 @@ use fagent_scene_input::{Snapshot, MAX_NODES};
 use std::path::Path;
 use std::time::{Duration, Instant};
 
-/// A cap that admits the fixture plus the benchmark's own creates.
+/// A cap that admits the fixture plus the benchmark's own creates. Since phase 3 the cap
+/// also bounds the expanded project, and the default fixture expands to exactly
+/// `MAX_NODES`, so the headroom sits above `MAX_NODES` too.
 pub fn limits(authored: usize) -> Limits {
     Limits {
-        max_nodes: MAX_NODES.max(authored + 10_000),
+        max_nodes: MAX_NODES.max(authored) + 10_000,
     }
 }
 
