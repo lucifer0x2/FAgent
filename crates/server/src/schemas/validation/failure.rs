@@ -28,7 +28,7 @@ impl Step {
                 if key.chars().nth(KEY_ECHO).is_some() {
                     echoed.push('…');
                 }
-                // Control characters (line breaks) go through JSON escaping too.
+                // Keys with control characters are quoted too, so a path never spans lines.
                 let bare = !echoed.is_empty()
                     && !echoed
                         .chars()
@@ -39,8 +39,16 @@ impl Step {
                     }
                     out.push_str(&echoed);
                 } else {
+                    // JSON string escaping covers U+0000–U+001F, `"` and `\`; the C1 controls
+                    // U+007F–U+009F (U+0085 is a line break) are escaped here as `\u00XX`.
                     out.push('[');
-                    out.push_str(&Value::String(echoed).to_string());
+                    for c in Value::String(echoed).to_string().chars() {
+                        if c.is_control() {
+                            out.push_str(&format!("\\u{:04x}", c as u32));
+                        } else {
+                            out.push(c);
+                        }
+                    }
                     out.push(']');
                 }
             }
@@ -128,12 +136,7 @@ fn strangers(choice: &Value, value: &Value) -> usize {
                 .unwrap_or(0);
         }
     }
-    let takes_object = match &choice["type"] {
-        Value::String(t) => t == "object",
-        Value::Array(types) => types.iter().any(|t| t == "object"),
-        _ => true,
-    };
-    if !takes_object {
+    if !takes_object(choice) {
         return object.len();
     }
     if choice["additionalProperties"] != false {
@@ -143,6 +146,47 @@ fn strangers(choice: &Value, value: &Value) -> usize {
         .keys()
         .filter(|key| choice["properties"].get(key.as_str()).is_none())
         .count()
+}
+
+fn takes_object(choice: &Value) -> bool {
+    match &choice["type"] {
+        Value::String(t) => t == "object",
+        Value::Array(types) => types.iter().any(|t| t == "object"),
+        _ => true,
+    }
+}
+
+/// Whether the form `choice` accepts key `last` of the object at `rel` below it. A step it
+/// cannot follow (a `oneOf` on the way) counts as accepted, so the key is still reported
+/// as conflicting rather than unknown.
+fn accepts(choice: &Value, rel: &[Step], last: &Step) -> bool {
+    let Some((step, rest)) = rel.split_first() else {
+        let Step::Key(key) = last else {
+            return true;
+        };
+        if let Some(alternatives) = choice["oneOf"].as_array() {
+            if choice.get("type").is_none() && choice.get("properties").is_none() {
+                return alternatives.iter().any(|a| accepts(a, rel, last));
+            }
+        }
+        return takes_object(choice)
+            && (choice["properties"].get(key.as_str()).is_some()
+                || choice["additionalProperties"] != false);
+    };
+    if choice.get("oneOf").is_some() {
+        return true;
+    }
+    let inner = match step {
+        Step::Key(key) => match choice["properties"].get(key.as_str()) {
+            Some(inner) => inner,
+            None => &choice["additionalProperties"],
+        },
+        Step::Index(_) => &choice["items"],
+    };
+    match inner {
+        Value::Object(_) => accepts(inner, rest, last),
+        _ => true,
+    }
 }
 
 fn score(choice: &Value, value: &Value, failure: &Failure) -> Score {
@@ -160,18 +204,18 @@ fn score(choice: &Value, value: &Value, failure: &Failure) -> Score {
 /// The failure to report when no variant of a `oneOf` at `path` matched `value`. Variants
 /// that tie name what they need together: the accepted kinds, types or field sets.
 pub(super) fn blame(path: &[Step], value: &Value, failures: Vec<(&Value, Failure)>) -> Failure {
-    let scored: Vec<(Score, Failure)> = failures
+    let scored: Vec<(Score, &Value, Failure)> = failures
         .into_iter()
-        .map(|(choice, failure)| (score(choice, value, &failure), failure))
+        .map(|(choice, failure)| (score(choice, value, &failure), choice, failure))
         .collect();
-    let Some(top) = scored.iter().map(|(s, _)| *s).max() else {
+    let Some(top) = scored.iter().map(|(s, _, _)| *s).max() else {
         return Failure::value(path, "matches no accepted form");
     };
-    let mut tied: Vec<Failure> = scored
+    let (choices, mut tied): (Vec<&Value>, Vec<Failure>) = scored
         .into_iter()
-        .filter(|(s, _)| *s == top)
-        .map(|(_, f)| f)
-        .collect();
+        .filter(|(s, _, _)| *s == top)
+        .map(|(_, c, f)| (c, f))
+        .unzip();
     let first = tied.remove(0);
     match &first.kind {
         Kind::Discriminator { missing, .. } => {
@@ -251,20 +295,33 @@ pub(super) fn blame(path: &[Step], value: &Value, failures: Vec<(&Value, Failure
         }
         Kind::Unknown if !tied.is_empty() => {
             // Each form rejects a field another form takes (two sources, say): name them all.
+            // A field no tied form takes is simply unknown, and is reported on its own.
             let parent = &first.path[..first.path.len() - 1];
+            let rel = parent.get(path.len()..).unwrap_or_default();
             let mut names: Vec<String> = Vec::new();
-            for failure in std::iter::once(&first).chain(&tied) {
+            let mut unknown = None;
+            for (index, failure) in std::iter::once(&first).chain(&tied).enumerate() {
                 let same_parent = failure.path.len() == first.path.len()
                     && failure.path[..failure.path.len() - 1] == *parent;
                 if let (Kind::Unknown, true, Some(last)) =
                     (&failure.kind, same_parent, failure.path.last())
                 {
+                    if !choices.iter().any(|choice| accepts(choice, rel, last)) {
+                        unknown.get_or_insert(index);
+                        continue;
+                    }
                     let mut name = String::new();
                     last.write(&mut name);
                     if !names.contains(&name) {
                         names.push(name);
                     }
                 }
+            }
+            if let Some(index) = unknown {
+                return match index {
+                    0 => first,
+                    _ => tied.swap_remove(index - 1),
+                };
             }
             if names.len() == 1 {
                 return first;
