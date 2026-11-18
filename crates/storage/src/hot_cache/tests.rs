@@ -105,3 +105,24 @@ fn admission_limit_and_weighted_capacity_bound_large_snapshots() {
     cache.put(&Arc::new(oversized), 1);
     assert!(cache.get("first", 1, 2).is_none());
 }
+
+/// A read that loaded the revision before a commit can fill the cache after the
+/// commit's eviction. That late entry is keyed by its own revision: a read at the
+/// committed revision never gets it, and its own fill replaces it.
+#[test]
+fn a_late_fill_of_the_pre_commit_snapshot_is_never_served_at_the_new_revision() {
+    let cache = SnapshotCache::new("db");
+    let before = snapshot("project", 4);
+    cache.put(&before, 1);
+    // The commit to revision 5 evicts; a slow read of revision 4 fills afterwards.
+    cache.evict("project");
+    cache.put(&before, 1);
+    assert!(cache.get("project", 1, 5).is_none());
+    let after = snapshot("project", 5);
+    cache.put(&after, 1);
+    assert!(Arc::ptr_eq(&cache.get("project", 1, 5).unwrap(), &after));
+    assert!(cache.get("project", 1, 4).is_none());
+    // An even later fill of revision 4 does not displace the newer entry.
+    cache.put(&before, 1);
+    assert!(Arc::ptr_eq(&cache.get("project", 1, 5).unwrap(), &after));
+}

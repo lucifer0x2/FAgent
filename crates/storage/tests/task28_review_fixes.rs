@@ -4,18 +4,29 @@ use common::*;
 use fagent_storage::*;
 use serde_json::{json, Value};
 
-/// Node memory is always on. Each case runs with memory cold and, when `warm`, with
-/// the project loaded into memory by a read before the batches under test.
+/// Node memory is always on. Each case runs with the project resident, as commits
+/// leave it (`warm`), or evicted from memory before the batches under test.
 fn store(root: &std::path::Path) -> Store {
     Store::open(root).unwrap()
 }
 
-fn warm(store: &Store, p: &Project, warm: bool) {
+fn prepare(store: &Store, p: &Project, warm: bool) {
+    let storage: Storage = store.clone().into();
     if warm {
-        let storage: Storage = store.clone().into();
-        storage.reader_snapshot(p.id()).unwrap();
-        assert!(storage.reader_snapshot(p.id()).unwrap().from_memory);
+        let read = storage.reader_snapshot(p.id()).unwrap();
+        assert!(read.from_memory, "commits leave the project resident");
+    } else {
+        storage.evict_memory(p.id());
+        assert!(storage.memory_snapshot(p.id()).is_none());
     }
+}
+
+/// After a commit memory serves the committed revision.
+fn assert_resident_at(store: &Store, p: &Project, revision: u64) {
+    let storage: Storage = store.clone().into();
+    let read = storage.reader_snapshot(p.id()).unwrap();
+    assert!(read.from_memory);
+    assert_eq!(read.shared.snapshot.revision, revision);
 }
 
 fn update(props: Value) -> Vec<Operation> {
@@ -45,14 +56,14 @@ fn scoped(
 
 #[test]
 fn malformed_page_ids_never_commit_or_reserve_replay_keys() {
-    for memory in [false, true] {
+    for warm in [false, true] {
         let temp = tempfile::tempdir().unwrap();
         let store = store(temp.path());
         let p = store.create_project("fixture", "Fixture").unwrap();
         p.apply_batch(request(&p, 0, "seed", initial())).unwrap();
         p.apply_batch(request(&p, 1, "warm", update(json!({"name":"warm"}))))
             .unwrap();
-        warm(&store, &p, memory);
+        prepare(&store, &p, warm);
         let before = p.snapshot().unwrap();
         let db = rusqlite::Connection::open(temp.path().join("fixture/db.sql")).unwrap();
         let invalid = [
@@ -111,6 +122,7 @@ fn malformed_page_ids_never_commit_or_reserve_replay_keys() {
                 .committed_revision,
             3
         );
+        assert_resident_at(&store, &p, 3);
         assert!(p.apply_scoped_batch(req.clone()).unwrap().replayed);
         // Resource operations use the full fallback, with the same nonstrict
         // request shape but no semantic page guard.
@@ -158,7 +170,7 @@ fn resource() -> Vec<Operation> {
 
 #[test]
 fn stale_lww_keeps_latest_conflicts_across_asset_import_and_bundle_restore() {
-    for memory in [false, true] {
+    for warm in [false, true] {
         let temp = tempfile::tempdir().unwrap();
         let store = store(temp.path());
         let p = store.create_project("fixture", "Fixture").unwrap();
@@ -190,7 +202,7 @@ fn stale_lww_keeps_latest_conflicts_across_asset_import_and_bundle_restore() {
             .unwrap();
         p.apply_batch(request(&p, 5, "latest", update(json!({"width":140}))))
             .unwrap();
-        warm(&store, &p, memory);
+        prepare(&store, &p, warm);
         let bundle = p.export_bundle().unwrap();
         let target = tempfile::tempdir().unwrap();
         let restored_store = Store::open(target.path()).unwrap();
@@ -200,7 +212,7 @@ fn stale_lww_keeps_latest_conflicts_across_asset_import_and_bundle_restore() {
         for source in [&p, &restored] {
             let req = request(source, 1, "stale", update(json!({"width":150,"height":60})));
             let result = source.apply_batch(req.clone()).unwrap();
-            assert!(!result.concurrent_unknown, "{result:?}, memory={memory}");
+            assert!(!result.concurrent_unknown, "{result:?}, warm={warm}");
             assert_eq!(result.concurrent_total, Some(2));
             let pairs: Vec<_> = result
                 .concurrent
@@ -216,6 +228,9 @@ fn stale_lww_keeps_latest_conflicts_across_asset_import_and_bundle_restore() {
                 ]
             );
             assert_eq!(result.committed_revision, 7);
+            if std::ptr::eq(source, &p) {
+                assert_resident_at(&store, source, 7);
+            }
             assert!(source.apply_batch(req).unwrap().replayed);
         }
     }

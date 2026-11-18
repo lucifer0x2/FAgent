@@ -73,6 +73,11 @@ fn exercise(storage: &Storage, p: &ProjectHandle) {
         &next.indexes,
         &storage.shared_snapshot(p.id()).unwrap().indexes
     ));
+    // Node memory is always on: the commit left the project resident at its
+    // revision (its first memory read drops duplicate cached indexes).
+    let resident = storage.scoped_snapshot(p.id(), "r1").unwrap();
+    assert!(resident.from_memory);
+    assert_eq!(resident.shared.snapshot.revision, base + 1);
 
     strict(
         p,
