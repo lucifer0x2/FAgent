@@ -77,3 +77,36 @@ fn link_pruning_stamps_links_and_failures_restore_stamps() {
     assert_eq!(state.prop_revision("a", "name"), None);
     assert_eq!(state.placement_revision("b"), None);
 }
+
+#[test]
+fn update_that_changes_nothing_stamps_nothing_but_is_a_changed_id() {
+    let mut state = load(small());
+    state
+        .apply(&[update("a", json!({"name":"A","w":{"x":1,"y":2}}), false)])
+        .unwrap();
+    let before = observe(&state);
+    // Same values by assignment, by merge, a merge removing an absent key, and an
+    // empty patch.
+    let delta = state
+        .apply(&[
+            update("a", json!({"name":"A"}), false),
+            update("a", json!({"w":{"x":1}}), true),
+            update("a", json!({"absent":null}), true),
+            update("a", json!({}), false),
+        ])
+        .unwrap();
+    assert_eq!(delta.nodes.upserted, ["a"]);
+    assert_eq!(delta.changed_ids(), ["a"]);
+    assert_eq!(state.prop_revision("a", "name"), Some(2));
+    assert_eq!(state.prop_revision("a", "w"), Some(2));
+    assert_eq!(state.prop_revision("a", "absent"), None);
+    assert_eq!(state.to_snapshot().nodes, before.snapshot.nodes);
+    assert_eq!(state.index_dump().stamp_bytes, before.dump.stamp_bytes);
+    // A changed value is stamped.
+    state
+        .apply(&[update("a", json!({"name":"B","w":{"x":1}}), true)])
+        .unwrap();
+    assert_eq!(state.prop_revision("a", "name"), Some(4));
+    assert_eq!(state.prop_revision("a", "w"), Some(2));
+    assert_rebuild_matches(&state);
+}

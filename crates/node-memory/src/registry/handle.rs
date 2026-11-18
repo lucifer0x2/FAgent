@@ -58,7 +58,6 @@ impl ProjectHandle {
         self.diverged.load(Ordering::Relaxed)
     }
 
-    #[allow(dead_code)] // used by `begin` (batch module)
     pub(crate) fn mark_diverged(&self) {
         self.diverged.store(true, Ordering::Relaxed);
     }
@@ -104,6 +103,31 @@ impl ProjectHandle {
             log,
             delta,
         ))
+    }
+
+    /// [`Self::begin`] when the project is at `expected` and the write lock is held:
+    /// `None` when it is at another revision. Returns the published view the batch
+    /// starts from together with the staging result, so a caller can inspect a
+    /// rejected batch against the exact base without holding the lock.
+    pub(crate) fn begin_at(
+        &self,
+        expected: u64,
+        ops: &[Operation],
+    ) -> Option<(Arc<ReadView>, Result<Staged<'_>>)> {
+        self.touch();
+        let mut state = self.state.write().unwrap_or_else(PoisonError::into_inner);
+        if state.revision() != expected {
+            return None;
+        }
+        let before = self
+            .published
+            .read()
+            .unwrap_or_else(PoisonError::into_inner)
+            .clone();
+        let staged = state
+            .stage(ops)
+            .map(|(log, delta)| Staged::locked(state, &self.bytes, &self.published, log, delta));
+        Some((before, staged))
     }
 
     /// Estimated bytes as of the last load or successful batch.
