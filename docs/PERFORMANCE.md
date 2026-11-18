@@ -43,18 +43,24 @@ above.
 | Same commit, real project of 7,025 nodes | 28.5 ms | **22.5 ms** |
 | Shadow mirror cost per commit (`SHADOW`) | – | 114 µs (17–26 µs on real projects); first load 76 ms |
 
-Task41 phase 1 (always on, same 200k fixture: 178,604 nodes, PostgreSQL, release, median of 30, run
-back to back on an idle machine): a small props edit commits in **36.5 ms** (`memory.begin` 30.4,
-persist 4.8), against 55.9 ms for the former opt-in memory path and 988 ms for the former default
-path in the same session. The first commit on a cold project loads and admits it under the row lock
-(about 3.8 s at 200k). Ops the delta validator does not cover yet (pages, root ops, tokens, styles,
-notes, `theme`/`links`/`flowStart`/`animations`) still validate the whole project, in memory.
-See [TASK41-REPORT.md](TASK41-REPORT.md).
+Task41 phase 3 (same 200k fixture: 178,604 authored nodes, PostgreSQL, release, 30 runs after two warm-ups,
+median / p95, load average 2.3–3.5): a commit validates only the batch's delta and the nodes that depend on it
+(per-op checks, then the end-of-batch delta rules); the whole project is validated once per load.
 
-In-memory operations on the 200k fixture take well under a millisecond: a props update takes
-584 ns, and a begin + commit takes 542 ns. Memory use is about 1.3 KB of RAM per authored node.
-Later node-memory stages (persistent reader indexes, delta validation, HOT reader cleanup) have
-been implemented, but their benchmarks are deferred. See the
+| Case (`node_memory_writes_bench`) | 200k fixture | Validation | ~7k fixture (6,376 nodes) |
+| --- | ---: | ---: | ---: |
+| Small props edit, plain node | 2.9–4.3 / 4.9–5.4 ms | 0.01 ms | 1.0 / 1.3 ms |
+| Props edit on a master child (929 instances) | 21.2–22.2 / 23.1–25.7 ms | 16–17 ms | 1.5 / 1.7 ms |
+| Reparent of a 152-node section | 5.3–5.7 / 5.9–7.2 ms | 0.8 ms | 1.6 / 1.8 ms |
+| Token edit reaching 890 instances | 20.7–21.8 / 21.8–23.4 ms | 15–17 ms | 1.5 / 1.6 ms |
+| Note create / page create | 2.5–4.4 / 3.3–5.4 ms | 0.01 ms | 1.1 / 1.2–1.4 ms |
+| Cold commit (load + admission + commit) | 1.12–1.19 / 1.16–1.24 s | – | 48 / 54 ms |
+| `get_design_context`, storage part, one frame | 0.8 / 1.0 ms | – | 0.45 / 0.48 ms |
+
+The same master-child edit took 36.5 ms in phase 1 and 31.8 ms in phase 2 (it was reported there as the "small props
+edit"), and 988 ms on the former database-only path. RAM is about 1.25 KB per authored node (engine estimate; 1.6 KB
+of process footprint). Phase breakdown and engine-level numbers: [TASK41-REPORT.md](TASK41-REPORT.md) "Phase 3".
+The Task28 stages that preceded the engine are described in the
 [I3b](TASK28-I3B-REPORT.md), [I4](TASK28-I4-REPORT.md) and
 [I5](TASK28-I5-REPORT.md) reports and the
 [base verification](FAGENT-BASE-VERIFICATION.md).

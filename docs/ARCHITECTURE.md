@@ -19,7 +19,7 @@ browser viewer (web/) ──► engine-wasm in a Worker: scene-wasm → fagent-p
 | --- | --- |
 | `crates/server` (`fagent-server`) | HTTP/MCP/SSE, jobs (render, export), viewer static files, public viewer |
 | `crates/storage` | SQLite or PostgreSQL storage, revisions, assets and fonts |
-| `crates/node-memory` | `NodeMemory`: in-memory engine for hot projects; every latest-revision read and every batch goes through it |
+| `crates/node-memory` | `NodeMemory`: in-memory engine for hot projects; every latest-revision read and every batch goes through it. Full validation once per load (admission); each batch is validated on its delta (per-op checks, then the end-of-batch rules of `scene-input` `validate::delta`) |
 | `crates/scene-input` | Authored models, validation and scene input preparation |
 | `crates/layout` | Taffy layout with text measurement (also the chromium worker's `layout-step`) |
 | `crates/text` | Font loading, HarfRust shaping and glyph outlines shared by measure and paint |

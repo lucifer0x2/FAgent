@@ -140,17 +140,18 @@ Agents can read the authoring guides as MCP resources (`skill://fagent/author-fr
 With **node-memory**, hot projects stay in RAM with indexes updated per operation, while the
 database remains the source of truth. On a 200k-node project (PostgreSQL, release build):
 
-| Measurement | Node-memory off | Node-memory on |
+| Measurement | Database-only path (former) | Node-memory (always on) |
 | --- | --- | --- |
 | `get_design_context`, one frame | 156 ms cached; 207 ms right after a write | **1.5 ms** warm; **2.0 ms** right after a write |
-| Page-scoped commit (median of 30) | 636 ms | **468 ms** |
-| In-memory props update / begin + commit | – | **584 ns / 542 ns** |
-| RAM per authored node | – | **~1.3 KB** |
+| Commit of a props edit on a master child (929 instances), median of 30 | 988 ms | **21 ms** |
+| Commit of a props edit on a plain node, median of 30 | – | **2.9 ms** (validation 0.01 ms) |
+| First access to a cold project (load + full validation once) | – | **1.1 s** |
+| RAM per authored node | – | **~1.25 KB** |
 
-Node-memory is always on since [Task41](tasks/41-node-memory-engine.md) phase 1; the "off" column is the
-former database-only path. A small props edit on the same fixture now commits in about 36 ms.
-These are single runs on a generated fixture, recorded in the repository; read them as orders of
-magnitude. Method, flags and the backend and viewer benchmarks: [Performance](docs/PERFORMANCE.md).
+Since [Task41](tasks/41-node-memory-engine.md) phase 3 a commit validates only the batch's delta and the nodes that
+depend on it; the whole project is validated once, when it is loaded. Medians on a generated fixture under moderate
+machine load, recorded in the repository; read them as orders of magnitude. Method and the backend and viewer
+benchmarks: [Performance](docs/PERFORMANCE.md).
 
 ## Documentation
 
