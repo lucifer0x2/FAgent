@@ -1,5 +1,6 @@
 //! Configurable node cap: a custom limit replaces the scene-input `MAX_NODES` on load
-//! and on create, and the error names the limit in force.
+//! and on batch end (checked on the final state, no operation index), and the error
+//! names the limit in force.
 mod support;
 
 use fagent_node_memory::{Limits, ProjectState};
@@ -40,6 +41,7 @@ fn higher_limit_loads_and_creates_beyond_max_nodes() {
         .apply(&[create("extra", NodeKind::Rectangle, "p", json!({}))])
         .expect_err("custom cap reached");
     assert_eq!(error.field.as_deref(), Some("nodes"));
+    assert_eq!(error.op_index, None, "the cap is a batch-level rule");
     assert!(error.message.contains(&(MAX_NODES + 2).to_string()));
 }
 
@@ -56,6 +58,7 @@ fn lower_limit_rejects_load_and_create() {
         .apply(&[create("extra", NodeKind::Rectangle, "p", json!({}))])
         .expect_err("over custom cap");
     assert_eq!(error.field.as_deref(), Some("nodes"));
+    assert_eq!(error.op_index, None);
     assert_eq!(state.len(), 3);
 }
 #[test]
@@ -81,4 +84,32 @@ fn node_cap_applies_on_load_and_create() {
     full.nodes.last_mut().unwrap().id = "over".into();
     let error = ProjectState::from_snapshot(full).err().expect("over cap");
     assert_eq!(error.field.as_deref(), Some("nodes"));
+}
+
+#[test]
+fn cap_is_checked_on_the_final_state_of_the_batch() {
+    let limits = Limits { max_nodes: 3 };
+    let mut state = ProjectState::from_snapshot_with(flat(3), limits).expect("at the cap");
+    let before = observe(&state);
+    // Over the cap mid-batch, back under it at the end: accepted, as Candidate does.
+    state
+        .apply(&[
+            create("x", NodeKind::Rectangle, "p", json!({})),
+            delete("n1"),
+        ])
+        .expect("final count is within the cap");
+    assert_eq!(state.len(), 3);
+    // Over the cap at the end: rejected with no operation index, state untouched.
+    let held = observe(&state);
+    let error = state
+        .apply(&[
+            create("y", NodeKind::Rectangle, "p", json!({})),
+            create("z", NodeKind::Rectangle, "p", json!({})),
+            delete("x"),
+        ])
+        .expect_err("final count is over the cap");
+    assert_eq!(error.field.as_deref(), Some("nodes"));
+    assert_eq!(error.op_index, None);
+    assert_unchanged(&state, &held);
+    assert_ne!(held.revision, before.revision);
 }

@@ -39,9 +39,6 @@ impl Txn<'_> {
         };
         checks::instance_target(self.store, &node)?;
         self.check_index(id, parent, index)?;
-        if self.store.len() >= self.max_nodes {
-            return Err(checks::too_many(self.max_nodes));
-        }
         let stamps = Stamps::created(self.rev);
         let key = self.store.insert(node, parent, stamps, &mut self.log);
         let derived = self.store.derive(key);
