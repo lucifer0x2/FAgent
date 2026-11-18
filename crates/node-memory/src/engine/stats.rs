@@ -37,7 +37,7 @@ pub struct MemoryStats {
     /// `rejected`).
     pub rejected_direct: u64,
     /// Rejections of the per-operation checks whose public error came from the
-    /// reference validator (part of `rejected`, or a divergence).
+    /// reference validator. Always 0: every `Txn` rejection is the public error.
     pub rejected_routed: u64,
     /// Batches where the engine and the reference validator disagreed.
     pub divergences: u64,

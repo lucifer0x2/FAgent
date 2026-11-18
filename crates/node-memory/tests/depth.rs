@@ -1,5 +1,6 @@
-//! Maximum depth 128 (a page is depth 1): checked on load, create and reparent,
-//! including the descendants a reparent moves deeper, so no stored node ever exceeds it.
+//! Maximum depth 128 (a page is depth 1): checked on load, and per operation on the
+//! created or moved node. Descendants a reparent moves deeper are left to end-of-batch
+//! validation, as in `Candidate`.
 mod support;
 
 use fagent_node_memory::{ManualClock, MemoryConfig, NodeMemory, ProjectState};
@@ -45,19 +46,40 @@ fn depth_limit_on_load_create_and_reparent() {
             .apply(&[create("x", NodeKind::Frame, "c127", json!({}))])
             .unwrap_err(),
     );
-    // g lands at depth 127 + 1, but its child h would be at 129: rejected, although
-    // `Candidate::apply` checks only the moved node (full validation rejects it).
-    depth_error(state.apply(&[reparent("g", "c126")]).unwrap_err());
+    depth_error(state.apply(&[reparent("g", "c127")]).unwrap_err());
     assert_unchanged(&state, &before);
     state.apply(&[reparent("h", "c126")]).unwrap();
     state.apply(&[reparent("g", "c125")]).unwrap();
     assert_rebuild_matches(&state);
 }
 
-/// Through `HotProject::begin`: the moved node's own depth is a per-operation error
-/// returned as is; its descendants' depth is not, so that error is the reference's.
+/// g lands at depth 127 + 1, but its child h would be at 129. `Candidate::apply`
+/// checks only the moved node, and so does `Txn`: full validation rejects the batch.
+/// Until then the working state holds the deep subtree, and walking it stays safe.
 #[test]
-fn descendant_depth_takes_the_reference_error() {
+fn descendants_moved_too_deep_are_left_to_full_validation() {
+    let mut state = load(snapshot(chain(127)));
+    let staged = state
+        .begin(&[reparent("g", "c126")])
+        .expect("per-operation checks pass");
+    assert_eq!(staged.state().subtree("c1").unwrap().count(), 129);
+    assert_eq!(staged.state().page_of("h").unwrap().id, "p");
+    drop(staged);
+    let error = state
+        .apply(&[
+            reparent("g", "c126"),
+            create("x", NodeKind::Frame, "h", json!({})),
+        ])
+        .unwrap_err();
+    assert_eq!(error.op_index, Some(1));
+    depth_error(error);
+}
+
+/// Through `HotProject::begin`: the moved node's own depth is a per-operation error
+/// returned as is; its descendants' depth is found by end-of-batch validation, with no
+/// operation index.
+#[test]
+fn descendant_depth_is_an_end_of_batch_error() {
     let memory = NodeMemory::new(MemoryConfig::default(), Arc::new(ManualClock::default()));
     let project = memory.load(snapshot(chain(127))).unwrap();
     let error = project
@@ -66,13 +88,11 @@ fn descendant_depth_takes_the_reference_error() {
         .unwrap();
     assert_eq!(error.op_index, Some(0));
     depth_error(error);
-    let stats = memory.stats();
-    assert_eq!((stats.rejected_direct, stats.rejected_routed), (1, 0));
     let error = project.begin(1, &[reparent("g", "c126")]).err().unwrap();
     assert_eq!(error.op_index, None, "found by full validation");
     depth_error(error);
     let stats = memory.stats();
-    assert_eq!((stats.rejected_direct, stats.rejected_routed), (1, 1));
+    assert_eq!((stats.rejected_direct, stats.rejected_routed), (1, 0));
     assert_eq!((stats.rejected, stats.divergences), (2, 0));
     assert!(!project.diverged());
 }

@@ -151,10 +151,6 @@ impl Store {
         self.members(&self.users, self.ids.get(master))
     }
 
-    pub(crate) fn has_users(&self, master: &str) -> bool {
-        self.users(master).next().is_some()
-    }
-
     /// Nodes with a `props.links` entry whose `to` is `target`.
     pub(crate) fn linking(&self, target: &str) -> impl Iterator<Item = Key> + '_ {
         self.members(&self.links, self.ids.get(target))

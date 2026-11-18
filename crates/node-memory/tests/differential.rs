@@ -1,9 +1,9 @@
 //! Equivalence oracle: random batches of stored `Operation`s applied to the lib and to
 //! `Candidate::from_snapshot` + `apply` + `prune_links`. Accepted batches must leave
 //! identical rows (nodes with sort keys, tokens, styles, notes) and identical changed
-//! ids, with indexes equal to a rebuild; rejections must carry the same error. The only
-//! allowed differences are `oracle::lib_only` and, for the state alone, errors after a
-//! token upsert (`oracle::after_token`).
+//! ids, with indexes equal to a rebuild; rejections must carry the same error, with no
+//! allowed difference. Through `HotProject::begin` the reference also runs full
+//! validation; only the order of several end-of-batch errors may differ there.
 mod support;
 
 use fagent_node_memory::{MemoryConfig, MemoryStats, NodeMemory, SystemClock};
@@ -35,13 +35,7 @@ fn state_run(seeds: std::ops::RangeInclusive<u64>, invalid: bool) -> Tally {
             );
         }
     }
-    eprintln!(
-        "accepted {}, rejected {}, lib-only {}, after a token upsert {}",
-        tally.accepted,
-        tally.rejected(),
-        tally.lib_only,
-        tally.deferred
-    );
+    eprintln!("accepted {}, rejected {}", tally.accepted, tally.rejected());
     for (kind, count) in &tally.rejected {
         eprintln!("  {count:>4} {kind}");
     }
@@ -113,14 +107,12 @@ fn begin_run(seeds: std::ops::RangeInclusive<u64>, invalid: bool) -> (Totals, Me
     report(&totals);
     let stats = memory.stats();
     eprintln!(
-        "per-op rejections: {} direct, {} routed ({} at or after a token upsert); engine: {} direct, {} routed",
-        totals.per_op_direct,
-        totals.per_op_routed,
-        totals.per_op_token,
-        stats.rejected_direct,
-        stats.rejected_routed
+        "per-op rejections: {} direct, {} otherwise; engine: {} direct, {} routed",
+        totals.per_op_direct, totals.per_op_routed, stats.rejected_direct, stats.rejected_routed
     );
     assert!(totals.differences.is_empty(), "differences found");
+    // Every per-operation error, token writes included, comes from `Txn` itself.
+    assert_eq!((totals.per_op_routed, stats.rejected_routed), (0, 0));
     assert_eq!(stats.divergences, 0);
     assert_eq!(stats.commits as usize, totals.committed);
     assert_eq!(stats.rollbacks as usize, totals.dropped);
@@ -176,9 +168,5 @@ fn begin_property_errors_match_candidate() {
         totals.per_op_direct > 1000,
         "per-op errors returned directly"
     );
-    // Besides errors at or after a token upsert (tokens are validated once per
-    // batch), only a reparent moving a subtree too deep is per-op and still routed.
-    assert!(totals.per_op_token > 0, "token batches are routed");
-    assert!((totals.per_op_routed - totals.per_op_token) * 100 <= totals.per_op_direct);
     assert!(stats.rejected_direct >= totals.per_op_direct as u64);
 }

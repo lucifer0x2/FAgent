@@ -3,9 +3,10 @@
 //! exactly as before.
 mod support;
 
-use fagent_node_memory::Operation;
+use fagent_node_memory::{ManualClock, MemoryConfig, NodeMemory, Operation};
 use fagent_scene_input::{NodeKind, Token};
 use serde_json::{json, Value};
+use std::sync::Arc;
 use support::*;
 
 /// A prefix touching every kind of change: create, update, reparent (across pages and
@@ -152,9 +153,26 @@ fn update_failures_roll_back() {
     let field = Some("props.componentId");
     assert_fails(update("i2", json!({"componentId":"f1"}), true), VF, field);
     assert_fails(update("i2", json!({"componentId":null}), true), VF, field);
-    // newi (created in the prefix) uses master "new": checked at the end of the batch.
-    let in_use = update("new", json!({"component":null}), true);
-    assert_fails_at(in_use, "COMPONENT_IN_USE", None, false);
+}
+
+/// newi (created in the prefix) uses master "new". Unmarking "new" is no operation
+/// error, as in `Candidate::apply`; full validation rejects the batch on the instance,
+/// without an operation index.
+#[test]
+fn unmarking_a_used_master_is_left_to_full_validation() {
+    let mut ops = prefix();
+    ops.push(update("new", json!({"component":null}), true));
+    let mut state = load(small());
+    assert!(state.begin(&ops).is_ok(), "per-operation checks pass");
+    let memory = NodeMemory::new(MemoryConfig::default(), Arc::new(ManualClock::default()));
+    let project = memory.load(small()).unwrap();
+    let error = project
+        .begin(1, &ops)
+        .err()
+        .expect("full validation rejects");
+    assert_eq!(error.field.as_deref(), Some("props.componentId"));
+    assert_eq!(error.op_index, None);
+    assert_eq!(memory.stats().rejected_direct, 0);
 }
 
 #[test]

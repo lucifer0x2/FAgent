@@ -1,32 +1,21 @@
-//! End-of-batch steps, after every operation applied: link pruning (as
-//! `Candidate::prune_links`) and the checks full validation would make on the final
-//! state rather than per operation.
+//! End-of-batch steps, after every operation applied: the node cap and link pruning
+//! (as `Candidate::prune_links`).
 use super::{Rejection, Txn};
 use crate::checks;
-use crate::props::{is_master, pruned_links};
+use crate::props::pruned_links;
 use crate::store::Key;
-use fagent_scene_input::validate::validate_tokens;
-use fagent_scene_input::Result;
 use std::collections::{BTreeSet, HashSet};
 
 impl Txn<'_> {
     /// The node cap is checked here, on the final state and without an operation
-    /// index, as `Candidate::validate` does: a batch may pass the cap mid-way and
-    /// delete back under it.
-    /// The token set is validated here, once, when the batch upserted a token
-    /// ([`Txn::deferred`]).
-    /// Every error here is [`Rejection::inexact`]: `Candidate` finds these during full
-    /// validation (or after a token upsert), in its own order, and the engine cap may
-    /// be below its cap.
+    /// index, as `Candidate::validate` checks it first: a batch may pass the cap
+    /// mid-way and delete back under it.
     pub(crate) fn finish(&mut self) -> std::result::Result<(), Rejection> {
         if self.store.len() > self.max_nodes {
-            return Err(Rejection::inexact(checks::too_many(self.max_nodes)));
-        }
-        if self.deferred() {
-            validate_tokens(&*self.store).map_err(Rejection::inexact)?;
+            return Err(checks::too_many(self.max_nodes).into());
         }
         self.prune_links();
-        self.check_masters().map_err(Rejection::inexact)
+        Ok(())
     }
 
     /// Drops links to nodes the batch deleted and did not recreate; an emptied `links`
@@ -50,27 +39,5 @@ impl Txn<'_> {
             self.store.stamp_key(key, "links", self.rev);
             self.touch_key(key);
         }
-    }
-
-    /// A node the batch touched that is no longer a component master must have no
-    /// instances left (an earlier `update_node` removed `component`).
-    fn check_masters(&self) -> Result<()> {
-        if !self.unmarked {
-            return Ok(());
-        }
-        let mut ids: Vec<&String> = self.nodes.keys().collect();
-        ids.sort_unstable();
-        for id in ids {
-            let Some(slot) = self.store.get(id) else {
-                continue;
-            };
-            if is_master(&slot.node.kind, &slot.node.props) || !self.store.has_users(id) {
-                continue;
-            }
-            let users = self.store.users(id);
-            let users = users.map(|u| self.store.node(u).id.clone()).collect();
-            return Err(checks::component_in_use(users));
-        }
-        Ok(())
     }
 }

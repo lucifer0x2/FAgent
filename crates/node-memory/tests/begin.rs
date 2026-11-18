@@ -183,9 +183,10 @@ fn a_node_cap_below_the_scene_input_cap_is_a_rejection_not_a_divergence() {
     assert_eq!(error.field.as_deref(), Some("nodes"));
     assert!(!project.diverged());
     assert_eq!(memory.stats().divergences, 0);
-    // The cap is an end-of-batch check: its error goes through the reference.
-    assert_eq!(memory.stats().rejected_routed, 1);
-    assert_eq!(memory.stats().rejected_direct, 0);
+    // The cap is an end-of-batch check, made first as full validation does: its
+    // error is `Txn`'s own.
+    assert_eq!(memory.stats().rejected_direct, 1);
+    assert_eq!(memory.stats().rejected_routed, 0);
 }
 
 #[test]
@@ -212,11 +213,12 @@ fn color(id: &str, value: serde_json::Value) -> fagent_node_memory::Operation {
     }
 }
 
-/// `Txn` validates tokens once per batch; `Candidate` after every upsert. A batch
-/// whose token set is invalid after one upsert and repaired by the next one, and an
-/// error after a token upsert, still get `Candidate`'s per-operation error.
+/// `Candidate` validates every token after each upsert; `Txn` checks what the write can
+/// affect, right after it. A batch whose token set is invalid after one upsert and
+/// repaired by the next one, and an error after a token upsert, get `Candidate`'s
+/// per-operation error straight from `Txn`.
 #[test]
-fn token_errors_are_candidates_although_checked_once_per_batch() {
+fn token_errors_are_candidates_per_upsert() {
     let (memory, project) = setup();
     let repaired = [
         color("alias", json!({"aliasId":"later"})),
@@ -235,7 +237,7 @@ fn token_errors_are_candidates_although_checked_once_per_batch() {
     assert_eq!(error.field.as_deref(), Some("token.aliasId"));
 
     let stats = memory.stats();
-    assert_eq!((stats.rejected, stats.rejected_direct), (2, 0));
-    assert_eq!((stats.rejected_routed, stats.divergences), (1, 0));
+    assert_eq!((stats.rejected, stats.rejected_direct), (2, 2));
+    assert_eq!((stats.rejected_routed, stats.divergences), (0, 0));
     assert!(!project.diverged());
 }

@@ -10,18 +10,13 @@
 //!
 //! The reference is `Candidate::apply` per operation, link pruning and `validate_after`
 //! over the base view, all in memory. `Txn` runs `Candidate::apply`'s per-operation
-//! checks in its order on the working state, so most of its rejections are the public
-//! error as is (`MemoryStats::rejected_direct`). The few it makes at another point than
-//! `Candidate` (a reparented subtree too deep, the token set, the end-of-batch node cap
-//! and component masters), and every error after a token upsert, go through the
-//! reference to produce the public error (`MemoryStats::rejected_routed`). If the
-//! reference then accepts a batch the lib rejected (or the changed ids differ) the
-//! engine and the validator disagree: the project is flagged as diverged and
-//! `STORAGE_FAILED` is returned.
+//! checks in its order on the working state (token writes included), and the
+//! end-of-batch node cap first, as full validation does, so each of its rejections is
+//! the public error as is (`MemoryStats::rejected_direct`). If the reference produces
+//! other changed ids than the lib, the engine and the validator disagree: the project
+//! is flagged as diverged and `STORAGE_FAILED` is returned.
 //!
-//! Token batches are never local (`memory::supports` rejects them): `Txn` validates
-//! the token set once per batch, so only the reference rejects a batch whose token set
-//! was invalid after one upsert and repaired by a later one.
+//! Token batches are never local (`memory::supports` rejects them).
 mod footprint;
 mod reference;
 mod rows;
@@ -145,13 +140,9 @@ impl HotProject {
         };
         let mut staged = match staged {
             Ok(staged) => staged,
-            Err(rejection) if rejection.exact => {
+            Err(rejection) => {
                 Stats::bump(&self.stats.rejected_direct);
                 return Err(self.reject(rejection.into_error()));
-            }
-            Err(rejection) => {
-                Stats::bump(&self.stats.rejected_routed);
-                return Err(self.rejected(&before, ops, rejection.into_error()));
             }
         };
         let changed = staged.delta().changed_ids();
@@ -184,19 +175,6 @@ impl HotProject {
     fn reject(&self, error: StorageError) -> StorageError {
         Stats::bump(&self.stats.rejected);
         error
-    }
-
-    /// The error for a batch the lib's `Txn` rejected inexactly: the reference's, which is the
-    /// public one. A reference that accepts is a divergence, except when the engine's
-    /// node cap is configured below the scene-input cap.
-    fn rejected(&self, before: &ReadView, ops: &[Operation], txn: StorageError) -> StorageError {
-        match reference::run(before, ops) {
-            Err(error) => self.reject(error),
-            Ok(_) if txn.code == "VALIDATION_FAILED" && txn.field.as_deref() == Some("nodes") => {
-                self.reject(txn)
-            }
-            Ok(_) => self.diverge(&txn.code),
-        }
     }
 
     fn diverge(&self, what: &str) -> StorageError {

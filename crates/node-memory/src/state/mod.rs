@@ -110,10 +110,9 @@ impl ProjectState {
     /// Applies `ops` atomically and holds them staged: the result exposes the delta and
     /// the staged state; committing keeps it, aborting or dropping leaves `self` as it
     /// was. On error nothing changes and the error carries the failing operation index
-    /// (end-of-batch checks carry none). Tokens are validated once, at the end of the
-    /// batch: unlike `Candidate::apply`, a batch whose token set is invalid after one
-    /// upsert and repaired by a later one is accepted, and errors after a token upsert
-    /// may differ from `Candidate`'s (the engine reports `Candidate`'s for both).
+    /// (end-of-batch checks carry none). The checks are `Candidate::apply`'s, token
+    /// writes included, plus the node cap; the rest of full validation (for example
+    /// descendants a reparent moved too deep) is not made here.
     pub fn begin(&mut self, ops: &[Operation]) -> Result<Staged<'_>> {
         let (next, delta, names) = self.stage(ops, None).map_err(Rejection::into_error)?;
         Ok(Staged::direct(self, next, delta, names))

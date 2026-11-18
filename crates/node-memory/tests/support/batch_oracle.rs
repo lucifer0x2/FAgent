@@ -40,12 +40,9 @@ pub struct Totals {
     /// Accept/reject, rows, changed ids, per-op errors: must stay empty.
     pub differences: Vec<String>,
     /// Reference per-operation rejections the engine returned straight from `Txn`
-    /// (`MemoryStats::rejected_direct`) and through the reference.
+    /// (`MemoryStats::rejected_direct`) and otherwise.
     pub per_op_direct: usize,
     pub per_op_routed: usize,
-    /// Routed per-operation rejections at or after a token upsert (`Txn` validates
-    /// tokens once per batch; part of `per_op_routed`).
-    pub per_op_token: usize,
     /// End-of-batch rejections where code or field differ from `validate()`'s first
     /// error (error order may differ; accept/reject agree).
     pub order: Vec<String>,
@@ -120,16 +117,7 @@ pub fn round(
         (Err(a), Expected::PerOp(e)) => {
             match direct {
                 true => totals.per_op_direct += 1,
-                false => {
-                    totals.per_op_routed += 1;
-                    let upto = e.op_index.map_or(ops.len(), |i| i + 1).min(ops.len());
-                    if ops[..upto]
-                        .iter()
-                        .any(|op| matches!(op, Operation::UpsertToken { .. }))
-                    {
-                        totals.per_op_token += 1;
-                    }
-                }
+                false => totals.per_op_routed += 1,
             }
             if !same_error(&a, &e) {
                 diff(format!(
