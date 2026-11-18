@@ -62,3 +62,9 @@ Append-only. Rules for entries:
 
 - Packaged [Task 41](../../tasks/41-node-memory-engine.md) at the user's request after the commit-path review: one self-contained engine struct in `crates/node-memory` with no database knowledge, always on (no `FAGENT_NODE_MEMORY_*` flags or modes), full validation once at load (warm | cold), diff-only validation per commit with per-op checks kept, error order among end-of-batch errors allowed to change, no pre-expanded instances.
 - Open: not assigned; admission behavior for invalid stored data to confirm in phase 2.
+
+### CodeRabbit pull request review — 2026-11-18
+
+- Added `.coderabbit.yaml` (schema v2, checked offline against `schema.v2.json`): English-language reviews, AGENTS.md as a code guideline, Betterleaks/TruffleHog/Presidio scanners on, and three `error` pre-merge checks (English only, no secrets or passwords, no local absolute paths). Feature review: per-area path instructions (storage, node-memory, scene-input, server, layout/text/paint, viewer) and four `warning` checks (task acceptance criteria from `tasks/`, tests for behavior changes, contract and docs in sync, no rejected approach). `auto_approvals` requests changes while a blocking check is open; authors cannot self-approve through `@coderabbitai approve`.
+- CodeRabbit is advisory review on top of the deterministic gate; `public-content.yml` (check script plus gitleaks history scan) stays the blocking check.
+- Open: the maintainer installs the CodeRabbit GitHub App on the repository and, if wanted, marks `public-content` and `CodeRabbit` as required checks on `main`. Public repositories under 10 stars get reviews only on `@coderabbitai review`.
