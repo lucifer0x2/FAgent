@@ -229,7 +229,11 @@ async fn schema_rejections_name_the_failing_field() {
     assert_eq!(field, format!("{}…", &long[..64]));
     assert!(message(&unknown).len() < 200, "{unknown}");
     // Keys that are empty or could read as several steps are quoted.
-    for (key, quoted) in [("", r#"[""]"#), ("a.b", r#"["a.b"]"#)] {
+    for (key, quoted) in [
+        ("", r#"[""]"#),
+        ("a.b", r#"["a.b"]"#),
+        ("a\nb", r#"["a\nb"]"#),
+    ] {
         let error = s.call("list_projects", json!({ key: 1 })).await;
         assert_eq!(error["error"]["field"], quoted, "{error}");
     }
@@ -250,6 +254,19 @@ async fn schema_rejections_name_the_failing_field() {
         alias["error"]["field"], "operations[0].token.value.extra",
         "{alias}"
     );
+    // A nested oneOf counts as its best alternative: the themed form takes two of three.
+    let themed = json!({"projectId":p,"idempotencyKey":"k","operations":[{"op":"upsert_token","token":{"id":"t","name":"T","type":"color","value":{"default":"#fff","themes":{},"extra":true}}}]});
+    let themed = s.call("apply_batch", themed).await;
+    assert_eq!(
+        themed["error"]["field"], "operations[0].token.value.extra",
+        "{themed}"
+    );
+    // The op the caller named selects the variant before field coverage: create_node
+    // accepts kind, but this is a delete_subtree with an extra field.
+    let delete = json!({"projectId":p,"idempotencyKey":"k","operations":[{"op":"delete_subtree","id":"x","kind":"frame","parentId":"p","props":{}}]});
+    let delete = s.call("apply_batch", delete).await;
+    assert_eq!(delete["error"]["opIndex"], 0, "{delete}");
+    assert_eq!(delete["error"]["field"], "operations[0].kind", "{delete}");
     // import_assets names the same full path in the message and `field`.
     let items = json!({"projectId":p,"expectedRevision":0,"idempotencyKey":"k","items":[{"sourceProjectId":"s","assetId":"a","mediaType":"image/png"}]});
     let items = s.call("import_assets", items).await;

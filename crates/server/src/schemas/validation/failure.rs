@@ -28,7 +28,11 @@ impl Step {
                 if key.chars().nth(KEY_ECHO).is_some() {
                     echoed.push('…');
                 }
-                let bare = !echoed.is_empty() && !echoed.contains(['.', '[', ']', '"']);
+                // Control characters (line breaks) go through JSON escaping too.
+                let bare = !echoed.is_empty()
+                    && !echoed
+                        .chars()
+                        .any(|c| c.is_control() || matches!(c, '.' | '[' | ']' | '"'));
                 if bare {
                     if !out.is_empty() {
                         out.push('.');
@@ -109,11 +113,21 @@ impl Failure {
 type Score = (bool, Reverse<usize>, usize, u8);
 
 /// How many of the fields sent this variant does not accept. A variant that cannot be an
-/// object accepts none of them.
+/// object accepts none of them; a variant that is itself a `oneOf` counts as its best
+/// alternative.
 fn strangers(choice: &Value, value: &Value) -> usize {
     let Some(object) = value.as_object() else {
         return 0;
     };
+    if let Some(alternatives) = choice["oneOf"].as_array() {
+        if choice.get("type").is_none() && choice.get("properties").is_none() {
+            return alternatives
+                .iter()
+                .map(|alternative| strangers(alternative, value))
+                .min()
+                .unwrap_or(0);
+        }
+    }
     let takes_object = match &choice["type"] {
         Value::String(t) => t == "object",
         Value::Array(types) => types.iter().any(|t| t == "object"),
