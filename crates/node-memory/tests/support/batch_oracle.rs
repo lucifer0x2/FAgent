@@ -39,6 +39,10 @@ pub struct Totals {
     pub rejected: BTreeMap<String, usize>,
     /// Accept/reject, rows, changed ids, per-op errors: must stay empty.
     pub differences: Vec<String>,
+    /// Reference per-operation rejections the engine returned straight from `Txn`
+    /// (`MemoryStats::rejected_direct`) and through the reference.
+    pub per_op_direct: usize,
+    pub per_op_routed: usize,
     /// End-of-batch rejections where code or field differ from `validate()`'s first
     /// error (error order may differ; accept/reject agree).
     pub order: Vec<String>,
@@ -103,12 +107,18 @@ pub fn round(
     totals.batches += 1;
     let want = expected(snapshot, ops);
     let base = snapshot.revision;
+    let direct = memory.stats().rejected_direct;
     let actual = project.begin(base, ops);
+    let direct = memory.stats().rejected_direct > direct;
     let mut diffs = Vec::new();
     let mut diff = |what: String| diffs.push(format!("{at}: {what}"));
     match (actual, want) {
         (Ok(Begin::Stale), _) => diff("stale at the tracked revision".into()),
         (Err(a), Expected::PerOp(e)) => {
+            match direct {
+                true => totals.per_op_direct += 1,
+                false => totals.per_op_routed += 1,
+            }
             if !same_error(&a, &e) {
                 diff(format!(
                     "per-op error\n   engine: {}\n   candidate: {}",
