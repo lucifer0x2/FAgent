@@ -4,6 +4,8 @@
 //! version doubles as the readers' view (see `view`).
 mod dump;
 mod load;
+#[cfg(test)]
+mod lookup_tests;
 mod reads;
 mod slice;
 mod staged;
