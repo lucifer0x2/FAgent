@@ -3,7 +3,7 @@ use crate::support::{each, per_op, row};
 use fagent_node_memory::ProjectState;
 
 /// Up to 65,536 ids spread evenly over the project in page-then-preorder order, so
-/// lookups hit the whole arena without holding a copy of every id.
+/// lookups hit the whole store without holding a copy of every id.
 fn sample_ids(state: &ProjectState) -> Vec<String> {
     let stride = (state.len() / 65_536).max(1);
     state

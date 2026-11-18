@@ -1,7 +1,7 @@
-//! Option (a), today's engine: the slot arena with its undo log (`ProjectState`) plus the
-//! published `ReadView` (256-shard persistent maps), loaded and written through
-//! `Registry`/`ProjectHandle` exactly as `NodeMemory` does: `begin` stages under the
-//! write lock, `commit` advances and publishes the reader view, drop rolls back.
+//! Option (a), today's engine: one persistent `ProjectState` over the radix trie, loaded
+//! and written through `Registry`/`ProjectHandle` exactly as `NodeMemory` does: `begin`
+//! stages a copy-on-write clone under the write lock, `commit` publishes that clone as
+//! the reader view (`ReadView` over the state), drop discards it.
 use super::common::{self, Workload};
 use super::read;
 use crate::args::Args;
@@ -53,9 +53,9 @@ pub fn run(args: &Args, path: &Path) {
     let start = Instant::now();
     let (handle, _) = registry.load(snapshot).expect("fixture loads");
     let first_load = start.elapsed();
-    common::memory_rows("arena + ReadView", parsed, sample(), authored);
+    common::memory_rows("persistent state (radix trie)", parsed, sample(), authored);
     println!(
-        "estimated_bytes (lib, arena + view): {:.0} B/node\n",
+        "estimated_bytes (lib, persistent state): {:.0} B/node\n",
         handle.estimated_bytes() as f64 / authored as f64
     );
 
@@ -105,7 +105,7 @@ pub fn run(args: &Args, path: &Path) {
         |_| handle.read().slice("root_10").map(|s| s.nodes.len()),
     );
     row_p95(
-        "read: arena slice root_10",
+        "read: state slice root_10",
         &times,
         "ProjectState::slice (cloned nodes)",
     );
@@ -120,7 +120,7 @@ pub fn run(args: &Args, path: &Path) {
         for run in 0..args.runs {
             batch(&handle, &[common::update(&text, run)], keep, &mut phases);
         }
-        report(name, &phases, "begin + apply + commit/publish");
+        report(name, &phases, "begin + apply + commit/drop");
     }
     let workloads: Vec<Workload> = common::workloads(text, section);
     for w in &workloads {
@@ -158,7 +158,7 @@ pub fn run(args: &Args, path: &Path) {
     row_p95(
         "load + index build",
         &loads,
-        &format!("{} runs (arena + ReadView)", args.load_runs),
+        &format!("{} runs (persistent state)", args.load_runs),
     );
 }
 
@@ -169,12 +169,12 @@ fn report(name: &str, phases: &Phases, note: &str) {
         &format!("{} rows; {note}", phases.rows),
     );
     row_p95(
-        "  of which apply (begin + ops, undo log, delta)",
+        "  of which apply (begin: stage clone + ops + delta)",
         &phases.apply,
         "",
     );
     row_p95(
-        "  of which publish (ReadView advance + swap)",
+        "  of which publish (commit swap or drop clone)",
         &phases.publish,
         "",
     );

@@ -57,7 +57,7 @@ pub fn frame<'s, F: Family>(state: &'s State<F>, interner: &Interner, id: &str) 
     )
 }
 
-/// Option (a): the published `ReadView`, through its public accessors (string ids).
+/// Option (a): the engine's published `ReadView`, through its public accessors (string ids).
 pub fn frame_view<'v>(view: &'v ReadView, id: &str) -> Vec<&'v Node> {
     let mut closure = BTreeSet::new();
     let add = |id: &str, closure: &mut BTreeSet<String>| {
