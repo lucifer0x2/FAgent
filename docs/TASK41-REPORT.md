@@ -517,6 +517,10 @@ the batch wrote.
   aliases and theme branches, theme scopes and vanished themes, styles, token type changes, unmarked masters, override
   targets, nested masters, instance cycles, triggers, links, flows, depth, the note count), each on the state and on
   the reference.
+- An independent review ran about 1.8M random batches against the reference with 0 accept/reject mismatches; it found
+  two error-content mismatches (a component cycle reported as `INSTANCE_DEPTH`, and a reparent cycle beyond the
+  128-entry ancestor walk reported as a cycle instead of the depth error), both fixed and covered by
+  `tests/error_parity.rs`.
 
 ### Measurements
 

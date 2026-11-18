@@ -26,7 +26,14 @@ impl Txn<'_> {
         let kind = self.store.node(key).kind.clone();
         let parent = checks::parent(self.store, id, &kind, Some(parent_id))?
             .expect("a non-page has a parent");
-        if self.store.ancestors(parent).any(|a| a == key) {
+        // `check_node`'s walk from the moved node meets it again within its first 128
+        // entries (the node, `parent`, then 127 ancestors) or fails on the depth first.
+        if self
+            .store
+            .ancestors(parent)
+            .take(checks::MAX_DEPTH - 1)
+            .any(|a| a == key)
+        {
             return Err(checks::cycle(id, parent_id));
         }
         checks::depth(1 + checks::depth_of(self.store, parent))?;
