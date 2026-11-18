@@ -163,6 +163,9 @@ fn rejections_carry_the_public_error_and_count() {
     assert!(!project.diverged());
     let stats = memory.stats();
     assert_eq!((stats.rejected, stats.divergences), (2, 0));
+    // The missing node is the per-operation checks' own error; the link is decided by
+    // validation after the batch, so neither went through the reference for its error.
+    assert_eq!((stats.rejected_direct, stats.rejected_routed), (1, 0));
     // Nothing leaked into the project.
     assert_eq!(project.view().metadata().revision, 1);
 }
@@ -180,6 +183,9 @@ fn a_node_cap_below_the_scene_input_cap_is_a_rejection_not_a_divergence() {
     assert_eq!(error.field.as_deref(), Some("nodes"));
     assert!(!project.diverged());
     assert_eq!(memory.stats().divergences, 0);
+    // The cap is an end-of-batch check: its error goes through the reference.
+    assert_eq!(memory.stats().rejected_routed, 1);
+    assert_eq!(memory.stats().rejected_direct, 0);
 }
 
 #[test]

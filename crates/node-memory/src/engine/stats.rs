@@ -27,6 +27,12 @@ pub struct MemoryStats {
     pub full: u64,
     /// Batches rejected by validation.
     pub rejected: u64,
+    /// Rejections whose error came straight from the per-operation checks (part of
+    /// `rejected`).
+    pub rejected_direct: u64,
+    /// Rejections of the per-operation checks whose public error came from the
+    /// reference validator (part of `rejected`, or a divergence).
+    pub rejected_routed: u64,
     /// Batches where the engine and the reference validator disagreed.
     pub divergences: u64,
 }
@@ -44,6 +50,8 @@ pub(crate) struct Stats {
     pub(crate) local: AtomicU64,
     pub(crate) full: AtomicU64,
     pub(crate) rejected: AtomicU64,
+    pub(crate) rejected_direct: AtomicU64,
+    pub(crate) rejected_routed: AtomicU64,
     pub(crate) divergences: AtomicU64,
 }
 
@@ -66,6 +74,8 @@ impl Stats {
             local: get(&self.local),
             full: get(&self.full),
             rejected: get(&self.rejected),
+            rejected_direct: get(&self.rejected_direct),
+            rejected_routed: get(&self.rejected_routed),
             divergences: get(&self.divergences),
         }
     }

@@ -1,6 +1,7 @@
 //! One cached project: many concurrent readers or one writer, plus access time and
 //! size for the registry's eviction policy.
 use super::Clock;
+use crate::ops::Rejection;
 use crate::{Delta, ProjectState, Staged};
 use fagent_scene_input::read_scope::ReadView;
 use fagent_scene_input::{Operation, Result};
@@ -95,7 +96,7 @@ impl ProjectHandle {
     pub fn begin(&self, ops: &[Operation]) -> Result<Staged<'_>> {
         self.touch();
         let state = self.state.write().unwrap_or_else(PoisonError::into_inner);
-        let (next, delta) = state.stage(ops)?;
+        let (next, delta) = state.stage(ops).map_err(Rejection::into_error)?;
         Ok(Staged::locked(
             state,
             &self.bytes,
@@ -113,7 +114,7 @@ impl ProjectHandle {
         &self,
         expected: u64,
         ops: &[Operation],
-    ) -> Option<(Arc<ReadView>, Result<Staged<'_>>)> {
+    ) -> Option<(Arc<ReadView>, std::result::Result<Staged<'_>, Rejection>)> {
         self.touch();
         let state = self.state.write().unwrap_or_else(PoisonError::into_inner);
         if state.revision() != expected {

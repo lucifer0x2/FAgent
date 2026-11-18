@@ -1,7 +1,7 @@
 //! End-of-batch steps, after every operation applied: link pruning (as
 //! `Candidate::prune_links`) and the checks full validation would make on the final
 //! state rather than per operation.
-use super::Txn;
+use super::{Rejection, Txn};
 use crate::checks;
 use crate::props::{is_master, pruned_links};
 use crate::store::Key;
@@ -12,12 +12,14 @@ impl Txn<'_> {
     /// The node cap is checked here, on the final state and without an operation
     /// index, as `Candidate::validate` does: a batch may pass the cap mid-way and
     /// delete back under it.
-    pub(crate) fn finish(&mut self) -> Result<()> {
+    /// Every error here is [`Rejection::inexact`]: `Candidate` finds these during full
+    /// validation, in its own order, and the engine cap may be below its cap.
+    pub(crate) fn finish(&mut self) -> std::result::Result<(), Rejection> {
         if self.store.len() > self.max_nodes {
-            return Err(checks::too_many(self.max_nodes));
+            return Err(Rejection::inexact(checks::too_many(self.max_nodes)));
         }
         self.prune_links();
-        self.check_masters()
+        self.check_masters().map_err(Rejection::inexact)
     }
 
     /// Drops links to nodes the batch deleted and did not recreate; an emptied `links`

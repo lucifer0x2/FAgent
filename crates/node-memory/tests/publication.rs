@@ -4,7 +4,7 @@ mod support;
 use fagent_node_memory::{ManualClock, Operation, Registry, RegistryConfig};
 use fagent_scene_input::{
     read_scope::{ReadScope, ScopeIndex, ScopedSnapshot},
-    NodeKind,
+    NodeKind, Style, Token,
 };
 use serde_json::json;
 use std::{sync::Arc, time::Duration};
@@ -120,14 +120,32 @@ fn persistent_indexes_match_fresh_scope_after_structural_and_reference_deltas() 
         vec![update("i1", json!({"componentId":"m2"}), false)],
         vec![update(
             "a",
-            json!({"links":[{"to":"f2","trigger":"click"}]}),
+            json!({"links":[{"to":"f2","on":"click"}]}),
             false,
         )],
-        vec![update(
-            "a",
-            json!({"fill":{"tokenId":"paint"},"states":{"hover":{"fill":{"styleId":"s"}}}}),
-            false,
-        )],
+        vec![
+            Operation::UpsertToken {
+                token: Token {
+                    id: "paint".into(),
+                    name: "Paint".into(),
+                    token_type: "color".into(),
+                    value: json!("#112233"),
+                },
+            },
+            Operation::UpsertStyle {
+                style: Style {
+                    id: "s".into(),
+                    name: "Fill".into(),
+                    kind: "fill".into(),
+                    value: json!("#445566"),
+                },
+            },
+            update(
+                "a",
+                json!({"fill":{"tokenId":"paint"},"states":{"hover":{"fill":{"styleId":"s"}}}}),
+                false,
+            ),
+        ],
         vec![Operation::CreateNote {
             id: "note".into(),
             node_id: "new".into(),
