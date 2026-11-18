@@ -47,7 +47,7 @@ impl Store {
                 _lock: lock,
                 projects: Mutex::new(BTreeMap::new()),
                 viewer_db: Mutex::new(None),
-                indexes: crate::revision_indexes::IndexCache::default().with_owner(memory.clone()),
+                indexes: crate::revision_indexes::IndexCache::default(),
                 memory,
             }),
         })

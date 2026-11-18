@@ -1,7 +1,7 @@
 //! The database incarnation each resident load came from. The engine stores no
 //! identity; this map is the adapter's freshness record.
-use crate::SnapshotCacheIdentity;
-use fagent_node_memory::LoadId;
+use crate::{SnapshotCacheIdentity, StorageError};
+use fagent_node_memory::{LoadId, NodeMemory};
 use std::collections::HashMap;
 use std::sync::{Mutex, MutexGuard, PoisonError};
 
@@ -15,6 +15,8 @@ pub(super) struct Tag {
     pub revision: u64,
     /// The engine rejected this identity's snapshot; reads skip loading it again.
     pub failed: bool,
+    /// The error a write got when loading this identity, returned to later writes.
+    pub error: Option<StorageError>,
     /// Duplicate cache entries are removed once per load.
     pub cache_cleaned: bool,
 }
@@ -30,6 +32,12 @@ impl Tag {
         tag
     }
 
+    pub fn failed_with(identity: &SnapshotCacheIdentity, error: StorageError) -> Self {
+        let mut tag = Self::failed(identity);
+        tag.error = Some(error);
+        tag
+    }
+
     fn new(load_id: Option<LoadId>, identity: &SnapshotCacheIdentity) -> Self {
         Self {
             load_id,
@@ -38,6 +46,7 @@ impl Tag {
             readiness: identity.asset_readiness.clone(),
             revision: identity.revision,
             failed: false,
+            error: None,
             cache_cleaned: false,
         }
     }
@@ -77,6 +86,14 @@ impl Tags {
             .is_some_and(|tag| tag.load_id == Some(load) && tag.same_incarnation(identity))
     }
 
+    /// The error a write remembered for a failed load of exactly `identity`.
+    pub fn failed_error(&self, identity: &SnapshotCacheIdentity) -> Option<StorageError> {
+        self.lock()
+            .get(&identity.project_id)
+            .filter(|tag| tag.failed_at(identity))
+            .and_then(|tag| tag.error.clone())
+    }
+
     pub fn claim_cache_cleanup(&self, project: &str, load: LoadId) -> bool {
         let mut tags = self.lock();
         let Some(tag) = tags.get_mut(project) else {
@@ -87,6 +104,35 @@ impl Tags {
         }
         tag.cache_cleaned = true;
         true
+    }
+
+    /// Records `tag` for `project`, dropping tags of loads that are no longer
+    /// resident (failed tags stay: they stop repeated loads of a bad identity).
+    pub fn insert(&self, engine: &NodeMemory, project: String, tag: Tag) {
+        let mut all = self.lock();
+        all.retain(|project, tag| {
+            tag.failed || tag.load_id.is_some() && engine.resident(project) == tag.load_id
+        });
+        all.insert(project, tag);
+    }
+
+    /// Moves the tag of `load` to `identity` after a commit this process published;
+    /// keeps its cache cleanup claim. Without an identity the load is untagged.
+    pub fn retag(&self, project: &str, load: LoadId, identity: Option<&SnapshotCacheIdentity>) {
+        let mut all = self.lock();
+        let Some(tag) = all.get_mut(project).filter(|tag| tag.load_id == Some(load)) else {
+            return;
+        };
+        match identity {
+            Some(identity) => {
+                let cleaned = tag.cache_cleaned;
+                *tag = Tag::loaded(load, identity);
+                tag.cache_cleaned = cleaned;
+            }
+            None => {
+                all.remove(project);
+            }
+        }
     }
 
     pub fn remove(&self, project: &str) {

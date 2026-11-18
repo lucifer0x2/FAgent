@@ -1,7 +1,7 @@
 //! Scoped snapshots come from node memory only at the database's current revision,
-//! on both engines. Commits and writes outside batches evict the project, so the
-//! next read loads it; other writers and unknown targets fall back to the database
-//! snapshot.
+//! on both engines. Commits stage in memory and leave the project resident at the
+//! new revision; writes outside batches evict it, so the next read loads it; other
+//! writers and unknown targets fall back to the database snapshot.
 mod postgres_support;
 
 use fagent_storage::*;
@@ -44,8 +44,7 @@ fn check(on: &Storage, other: Option<Storage>, slug: &str) -> (String, u64) {
     }
     let id = on.create_project(slug, "Reads").unwrap().id().to_owned();
     let mut rev = commit(on, &id, 0, "seed", seed());
-    // The commit evicted the project: the first read loads it, the next one hits.
-    assert_eq!(read(on, &id, "frame"), (false, rev));
+    // The commit left the project resident at its revision.
     assert_eq!(read(on, &id, "frame"), (true, rev));
     assert_eq!(read(on, slug, "a"), (true, rev), "slugs resolve too");
     assert!(!read(on, &id, "missing").0);
@@ -56,11 +55,7 @@ fn check(on: &Storage, other: Option<Storage>, slug: &str) -> (String, u64) {
         "edit",
         json!([{"op":"update_node","id":"a","props":{"name":"A"}}]),
     );
-    assert_eq!(
-        read(on, &id, "frame"),
-        (false, rev),
-        "commit evicted: cold load"
-    );
+    assert_eq!(read(on, &id, "frame"), (true, rev), "committed in memory");
     let hit = on.scoped_snapshot(&id, "frame").unwrap();
     assert!(hit.from_memory);
     let scoped = hit.shared.scoped().unwrap();
@@ -95,7 +90,8 @@ fn sqlite_scoped_reads_come_from_memory_when_current() {
     check(&on, None, "sqlite-on");
     let stats = on.memory_stats();
     assert!(stats.read_hits >= 4, "{stats:?}");
-    assert!(stats.read_loads >= 3, "{stats:?}");
+    assert!(stats.read_loads >= 1, "{stats:?}");
+    assert!(stats.write_loads >= 1 && stats.write_hits >= 1, "{stats:?}");
 }
 
 #[test]

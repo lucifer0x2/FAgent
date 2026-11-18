@@ -165,7 +165,6 @@ impl RevisionIndexes {
 #[derive(Clone)]
 pub(crate) struct IndexCache {
     entries: Cache<SnapshotCacheIdentity, Arc<RevisionIndexes>>,
-    owner: crate::memory::Memory,
     gate: Arc<Mutex<()>>,
 }
 impl Default for IndexCache {
@@ -182,13 +181,8 @@ impl IndexCache {
                 .weigher(|_: &SnapshotCacheIdentity, value: &Arc<RevisionIndexes>| value.weight())
                 .time_to_live(ttl)
                 .build(),
-            owner: Default::default(),
             gate: Default::default(),
         }
-    }
-    pub(crate) fn with_owner(mut self, owner: crate::memory::Memory) -> Self {
-        self.owner = owner;
-        self
     }
     pub(crate) fn evict(&self, project: &str) {
         let _gate = self
@@ -214,11 +208,9 @@ impl IndexCache {
                 .gate
                 .lock()
                 .unwrap_or_else(std::sync::PoisonError::into_inner);
-            if !self.owner.owns_project(&snapshot.project_id) {
-                if let Some(indexes) = self.entries.get(&identity) {
-                    bench_phase::count("indexes.cache_hits", 1);
-                    return indexes;
-                }
+            if let Some(indexes) = self.entries.get(&identity) {
+                bench_phase::count("indexes.cache_hits", 1);
+                return indexes;
             }
         }
         let indexes = Arc::new(RevisionIndexes::new(&snapshot.nodes));
@@ -226,9 +218,6 @@ impl IndexCache {
             .gate
             .lock()
             .unwrap_or_else(std::sync::PoisonError::into_inner);
-        if self.owner.owns_project(&snapshot.project_id) {
-            return indexes;
-        }
         self.entries.get_with(identity, || indexes)
     }
     pub(crate) fn publish(&self, identity: SnapshotCacheIdentity, indexes: Arc<RevisionIndexes>) {
@@ -236,9 +225,6 @@ impl IndexCache {
             .gate
             .lock()
             .unwrap_or_else(std::sync::PoisonError::into_inner);
-        if self.owner.owns_project(&identity.project_id) {
-            return;
-        }
         // Exact immutable keys: late old fills cannot replace any newer revision.
         self.entries.get_with(identity, || indexes);
     }

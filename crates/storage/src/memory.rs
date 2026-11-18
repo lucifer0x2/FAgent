@@ -3,14 +3,20 @@
 //! The engine knows nothing about databases. This adapter keeps, per project, the
 //! database incarnation a resident load came from ([`identity`]), serves scoped
 //! reads of the latest revision from the engine's published views ([`reads`]) and
-//! counts what it did ([`stats`]). Writes outside the engine (today every commit,
-//! asset and font imports, privacy updates, bundle opens) call [`Memory::evict`];
-//! the next read reloads the project from the database.
+//! counts what it did ([`stats`]). Batches and previews stage in the resident
+//! project ([`writes`]) after the backend probed the database identity under its
+//! write lock; strict page guards run on the engine views ([`guard`]). Writes outside
+//! the engine (asset and font imports, privacy updates, bundle opens, a failed
+//! persist) call [`Memory::evict`]; the next access reloads the project.
+pub(crate) mod guard;
+#[cfg(test)]
+mod guard_tests;
 mod identity;
 mod reads;
 #[cfg(test)]
 mod reads_tests;
 mod stats;
+mod writes;
 
 use crate::{SharedSnapshot, SnapshotCacheIdentity};
 use fagent_node_memory::{MemoryConfig, NodeMemory, SystemClock};

@@ -1,10 +1,13 @@
 use super::*;
 #[test]
-fn actual_sqlite_commit_reuses_topology_and_lazy_read_dependencies() {
+fn actual_sqlite_commit_leaves_read_dependencies_lazy() {
     let temp = tempfile::tempdir().unwrap();
     // The revision-index cache serves projects memory does not hold; shared
-    // snapshots never load memory.
-    let storage: Storage = Store::open(temp.path()).unwrap().into();
+    // snapshots never load memory. Commits stage in memory, so the test evicts
+    // the project after each one.
+    let store = Store::open(temp.path()).unwrap();
+    let memory = store.root.memory.clone();
+    let storage: Storage = store.into();
     let p = storage.create_project("topology", "Topology").unwrap();
     let mut request = BatchRequest { project_id:p.id().into(), expected_revision: Some(0), strict: false, idempotency_key:"seed".into(), operations:serde_json::from_value(json!([
         {"op":"create_node","id":"page","kind":"page","parentId":null,"props":{}},
@@ -12,6 +15,11 @@ fn actual_sqlite_commit_reuses_topology_and_lazy_read_dependencies() {
         {"op":"create_node","id":"rect","kind":"rectangle","parentId":"frame","props":{"width":10,"height":10}}
     ])).unwrap() };
     p.apply_batch(request.clone()).unwrap();
+    assert!(
+        memory.owns_project(p.id()),
+        "a commit leaves the project resident"
+    );
+    memory.evict(p.id());
     let old = storage.shared_snapshot(p.id()).unwrap();
     assert!(old.indexes.dependencies.lock().unwrap().is_none());
     old.edit_context(vec!["page".into()]).unwrap();
@@ -35,13 +43,9 @@ fn actual_sqlite_commit_reuses_topology_and_lazy_read_dependencies() {
         props: json!({"width":11}),
     }];
     p.apply_batch(request).unwrap();
+    memory.evict(p.id());
     let new = storage.shared_snapshot(p.id()).unwrap();
     assert!(!Arc::ptr_eq(&old.indexes, &new.indexes));
-    assert!(
-        Arc::ptr_eq(&old.indexes.topology, &new.indexes.topology),
-        "commit must reuse the read's cached topology"
-    );
-    assert!(Arc::ptr_eq(&old.indexes.pages, &new.indexes.pages));
     assert!(
         new.indexes.dependencies.lock().unwrap().is_none(),
         "strict commit must not expand dependency work"

@@ -55,7 +55,7 @@ impl PostgresBackend {
             pool,
             namespace: namespace.into(),
             cache: None,
-            indexes: crate::revision_indexes::IndexCache::default().with_owner(memory.clone()),
+            indexes: crate::revision_indexes::IndexCache::default(),
             memory,
         })
     }

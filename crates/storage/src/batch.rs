@@ -1,8 +1,9 @@
-//! One candidate-validation pipeline for committed and previewed batches.
+//! Committed and previewed batches: request checks here, staging in `NodeMemory`
+//! (`memory`) under the project writer lock.
 use crate::*;
 use serde::Serialize;
-mod commit;
 mod history;
+mod memory;
 mod validation;
 #[cfg(test)]
 pub(crate) use validation::validated_candidate;
@@ -97,87 +98,16 @@ impl Project {
                 return Ok((Outcome::Committed(result), metrics));
             }
         }
-        let time = Instant::now();
-        let (before, identity) = self.load_base(&mut conn)?;
-        let indexes = self.root.indexes.for_snapshot(&before, identity.clone());
-        metrics.read_us = us(time);
-        base.check(before.revision, pages.is_some())?;
-        let time = Instant::now();
-        let (candidate, changed_ids, mut work, next_indexes) =
-            validated_candidate_indexed(&before, &request.operations, indexes.clone())?;
-        let scope = scoped::BatchScope::indexed(
-            &before,
-            &candidate,
-            &changed_ids,
-            indexes,
-            next_indexes.clone(),
-        )?;
-        let history = match base.history_after(before.revision, pages.is_some()) {
-            Some(after) => history::after(&conn, after)?,
-            None => vec![],
-        };
-        if let (Some(pages), true) = (&pages, base.strict) {
-            let _phase = bench_phase::Span::new("scoped.check");
-            scoped::check(
-                &before, &candidate, &request, pages, &history, &scope, &mut work,
-            )?;
-        }
-        drop(work);
-        metrics.validate_us = us(time);
-        if dry_run {
-            metrics.total_us = us(total);
-            return Ok((
-                Outcome::Preview(DryRunResult {
-                    project_id: self.project_id.clone(),
-                    dry_run: true,
-                    base_revision: before.revision,
-                    changed_ids,
-                    diagnostics: vec![],
-                }),
-                metrics,
-            ));
-        }
-        let mut result = BatchResult {
-            project_id: self.project_id.clone(),
-            committed_revision: before.revision + 1,
-            changed_ids,
-            render_status: "pending".into(),
-            ..Default::default()
-        };
-        let operations = &request_value["operations"];
-        concurrent::fill(
-            &mut result,
-            base,
-            before.revision,
-            &history,
-            operations,
-            &candidate,
-        );
-        let history = bench_phase::time("history.envelope", || {
-            scoped::envelope_with_scopes(
-                scope.footprint,
-                request_value.clone(),
-                request_value["operations"].clone(),
-            )
-        })?;
-        let commit = commit::Commit {
-            before: &before,
-            candidate: &candidate,
-            key: &request.idempotency_key,
+        let checked = memory::Checked {
+            request: &request,
+            value: &request_value,
             hash: &request_hash,
-            history: &history,
-            result: &result,
+            base,
+            pages: pages.as_deref(),
+            dry_run,
         };
-        self.commit(&mut conn, commit, &mut metrics)?;
-        if let Some(mut identity) = identity {
-            identity.revision = result.committed_revision;
-            // The write may have changed the file stamp; we still hold the writer lock.
-            if let Ok(Some(stamp)) = backend::sqlite::identity::file_stamp(self) {
-                identity.incarnation = stamp;
-            }
-            self.root.indexes.publish(identity, next_indexes);
-        }
+        let outcome = self.stage(&mut conn, checked, &mut metrics)?;
         metrics.total_us = us(total);
-        Ok((Outcome::Committed(result), metrics))
+        Ok((outcome, metrics))
     }
 }
