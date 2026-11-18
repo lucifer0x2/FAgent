@@ -62,3 +62,4 @@ Append-only. Rules for entries:
 
 - Packaged [Task 41](../../tasks/41-node-memory-engine.md) at the user's request after the commit-path review: one self-contained engine struct in `crates/node-memory` with no database knowledge, always on (no `FAGENT_NODE_MEMORY_*` flags or modes), full validation once at load (warm | cold), diff-only validation per commit with per-op checks kept, error order among end-of-batch errors allowed to change, no pre-expanded instances.
 - Open: not assigned; admission behavior for invalid stored data to confirm in phase 2.
+- Assigned 2026-11-18 on `feat/task-41-node-memory-engine`; phase 1 (boundary) started. Decisions: struct name `NodeMemory`; admission on invalid stored data = serve reads, keep diff-only commit validation, count and log with project/node ids only (implemented in phase 2); fix pre-existing clippy errors in storage/server in a separate commit; spike 1b (single persistent state) waits for user approval after phase 1.
