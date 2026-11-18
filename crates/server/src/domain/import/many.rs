@@ -30,13 +30,13 @@ pub(crate) async fn run(state: &AppState, args: Value) -> Result<Value> {
     let mut resolved = Vec::with_capacity(items.len());
     let mut held = 0usize;
     for (index, item) in items.into_iter().enumerate() {
-        crate::schemas::validate_import_item(&item).map_err(|mut e| {
-            // Keep the validator's field so `items[i].<field>` matches the message.
+        crate::schemas::validate_import_item(&item, index).map_err(|mut e| {
+            // The validator already names `items[i].<field>` in the message and `field`.
             e.0.message = format!(
-                "{} (send exactly one of path, base64 or sourceProjectId with assetId or fontId; mediaType and font only with path or base64)",
+                "items[{index}]: {} (send exactly one of path, base64 or sourceProjectId with assetId or fontId; mediaType and font only with path or base64)",
                 e.0.message
             );
-            at(index, e, "source")
+            e
         })?;
         let item: Item = serde_json::from_value(item).map_err(|e| at(index, e.into(), "source"))?;
         let item = resolve(state, item)
