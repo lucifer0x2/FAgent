@@ -160,3 +160,87 @@ read-view index sets that made this 13 s at 45k nodes and timed out at 200k.
   structure before phase 2.
 - Files: none over 300 lines among the new modules; largest touched source file
   `crates/storage/src/postgres/adapter.rs` (256 lines).
+
+## Spike 1b — One persistent state (2026-11-18)
+
+Branch `spike/task-41-1b` (from `feat/task-41-node-memory-engine`). Measurement only: the engine is unchanged.
+Prototypes live in `crates/node-memory/examples/bench/spike/`; `imbl` 7.0.2 is a dev-dependency of the bench only.
+Rerun, one option per process so memory rows stay separate:
+
+```bash
+cargo run --release -p fagent-node-memory --example bench -- --runs 101 --load-runs 7 --spike a   # also ord, hash, radix
+```
+
+### What was compared
+
+- **(a) arena** — today's engine through `Registry`/`ProjectHandle`: slot arena + undo log (`ProjectState`) and the
+  published `ReadView` (256-shard persistent maps keyed by `String`). `begin` stages under the write lock, `commit`
+  advances and publishes the view, drop rolls back.
+- **(b) imbl** — one persistent state: `nodes: Map<u32, Rec{Arc<Node>, parent, page, root, master}>`, sorted children
+  `Map<u32, Arc<Vec<u32>>>`, pages, instance users and incoming links (`Map<u32, Arc<BTreeSet<u32>>>`), ids interned to
+  dense `u32`. `begin` = O(1) clone, ops write on the clone, reject = drop, commit = publish that clone (pointer swap).
+  Delta: `OrdMap::diff` skips shared subtrees; `imbl::HashMap` has no diff, so it uses the write set. Measured with
+  both `OrdMap` and `HashMap`.
+- **(c) radix** — the same state over a hand-written persistent radix trie (64-way, depth grown on demand: 3 levels at
+  200k keys, ~200 lines, no dependency); pointer diff skips shared nodes.
+- Same workload for all: ops of the stored `Operation` type with the arena's placement rules (renumber to positions);
+  rows counted per commit match across options (1, 14,005, 1, 328, 1). The read is the structural part of
+  `get_design_context` on one frame (`ReadView::expand_view` steps: subtree + ancestors + master closure, ordered);
+  instance expansion and resolution run after it on the node list and do not depend on the store.
+
+### Results (200k fixture: 178,415 authored nodes; release; 101 runs, 7 loads; load average 1.7–2.4; two rounds in
+alternating order, round 1 shown, round 2 within ±10%)
+
+| Measure | (a) arena + ReadView | (b) imbl OrdMap | (b) imbl HashMap | (c) radix trie |
+| --- | ---: | ---: | ---: | ---: |
+| Footprint after load, per authored node | 3,280 B | 1,633 B (−50%) | 1,722 B (−48%) | **1,563 B (−52%)** |
+| Load + index build, median / p95 | 372 / 398 ms | 38.8 / 39.5 ms | 40.0 / 40.9 ms | **27.4 / 28.1 ms** |
+| Get node by id | 95 ns | 67 ns | 38 ns | **20 ns** |
+| Read: frame closure `root_10` (291 nodes), median / p95 | 91 / 98 µs | 60 / 65 µs | 29 / 32 µs | **22 / 31 µs** |
+| Read: frame closure `frame_wide` (14,002 nodes) | 5.70 / 5.85 ms | 2.42 / 2.49 ms | 1.65 / 2.02 ms | **1.14 / 1.17 ms** |
+| Commit: 1 props update (begin + apply + delta + publish) | 19.9 / 21.0 µs | 1.29 / 1.46 µs | 1.04 / 1.25 µs | 1.08 / 1.67 µs |
+| — apply (begin + op) | 0.50 µs | 0.54 µs | 0.71 µs | 0.50 µs |
+| — publish per commit | 19.5 µs (view advance) | 0.25 µs + 0.50 µs diff | 0.33 µs | 0.29 µs + 0.33 µs diff |
+| Reject: 1 props update (dropped) | 0.58 µs | 1.25 µs | 1.04 µs | 1.08 µs |
+| Commit: create node (append) | 83 / 95 µs | 4.5 / 5.9 µs | 2.9 / 6.5 µs | **1.4 / 1.9 µs** |
+| Commit: create at index 0 of wide frame (14k renumbered, 5 runs) | **8,975 ms** | 5.95 ms | 10.6 ms | **3.31 ms** |
+| Commit: reparent subtree across root frames | 4.15 ms | 48.7 µs | 73.9 µs | **5.4 µs** |
+| Commit: delete root frame subtree (328 nodes) | 210 / 353 ms | 198 / 340 µs | 371 / 605 µs | **104 / 193 µs** |
+| Commit: 100 props updates in one batch | 48 µs | 49 µs | 50 µs | 37 µs |
+
+Notes:
+
+- The ~1.3 KB/node and 584/542 ns baselines from phase 1 were `ProjectState` alone (no `ReadView`). The engine holds
+  both, so (a) is 3,280 B/node, and a committed small edit costs ~20 µs, almost all in the `ReadView` advance.
+- **Phase-1 finding, independent of the decision:** publishing to `ReadView` is superlinear in the changed rows.
+  `ViewIndexes` updates one sibling at a time and each update clones and re-weighs the parent's whole
+  `Arc<BTreeSet<(i64, String)>>` (`scoped/view_indexes.rs::sibling`, `persistent::Map::insert`), so renumbering 14k
+  siblings takes ~9 s and deleting a 328-node root frame ~210 ms, all under the project write lock. Any reorder or
+  insert at the front of a wide frame hits this today.
+- The prototypes leave out what is not on the measured paths: per-prop write stamps, resources and notes, the
+  `ReadView` reference/dependency/frame indexes and structural checks at load (cycle, depth, limits), so their load
+  time is a lower bound. Even if the missing indexes cost as much again as the arena alone, RAM would stay below
+  (a); the decision margin on RAM is large (52% against a 30% bar).
+- Renumbering in (b)/(c) copies each changed node (props included), where the arena edits in place; still 3–6 ms for
+  14k siblings because no sibling set is copied per member.
+- `imbl::HashMap` has no structural diff; its delta comes from the write set. Its read and lookup are faster than
+  `OrdMap`, its publish (dropping replaced nodes) slower.
+
+### Decision
+
+All three criteria pass for (b) and (c): RAM/node −48% to −52% (≥ 30%), a small in-memory commit 1.0–1.3 µs
+(≤ 50 µs), reads 1.5–4× faster. **Recommendation: (c), the hand-written radix trie.** It is best or tied on every
+row, needs no new dependency, and its pointer diff gives the delta for free; `imbl` stays out of the runtime
+(`OrdMap` is a close second if a maintained library is preferred).
+
+What adopting (c) means for phase 2 (needs the user's go-ahead):
+
+- One `Arc<State>` per project is both the writer base and the published view; `Txn` writes on a clone, so the undo
+  log (`store/undo.rs`), the second node copy in `ReadView` and `state/publication.rs` go away. New phase-3 indexes
+  are more persistent maps in the state, with no undo entries.
+- Readers look ids up through the interner, so it must be safe to read while one writer appends (append-only
+  `RwLock` or a persistent string → key map inside the state). Interned keys are never reused; deleted ids stay
+  interned until the project is reloaded (eviction/reload already bounds this).
+- `ReadView`'s scoped readers and the validators read `String`-keyed maps today; they need an adapter or the phase-2
+  lookup trait over the new state.
+- Keep the arena only as a test oracle during the switch, then delete it.
