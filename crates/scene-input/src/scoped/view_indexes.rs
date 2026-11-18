@@ -2,10 +2,15 @@
 use super::{persistent::Map, view::ReadView};
 use crate::{Node, NodeKind};
 use serde_json::Value;
-use std::{collections::BTreeSet, sync::Arc};
+use std::{
+    collections::{BTreeSet, HashMap},
+    sync::Arc,
+};
 
 pub(super) type Ids = Arc<BTreeSet<String>>;
 pub(super) type Siblings = Arc<BTreeSet<(i64, String)>>;
+/// Sets under construction, keyed like the index they are stored in.
+type Sets = HashMap<String, BTreeSet<String>>;
 
 #[derive(Clone, Default)]
 pub(super) struct ViewIndexes {
@@ -27,15 +32,56 @@ pub(super) struct ViewIndexes {
 impl ViewIndexes {
     pub fn new(view: &ReadView) -> Self {
         let mut index = Self::default();
+        // Sets are built whole, then stored once: adding members one at a time to a
+        // stored set copies and weighs it per member, quadratic for wide parents.
+        let mut children: HashMap<String, BTreeSet<(i64, String)>> = HashMap::new();
+        let (mut refs, mut incoming, mut users) = (Sets::new(), Sets::new(), Sets::new());
         for (_, node) in view.nodes.iter() {
-            index.placement(None, Some(node));
-            index.refs(&node.id, &BTreeSet::new(), &references(&node.props));
-            index.links(&node.id, &BTreeSet::new(), &links(node));
+            let placed = (node.sort_key, node.id.clone());
+            match &node.parent_id {
+                Some(parent) => {
+                    children.entry(parent.clone()).or_default().insert(placed);
+                }
+                None => {
+                    Arc::make_mut(&mut index.roots).insert(placed);
+                }
+            }
+            if node.kind == NodeKind::Frame {
+                let frame = (node.parent_id.clone(), node.sort_key, node.id.clone());
+                Arc::make_mut(&mut index.frames).insert(frame);
+            }
+            let keys = references(&node.props);
+            for key in &keys {
+                refs.entry(key.clone()).or_default().insert(node.id.clone());
+            }
+            if !keys.is_empty() {
+                index
+                    .dependencies
+                    .insert(format!("node:{}", node.id), Arc::new(keys));
+            }
+            for key in links(node) {
+                incoming.entry(key).or_default().insert(node.id.clone());
+            }
             if let Some(master) = node.typed_props().component_id() {
                 index.masters.insert(node.id.clone(), master.into());
                 if node.kind == NodeKind::Instance {
-                    member(&mut index.users, master, &node.id, true);
+                    users
+                        .entry(master.into())
+                        .or_default()
+                        .insert(node.id.clone());
                 }
+            }
+        }
+        for (parent, ids) in children {
+            index.children.insert(parent, Arc::new(ids));
+        }
+        for (sets, map) in [
+            (refs, &mut index.references),
+            (incoming, &mut index.incoming),
+            (users, &mut index.users),
+        ] {
+            for (key, ids) in sets {
+                map.insert(key, Arc::new(ids));
             }
         }
         for (id, _) in view.nodes.iter() {
@@ -43,8 +89,13 @@ impl ViewIndexes {
                 index.pages.insert(id.clone(), page);
             }
         }
+        let mut anchors = Sets::new();
         for (_, note) in view.notes.iter() {
-            member(&mut index.anchors, &note.node_id, &note.id, true);
+            let notes = anchors.entry(note.node_id.clone()).or_default();
+            notes.insert(note.id.clone());
+        }
+        for (node, ids) in anchors {
+            index.anchors.insert(node, Arc::new(ids));
         }
         for token in &view.snapshot.tokens {
             index.dependencies.insert(

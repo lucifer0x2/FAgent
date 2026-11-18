@@ -47,7 +47,7 @@ impl Memory {
         for _ in 0..LOAD_TRIES {
             self.evict(project_id);
             let snapshot = load()?;
-            match inner.engine.load(snapshot) {
+            match crate::bench_phase::time("memory.load", || inner.engine.load(snapshot)) {
                 Ok(project) => {
                     if let Some(identity) = identity {
                         let tag = Tag::loaded(project.load_id(), identity);
