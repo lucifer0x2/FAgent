@@ -3,8 +3,10 @@
 //! `T`. On a valid base the graph was acyclic and at most 8 deep, so a new cycle or a
 //! new too-long path runs through a master whose edges changed (a *start* master). The
 //! full check walks from every master in id order; only the masters that reach a start
-//! master (its users' enclosing masters, transitively) can fail, so the same walk from
-//! those, in id order, reports the same first error.
+//! master (its users' enclosing masters, transitively) can fail. Which error that walk
+//! meets first (cycle or depth) depends on the masters walked before, so on a fault the
+//! graph is walked once more over every master in id order, as the full check does;
+//! accepted batches never pay for that walk.
 use crate::validate::Lookup;
 use crate::{NodeKind, Result, StorageError};
 use std::collections::{BTreeMap, BTreeSet};
@@ -33,6 +35,46 @@ pub(super) fn check<'a>(after: &dyn Lookup, affected: impl Iterator<Item = &'a s
     let mut walk = Walk {
         lookup: after,
         edges: BTreeMap::new(),
+        heights: BTreeMap::new(),
+    };
+    for root in &roots {
+        if let Err(fault) = walk.visit(root, &mut BTreeSet::new()) {
+            return Err(full(after).err().unwrap_or(fault));
+        }
+    }
+    Ok(())
+}
+
+/// `Candidate::instance_graph` over the whole project: an edge from every master within
+/// 128 ancestors of an instance to its target, every master with an edge visited in id
+/// order with one shared memo.
+fn full(lookup: &dyn Lookup) -> Result<()> {
+    let mut edges: BTreeMap<String, BTreeSet<String>> = BTreeMap::new();
+    let mut pending = lookup.pages();
+    while let Some(node) = pending.pop() {
+        pending.extend(lookup.children(&node.id));
+        if node.props.get("component").is_some() {
+            // Known edges only: no descent below the 128-ancestor bound.
+            edges.entry(node.id.clone()).or_default();
+        }
+        if node.kind != NodeKind::Instance {
+            continue;
+        }
+        let Some(target) = node.props["componentId"].as_str() else {
+            continue;
+        };
+        for master in enclosing_masters(lookup, node.parent_id.as_deref()) {
+            edges.entry(master).or_default().insert(target.to_owned());
+        }
+    }
+    let roots: Vec<String> = edges
+        .iter()
+        .filter(|(_, targets)| !targets.is_empty())
+        .map(|(id, _)| id.clone())
+        .collect();
+    let mut walk = Walk {
+        lookup,
+        edges,
         heights: BTreeMap::new(),
     };
     for root in &roots {
