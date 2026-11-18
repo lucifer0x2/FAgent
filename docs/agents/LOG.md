@@ -47,3 +47,8 @@ Append-only. Rules for entries:
 - New rules in `AGENTS.md`: English-only content and a blocking "Public repository" rule. `scripts/check-public-content.sh` (run by `.githooks/pre-commit`) blocks local absolute paths, real tailnet hosts, secrets, non-example emails and the names in the untracked `.private-patterns`.
 - Open-source scrub: client project names, IDs, slugs and snapshot hashes, real backup names, a real tailnet host and the migration scripts for the previous product were removed; machine notes moved to the untracked `CLAUDE.local.md`. Limitation IDs that pointed to the previous product's feedback list were replaced with plain descriptions.
 - The README screenshots and motion GIF were removed because the demo frame's footer showed the previous product name. Open: the user will add new screenshots to `README.md`.
+
+### Task 40 — Liquid glass shader — 2026-11-18
+
+- Packaged [Task 40](../../tasks/40-liquid-glass-shader.md) (backlog) at the user's request: backdrop blur and a glass material (refraction, chroma, specular) through a custom WGSL pass plus a `vello_cpu` reference, because Vello 0.4 only executes Flood, GaussianBlur, Offset and DropShadow filters.
+- Open: not assigned; phase 0 spike decides segmented rendering vs prefix re-encode and the WebGL2 path.
