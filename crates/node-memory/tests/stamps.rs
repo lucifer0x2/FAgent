@@ -65,9 +65,9 @@ fn writes_stamp_keys_placement_and_creation() {
 fn link_pruning_stamps_links_and_failures_restore_stamps() {
     let mut state = load(small());
     state
-        .apply(&[update("a", json!({"links":[{"to":"t2"}]}), false)])
+        .apply(&[update("a", json!({"links":[{"to":"f2"}]}), false)])
         .unwrap();
-    state.apply(&[delete("t2")]).unwrap();
+    state.apply(&[delete("f2")]).unwrap();
     assert_eq!(state.prop_revision("a", "links"), Some(3));
     let before = observe(&state);
     let failing = [

@@ -1,6 +1,6 @@
 //! Maximum depth 128 (a page is depth 1): checked on load, and per operation on the
-//! created or moved node. Descendants a reparent moves deeper are left to end-of-batch
-//! validation, as in `Candidate`.
+//! created or moved node. Descendants a reparent moves deeper are found by the end-of-batch
+//! rules, as by `Candidate::validate`.
 mod support;
 
 use fagent_node_memory::{ManualClock, MemoryConfig, NodeMemory, ProjectState};
@@ -54,17 +54,21 @@ fn depth_limit_on_load_create_and_reparent() {
 }
 
 /// g lands at depth 127 + 1, but its child h would be at 129. `Candidate::apply`
-/// checks only the moved node, and so does `Txn`: full validation rejects the batch.
-/// Until then the working state holds the deep subtree, and walking it stays safe.
+/// checks only the moved node, and so does `Txn`; the end-of-batch rules check the
+/// moved subtree and reject the batch, without an operation index. The working state
+/// holds the deep subtree meanwhile, and walking it stays safe: moving g back in the
+/// same batch is accepted.
 #[test]
-fn descendants_moved_too_deep_are_left_to_full_validation() {
+fn descendants_moved_too_deep_are_an_end_of_batch_error() {
     let mut state = load(snapshot(chain(127)));
-    let staged = state
-        .begin(&[reparent("g", "c126")])
-        .expect("per-operation checks pass");
-    assert_eq!(staged.state().subtree("c1").unwrap().count(), 129);
-    assert_eq!(staged.state().page_of("h").unwrap().id, "p");
-    drop(staged);
+    let error = state.begin(&[reparent("g", "c126")]).err().unwrap();
+    assert_eq!(error.op_index, None);
+    depth_error(error);
+    let back = [reparent("g", "c126"), reparent("g", "c1")];
+    assert_eq!(
+        state.begin(&back).unwrap().state().page_of("h").unwrap().id,
+        "p"
+    );
     let error = state
         .apply(&[
             reparent("g", "c126"),
@@ -89,10 +93,7 @@ fn descendant_depth_is_an_end_of_batch_error() {
     assert_eq!(error.op_index, Some(0));
     depth_error(error);
     let error = project.begin(1, &[reparent("g", "c126")]).err().unwrap();
-    assert_eq!(error.op_index, None, "found by full validation");
+    assert_eq!(error.op_index, None, "found by the end-of-batch rules");
     depth_error(error);
-    let stats = memory.stats();
-    assert_eq!((stats.rejected_direct, stats.rejected_routed), (1, 0));
-    assert_eq!((stats.rejected, stats.divergences), (2, 0));
-    assert!(!project.diverged());
+    assert_eq!(memory.stats().rejected, 2);
 }

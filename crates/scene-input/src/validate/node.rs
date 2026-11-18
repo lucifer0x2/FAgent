@@ -1,15 +1,6 @@
-use super::{scope::Resolver, values::*, Candidate};
+use super::{scope::Resolver, values::*};
 use crate::{error::*, model::*};
 use std::collections::BTreeSet;
-impl Candidate {
-    pub(super) fn ancestors(&self, id: &str) -> impl Iterator<Item = &Node> {
-        let parent = |node: &Node| node.parent_id.as_ref().and_then(|id| self.nodes.get(id));
-        std::iter::successors(self.nodes.get(id).and_then(parent), move |node| {
-            parent(node)
-        })
-        .take(128)
-    }
-}
 impl Resolver<'_> {
     pub(super) fn style(&self, style: &Style) -> Result<()> {
         id(&style.id)?;

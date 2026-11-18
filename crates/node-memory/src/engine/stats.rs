@@ -27,20 +27,8 @@ pub struct MemoryStats {
     pub commits: u64,
     /// Prepared batches dropped without commit.
     pub rollbacks: u64,
-    /// Batches validated on the delta path.
-    pub local: u64,
-    /// Batches validated by the reference path.
-    pub full: u64,
-    /// Batches rejected by validation.
+    /// Batches rejected by validation (per-operation or end-of-batch).
     pub rejected: u64,
-    /// Rejections whose error came straight from the per-operation checks (part of
-    /// `rejected`).
-    pub rejected_direct: u64,
-    /// Rejections of the per-operation checks whose public error came from the
-    /// reference validator. Always 0: every `Txn` rejection is the public error.
-    pub rejected_routed: u64,
-    /// Batches where the engine and the reference validator disagreed.
-    pub divergences: u64,
 }
 
 #[derive(Default)]
@@ -56,12 +44,7 @@ pub(crate) struct Stats {
     pub(crate) over_budget: AtomicU64,
     pub(crate) commits: AtomicU64,
     pub(crate) rollbacks: AtomicU64,
-    pub(crate) local: AtomicU64,
-    pub(crate) full: AtomicU64,
     pub(crate) rejected: AtomicU64,
-    pub(crate) rejected_direct: AtomicU64,
-    pub(crate) rejected_routed: AtomicU64,
-    pub(crate) divergences: AtomicU64,
 }
 
 impl Stats {
@@ -83,12 +66,7 @@ impl Stats {
             over_budget: get(&self.over_budget),
             commits: get(&self.commits),
             rollbacks: get(&self.rollbacks),
-            local: get(&self.local),
-            full: get(&self.full),
             rejected: get(&self.rejected),
-            rejected_direct: get(&self.rejected_direct),
-            rejected_routed: get(&self.rejected_routed),
-            divergences: get(&self.divergences),
         }
     }
 }

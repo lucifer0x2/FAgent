@@ -8,8 +8,7 @@ use std::sync::atomic::{AtomicU64, Ordering};
 #[serde(rename_all = "camelCase")]
 pub struct NodeMemoryStats {
     /// The engine's counters: loads and admissions (full validation at load, with
-    /// failures and time), evictions, expiry, batches by path, and rejections (direct
-    /// from the per-operation checks or routed through the reference).
+    /// failures and time), evictions, expiry, commits, rollbacks and rejections.
     pub memory: MemoryStats,
     /// Estimated bytes of resident projects.
     pub resident_bytes: u64,

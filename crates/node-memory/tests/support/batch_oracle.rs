@@ -1,31 +1,12 @@
 //! `HotProject::begin` against the reference: `Candidate::apply` per operation, link
 //! pruning and a full `validate()`. Differences are collected, never panicked on, so one
 //! run reports every one of them.
-use super::oracle::candidate;
+use super::oracle::{brief, expected, same_error, Expected};
 use super::Rng;
-use fagent_node_memory::{Begin, HotProject, NodeMemory, Operation, Path, Rows};
+use fagent_node_memory::{Begin, HotProject, NodeMemory, Operation, Rows};
 use fagent_scene_input::validate::Candidate;
-use fagent_scene_input::{Snapshot, StorageError};
+use fagent_scene_input::Snapshot;
 use std::collections::BTreeMap;
-
-/// What the reference says about a batch.
-enum Expected {
-    /// `Candidate::apply` failed on an operation.
-    PerOp(StorageError),
-    /// Every operation applied but `validate()` failed.
-    EndOfBatch(StorageError),
-    Accept(Box<Candidate>, Vec<String>),
-}
-
-fn expected(snapshot: &Snapshot, ops: &[Operation]) -> Expected {
-    match candidate(snapshot, ops) {
-        Err(error) => Expected::PerOp(error),
-        Ok((candidate, changed)) => match candidate.validate() {
-            Err(error) => Expected::EndOfBatch(error),
-            Ok(()) => Expected::Accept(Box::new(candidate), changed),
-        },
-    }
-}
 
 /// Counts and differences of one differential run.
 #[derive(Default)]
@@ -34,26 +15,12 @@ pub struct Totals {
     pub accepted: usize,
     pub committed: usize,
     pub dropped: usize,
-    pub local: usize,
-    pub full: usize,
     pub rejected: BTreeMap<String, usize>,
     /// Accept/reject, rows, changed ids, per-op errors: must stay empty.
     pub differences: Vec<String>,
-    /// Reference per-operation rejections the engine returned straight from `Txn`
-    /// (`MemoryStats::rejected_direct`) and otherwise.
-    pub per_op_direct: usize,
-    pub per_op_routed: usize,
     /// End-of-batch rejections where code or field differ from `validate()`'s first
     /// error (error order may differ; accept/reject agree).
     pub order: Vec<String>,
-}
-
-fn same_error(a: &StorageError, b: &StorageError) -> bool {
-    serde_json::to_value(a).unwrap() == serde_json::to_value(b).unwrap()
-}
-
-fn brief(e: &StorageError) -> String {
-    format!("{} {:?} {:?} {}", e.code, e.field, e.op_index, e.message)
 }
 
 fn expected_rows(before: &Snapshot, after: &Candidate, changed: &[String]) -> Rows {
@@ -107,18 +74,12 @@ pub fn round(
     totals.batches += 1;
     let want = expected(snapshot, ops);
     let base = snapshot.revision;
-    let direct = memory.stats().rejected_direct;
     let actual = project.begin(base, ops);
-    let direct = memory.stats().rejected_direct > direct;
     let mut diffs = Vec::new();
     let mut diff = |what: String| diffs.push(format!("{at}: {what}"));
     match (actual, want) {
         (Ok(Begin::Stale), _) => diff("stale at the tracked revision".into()),
         (Err(a), Expected::PerOp(e)) => {
-            match direct {
-                true => totals.per_op_direct += 1,
-                false => totals.per_op_routed += 1,
-            }
             if !same_error(&a, &e) {
                 diff(format!(
                     "per-op error\n   engine: {}\n   candidate: {}",
@@ -153,10 +114,6 @@ pub fn round(
         }
         (Ok(Begin::Ready(prepared)), Expected::Accept(after, changed)) => {
             totals.accepted += 1;
-            match prepared.path() {
-                Path::Local => totals.local += 1,
-                Path::Full => totals.full += 1,
-            }
             if prepared.changed_ids() != changed.as_slice() {
                 diff(format!(
                     "changed ids {:?} vs {:?}",

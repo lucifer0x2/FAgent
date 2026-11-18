@@ -1,45 +1,24 @@
 //! One batch against a resident project: apply it under the project's write lock, validate
 //! it, and hand an adapter everything it needs to persist and publish it.
 //!
-//! [`HotProject::begin`] stages the batch (per-operation checks in the lib's `Txn`), then
-//! validates the result:
-//!
-//! - an operation class the classifier supports is checked on its delta only
-//!   (`validate_delta`); a batch the delta validator cannot decide runs the reference;
-//! - every other class runs the reference on the staged batch.
-//!
-//! The reference is `Candidate::apply` per operation, link pruning and `validate_after`
-//! over the base view, all in memory. `Txn` runs `Candidate::apply`'s per-operation
-//! checks in its order on the working state (token writes included), and the
-//! end-of-batch node cap first, as full validation does, so each of its rejections is
-//! the public error as is (`MemoryStats::rejected_direct`). If the reference produces
-//! other changed ids than the lib, the engine and the validator disagree: the project
-//! is flagged as diverged and `STORAGE_FAILED` is returned.
-//!
-//! Token batches are never local (`memory::supports` rejects them).
+//! [`HotProject::begin`] stages the batch through `ProjectState::stage`: `Candidate::apply`'s
+//! per-operation checks in `Txn` on the working state (token writes included), the
+//! node cap, then the end-of-batch delta rules (`validate::delta`) over the base and
+//! staged states. Every rejection is the public error as is: per-operation errors carry
+//! their operation index, end-of-batch errors none. No snapshot, `Candidate` or
+//! whole-project pass runs on this path.
 mod footprint;
-mod reference;
 mod rows;
 
 use crate::engine::{HotProject, Stats};
 use crate::{Delta, Staged};
 use fagent_scene_input::read_scope::ReadView;
-use fagent_scene_input::validate::memory;
 use fagent_scene_input::{Operation, Result, StorageError};
 use std::cell::OnceCell;
 use std::collections::BTreeSet;
 use std::sync::Arc;
 
 pub use rows::Rows;
-
-/// How a batch was validated.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum Path {
-    /// On its delta and dependency closure.
-    Local,
-    /// By the reference validator over the whole project.
-    Full,
-}
 
 /// The outcome of [`HotProject::begin`].
 #[must_use = "a prepared batch is rolled back when dropped"]
@@ -62,7 +41,6 @@ pub struct Prepared<'a> {
     after: Arc<ReadView>,
     staged: Option<Staged<'a>>,
     before: Arc<ReadView>,
-    path: Path,
     changed: Vec<String>,
     footprint: OnceCell<BTreeSet<String>>,
     stats: Arc<Stats>,
@@ -109,10 +87,6 @@ impl<'a> Prepared<'a> {
         &self.after
     }
 
-    pub fn path(&self) -> Path {
-        self.path
-    }
-
     /// Publishes the batch and returns its delta.
     pub fn commit(mut self) -> Delta {
         Stats::bump(&self.stats.commits);
@@ -140,32 +114,14 @@ impl HotProject {
         };
         let mut staged = match staged {
             Ok(staged) => staged,
-            Err(rejection) => {
-                Stats::bump(&self.stats.rejected_direct);
-                return Err(self.reject(rejection.into_error()));
-            }
+            Err(rejection) => return Err(self.reject(rejection.into_error())),
         };
         let changed = staged.delta().changed_ids();
         let after = staged.preview();
-        let local = memory::validate_delta(&before, &after, ops, &changed);
-        let path = match local {
-            Err(error) => return Err(self.reject(error)),
-            Ok(Some(_)) => Path::Local,
-            Ok(None) => match reference::run(&before, ops) {
-                Err(error) => return Err(self.reject(error)),
-                Ok(ids) if ids != changed => return Err(self.diverge("changed ids")),
-                Ok(_) => Path::Full,
-            },
-        };
-        Stats::bump(match path {
-            Path::Local => &self.stats.local,
-            Path::Full => &self.stats.full,
-        });
         Ok(Begin::Ready(Prepared {
             staged: Some(staged),
             before,
             after,
-            path,
             changed,
             footprint: OnceCell::new(),
             stats: self.stats.clone(),
@@ -175,22 +131,5 @@ impl HotProject {
     fn reject(&self, error: StorageError) -> StorageError {
         Stats::bump(&self.stats.rejected);
         error
-    }
-
-    fn diverge(&self, what: &str) -> StorageError {
-        Stats::bump(&self.stats.divergences);
-        self.handle.mark_diverged();
-        eprintln!(
-            "{}",
-            serde_json::json!({
-                "event": "node_memory_divergence",
-                "project": self.id(),
-                "what": what,
-            })
-        );
-        StorageError::new(
-            "STORAGE_FAILED",
-            "In-memory project disagrees with the reference validator",
-        )
     }
 }

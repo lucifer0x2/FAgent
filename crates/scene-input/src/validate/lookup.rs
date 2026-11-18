@@ -46,9 +46,13 @@ pub trait Lookup {
     }
     /// Distinct theme names declared over all tokens, `default` excluded.
     fn named_themes(&self) -> usize {
+        self.declared_themes().len()
+    }
+    /// The theme names [`Self::named_themes`] counts, sorted.
+    fn declared_themes(&self) -> Vec<&str> {
         let names = self.tokens().flat_map(theme_names);
         let names: BTreeSet<&str> = names.filter(|n| *n != "default").collect();
-        names.len()
+        names.into_iter().collect()
     }
     /// Ids of the tokens with an `aliasId` branch naming `token`, sorted.
     fn aliasers(&self, token: &str) -> Vec<&str> {
@@ -56,6 +60,8 @@ pub trait Lookup {
         aliasing.map(|t| t.id.as_str()).collect()
     }
     fn style(&self, id: &str) -> Option<&Style>;
+    /// Every style in id order.
+    fn styles(&self) -> Box<dyn Iterator<Item = &Style> + '_>;
     fn font(&self, id: &str) -> Option<&Font>;
     /// Every font in id order.
     fn fonts(&self) -> Box<dyn Iterator<Item = &Font> + '_>;
@@ -118,6 +124,9 @@ impl Lookup for Candidate {
     }
     fn style(&self, id: &str) -> Option<&Style> {
         self.styles.get(id)
+    }
+    fn styles(&self) -> Box<dyn Iterator<Item = &Style> + '_> {
+        Box::new(self.styles.values())
     }
     fn font(&self, id: &str) -> Option<&Font> {
         self.fonts.get(id)

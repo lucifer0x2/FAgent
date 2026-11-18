@@ -10,6 +10,7 @@ mod reads;
 mod slice;
 mod staged;
 mod subtree;
+mod validation;
 mod view;
 mod writes;
 
@@ -17,10 +18,11 @@ use crate::ops::{Delta, Rejection, Txn};
 use crate::store::{Interned, Resources, Store};
 use crate::Limits;
 pub use dump::IndexDump;
-use fagent_scene_input::{Operation, Result, Snapshot, StorageError};
+use fagent_scene_input::validate::delta::Facts;
+use fagent_scene_input::{bench_phase::time, Operation, Result, Snapshot, StorageError};
 pub use staged::Staged;
 use std::sync::atomic::{AtomicUsize, Ordering};
-use std::sync::Arc;
+use std::sync::{Arc, OnceLock};
 pub use subtree::Subtree;
 pub use writes::Written;
 
@@ -35,6 +37,9 @@ pub struct ProjectState {
     /// Revision at load: write stamps are offsets from it.
     loaded: u64,
     limits: Limits,
+    /// Counters the delta rules carry between revisions; set by admission or a
+    /// validated batch, computed on first use otherwise.
+    facts: OnceLock<Arc<Facts>>,
 }
 
 impl ProjectState {
@@ -55,6 +60,7 @@ impl ProjectState {
             loaded: snapshot.revision,
             meta: Arc::new(snapshot),
             limits,
+            facts: OnceLock::new(),
         })
     }
 
@@ -97,7 +103,8 @@ impl ProjectState {
     }
 
     /// Approximate bytes held for nodes, indexes, interned ids and write stamps (not
-    /// resources). Parts shared with other versions count in full.
+    /// resources, nor the validation facts, which a state may compute on first use).
+    /// Parts shared with other versions count in full.
     pub fn estimated_bytes(&self) -> usize {
         self.store.bytes()
     }
@@ -110,9 +117,10 @@ impl ProjectState {
     /// Applies `ops` atomically and holds them staged: the result exposes the delta and
     /// the staged state; committing keeps it, aborting or dropping leaves `self` as it
     /// was. On error nothing changes and the error carries the failing operation index
-    /// (end-of-batch checks carry none). The checks are `Candidate::apply`'s, token
-    /// writes included, plus the node cap; the rest of full validation (for example
-    /// descendants a reparent moved too deep) is not made here.
+    /// (end-of-batch checks carry none). The checks are `Candidate::apply`'s per
+    /// operation, token writes included, then the end-of-batch rules of
+    /// `Candidate::validate` on the batch's delta and closure (`validate::delta`):
+    /// given a valid base, the outcome is `Candidate`'s apply + full validation.
     pub fn begin(&mut self, ops: &[Operation]) -> Result<Staged<'_>> {
         let (next, delta, names) = self.stage(ops, None).map_err(Rejection::into_error)?;
         Ok(Staged::direct(self, next, delta, names))
@@ -139,7 +147,11 @@ impl ProjectState {
         }
         let names = self.store.open_names();
         let mut next = self.clone();
-        match next.run(ops) {
+        let checked = time("memory.txn", || next.run(ops)).and_then(|delta| {
+            self.validate_batch(&mut next, &delta)?;
+            Ok(delta)
+        });
+        match checked {
             Ok(delta) => Ok((next, delta, names)),
             Err(rejection) => {
                 // `Txn` only borrowed the clone: nothing else can hold its keys.

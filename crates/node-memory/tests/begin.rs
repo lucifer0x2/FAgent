@@ -1,8 +1,8 @@
-//! `HotProject::begin`: staleness, paths, rows, footprint, rollback and counters.
+//! `HotProject::begin`: staleness, rows, footprint, rollback and counters.
 mod support;
 
 use fagent_node_memory::{
-    Begin, HotProject, Limits, ManualClock, MemoryConfig, NodeMemory, Path, Prepared,
+    Begin, HotProject, Limits, ManualClock, MemoryConfig, NodeMemory, Prepared,
 };
 use fagent_scene_input::{NodeKind, Token};
 use serde_json::json;
@@ -40,11 +40,10 @@ fn stale_when_the_project_is_at_another_revision() {
 }
 
 #[test]
-fn local_batch_exposes_rows_footprint_and_both_views() {
+fn a_batch_exposes_rows_footprint_and_both_views() {
     let (memory, project) = setup();
     let ops = [update("a", json!({"name":"A"}), true)];
     let prepared = ready(project.begin(1, &ops).unwrap());
-    assert_eq!(prepared.path(), Path::Local);
     assert_eq!(prepared.changed_ids(), ["a"]);
     let rows = prepared.rows();
     assert_eq!(rows.nodes.len(), 1);
@@ -59,7 +58,7 @@ fn local_batch_exposes_rows_footprint_and_both_views() {
     assert_eq!(delta.revision, 2);
     assert_eq!(project.view().node("a").unwrap().props["name"], "A");
     let stats = memory.stats();
-    assert_eq!((stats.commits, stats.local, stats.full), (1, 1, 0));
+    assert_eq!((stats.commits, stats.rollbacks), (1, 0));
 }
 
 #[test]
@@ -74,7 +73,7 @@ fn update_that_changes_nothing_has_no_row_but_is_a_changed_id() {
 }
 
 #[test]
-fn page_token_and_note_batches_take_the_reference_path() {
+fn page_token_and_note_batches_report_their_rows() {
     let (_, project) = setup();
     let token = Token {
         id: "tk".into(),
@@ -93,7 +92,6 @@ fn page_token_and_note_batches_take_the_reference_path() {
         },
     ];
     let prepared = ready(project.begin(1, &ops).unwrap());
-    assert_eq!(prepared.path(), Path::Full);
     assert_eq!(prepared.changed_ids(), ["n1", "p2", "p3", "tk"]);
     let rows = prepared.rows();
     assert_eq!(rows.tokens.len(), 1);
@@ -160,18 +158,14 @@ fn rejections_carry_the_public_error_and_count() {
     let error = project.begin(1, &ops).err().expect("rejected");
     assert_eq!(error.field.as_deref(), Some("links[0].to"));
     assert_eq!(error.op_index, None);
-    assert!(!project.diverged());
     let stats = memory.stats();
-    assert_eq!((stats.rejected, stats.divergences), (2, 0));
-    // The missing node is the per-operation checks' own error; the link is decided by
-    // validation after the batch, so neither went through the reference for its error.
-    assert_eq!((stats.rejected_direct, stats.rejected_routed), (1, 0));
+    assert_eq!(stats.rejected, 2);
     // Nothing leaked into the project.
     assert_eq!(project.view().metadata().revision, 1);
 }
 
 #[test]
-fn a_node_cap_below_the_scene_input_cap_is_a_rejection_not_a_divergence() {
+fn a_node_cap_below_the_scene_input_cap_is_a_rejection() {
     let config = MemoryConfig {
         limits: Limits { max_nodes: 18 },
         ..MemoryConfig::default()
@@ -181,12 +175,6 @@ fn a_node_cap_below_the_scene_input_cap_is_a_rejection_not_a_divergence() {
     let ops = [create("x", NodeKind::Rectangle, "f1", json!({}))];
     let error = project.begin(1, &ops).err().expect("over the cap");
     assert_eq!(error.field.as_deref(), Some("nodes"));
-    assert!(!project.diverged());
-    assert_eq!(memory.stats().divergences, 0);
-    // The cap is an end-of-batch check, made first as full validation does: its
-    // error is `Txn`'s own.
-    assert_eq!(memory.stats().rejected_direct, 1);
-    assert_eq!(memory.stats().rejected_routed, 0);
 }
 
 #[test]
@@ -237,7 +225,5 @@ fn token_errors_are_candidates_per_upsert() {
     assert_eq!(error.field.as_deref(), Some("token.aliasId"));
 
     let stats = memory.stats();
-    assert_eq!((stats.rejected, stats.rejected_direct), (2, 2));
-    assert_eq!((stats.rejected_routed, stats.divergences), (0, 0));
-    assert!(!project.diverged());
+    assert_eq!(stats.rejected, 2);
 }

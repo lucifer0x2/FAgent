@@ -47,12 +47,6 @@ impl HotProject {
         self.view()
     }
 
-    /// Whether a batch ever disagreed with the reference validator. The resident
-    /// copy is then not to be trusted: evict it.
-    pub fn diverged(&self) -> bool {
-        self.handle.diverged()
-    }
-
     /// Estimated bytes as of the last load or successful batch, plus the names a
     /// discarded batch left interned (see `Staged`).
     pub fn estimated_bytes(&self) -> usize {

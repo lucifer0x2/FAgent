@@ -89,7 +89,7 @@ impl<'a> Staged<'a> {
     }
 
     /// The staged version as a reader view, never published until commit. Commit
-    /// publishes this same `Arc`, so validation certificates bind to it.
+    /// publishes this same `Arc`.
     pub fn preview(&mut self) -> Arc<ReadView> {
         let next = &self.next;
         self.preview

@@ -5,8 +5,8 @@
 //!
 //! - [`NodeMemory`] is the engine an adapter uses: it owns every resident project, loads
 //!   snapshots, serves [`HotProject::view`]s and validates and stages batches through
-//!   [`HotProject::begin`] (per-operation checks in `Txn`, then delta validation or the
-//!   in-memory reference validator), returning the rows to persist.
+//!   [`HotProject::begin`] (per-operation checks in `Txn`, then the end-of-batch delta
+//!   rules), returning the rows to persist.
 //! - [`Registry`] keeps HOT projects with TTL and memory-budget eviction.
 //! - [`ProjectState`] is one persistent value: nodes and indexes live in radix tries
 //!   keyed by interned ids, so cloning it is O(1). It answers borrowed reads, builds
@@ -25,8 +25,9 @@
 //!
 //! `ProjectState` runs `Candidate::apply`'s per-operation checks (structure, node
 //! properties, tokens and styles through the scene-input `Lookup` over its working
-//! state); whole-project validation stays in `fagent-scene-input` and is driven by
-//! `HotProject::begin`.
+//! state), then `Candidate::validate`'s end-of-batch rules on the batch's delta and
+//! closure (`fagent_scene_input::validate::delta`). Full validation runs once per load
+//! ([`ProjectState::admit`]), never per batch.
 mod batch;
 mod checks;
 mod engine;
@@ -37,7 +38,7 @@ mod registry;
 mod state;
 mod store;
 
-pub use batch::{Begin, Path, Prepared, Rows};
+pub use batch::{Begin, Prepared, Rows};
 pub use engine::{HotProject, MemoryConfig, MemoryStats, NodeMemory};
 pub use fagent_scene_input::Operation;
 pub use limits::Limits;
