@@ -3,6 +3,10 @@
 //! links, notes by anchor) that each write updates incrementally, in time proportional
 //! to the affected subtree or sibling list.
 //!
+//! - [`NodeMemory`] is the engine an adapter uses: it owns every resident project, loads
+//!   snapshots, serves [`HotProject::view`]s and validates and stages batches through
+//!   [`HotProject::begin`] (per-operation checks in `Txn`, then delta validation or the
+//!   in-memory reference validator), returning the rows to persist.
 //! - [`Registry`] keeps HOT projects with TTL and memory-budget eviction.
 //! - [`ProjectState`] answers borrowed reads, builds scoped [`ProjectState::slice`]s and
 //!   applies atomic batches of stored [`Operation`]s with the same results as
@@ -15,8 +19,9 @@
 //! payloads/index shards are shared until touched, and retaining it never holds the
 //! writer-state lock. Storage publishes only after its database commit.
 //!
-//! Only structural validation runs here; property, token and style validation stays
-//! in `fagent-scene-input`.
+//! `ProjectState` runs structural validation only; property, token and style validation
+//! stays in `fagent-scene-input` and is driven by `HotProject::begin`.
+mod batch;
 mod checks;
 mod engine;
 mod limits;
@@ -26,6 +31,7 @@ mod registry;
 mod state;
 mod store;
 
+pub use batch::{Begin, Path, Prepared, Rows};
 pub use engine::{HotProject, MemoryConfig, MemoryStats, NodeMemory};
 pub use fagent_scene_input::Operation;
 pub use limits::Limits;

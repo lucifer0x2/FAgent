@@ -11,6 +11,8 @@ use serde_json::{json, Value};
 pub struct Gen<'a> {
     pub rng: &'a mut Rng,
     pub counter: usize,
+    /// Also draw pages, root frames, tokens, styles, themes, flows and links.
+    pub extended: bool,
 }
 
 /// Ids and kinds the generator picks from, refreshed per batch.
@@ -42,7 +44,7 @@ impl Gen<'_> {
     }
 
     /// An existing node of one of `kinds` when there is one, else a missing id.
-    fn pick_kind(&mut self, pool: &Pool, kinds: &[NodeKind]) -> String {
+    pub(super) fn pick_kind(&mut self, pool: &Pool, kinds: &[NodeKind]) -> String {
         for _ in 0..6 {
             let id = self.pick(pool);
             let kind = pool.nodes.iter().find(|(n, _)| *n == id).map(|(_, k)| k);
@@ -66,6 +68,9 @@ impl Gen<'_> {
     }
 
     fn op(&mut self, pool: &mut Pool) -> Operation {
+        if self.extended && self.rng.chance(35) {
+            return self.extra(pool);
+        }
         match self.rng.below(100) {
             0..=29 => self.create(pool),
             30..=47 => self.update(pool),

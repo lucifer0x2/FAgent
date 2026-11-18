@@ -11,7 +11,6 @@ use std::sync::Arc;
 #[derive(Clone)]
 pub struct HotProject {
     pub(crate) handle: Arc<ProjectHandle>,
-    #[allow(dead_code)] // read by `begin` (batch module)
     pub(crate) stats: Arc<Stats>,
 }
 

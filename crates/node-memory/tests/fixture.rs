@@ -77,6 +77,7 @@ fn random_batches_on_generated_fixture_match_candidate() {
     let mut gen = Gen {
         rng: &mut rng,
         counter: 0,
+        extended: false,
     };
     let mut tally = Tally::default();
     for n in 0..60 {

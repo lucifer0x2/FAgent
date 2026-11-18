@@ -1,9 +1,11 @@
 //! Shared test helpers: a small hand-written project, operation builders, a rebuild
 //! comparison that never prints whole indexes, and a deterministic PRNG.
 #![allow(dead_code)]
+pub mod batch_oracle;
 pub mod fixture;
 pub mod ops;
 pub mod oracle;
+pub mod random_extra;
 pub mod random_ops;
 pub mod random_resources;
 

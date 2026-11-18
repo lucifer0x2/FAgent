@@ -19,16 +19,26 @@ impl Txn<'_> {
         let key = checks::existing(self.store, id)?;
         let node = self.store.node(key);
         let next = props::updated(&node.props, patch, merge)?;
+        // Only a key whose value changes is stamped; an update that changes nothing
+        // leaves props and stamps alone but still counts as a changed id.
+        let written: Vec<bool> = patch
+            .keys()
+            .map(|name| next.get(name) != node.props.get(name))
+            .collect();
         let was_master = is_master(&node.kind, &node.props);
         let now_master = is_master(&node.kind, &next);
-        self.store.set_props(key, next, &mut self.log);
+        if next != node.props {
+            self.store.set_props(key, next, &mut self.log);
+        }
         checks::instance_target(self.store, self.store.node(key))?;
         self.unmarked |= was_master && !now_master;
         if was_master != now_master {
             self.store.refresh(key, &mut self.log);
         }
-        for name in patch.keys() {
-            self.store.stamp_key(key, name, self.rev, &mut self.log);
+        for (name, written) in patch.keys().zip(written) {
+            if written {
+                self.store.stamp_key(key, name, self.rev, &mut self.log);
+            }
         }
         self.touch(id, true);
         Ok(())

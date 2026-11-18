@@ -9,13 +9,12 @@ mod config;
 mod project;
 mod stats;
 
+use crate::{Clock, Eviction, Registry, RegistryConfig};
 pub use config::MemoryConfig;
+use fagent_scene_input::{Result, Snapshot};
 pub use project::HotProject;
 pub use stats::MemoryStats;
-
-use crate::{Clock, Eviction, Registry, RegistryConfig};
-use fagent_scene_input::{Result, Snapshot};
-use stats::Stats;
+pub(crate) use stats::Stats;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Arc;
 
