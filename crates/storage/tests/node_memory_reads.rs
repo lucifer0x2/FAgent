@@ -100,7 +100,7 @@ fn sqlite_scoped_reads_come_from_memory_when_current() {
         "admissions",
         "admission_failures",
         "admission_micros",
-        "rejected_direct",
+        "rejected",
     ] {
         assert!(json["memory"].get(key).is_some(), "{key} in {json}");
     }

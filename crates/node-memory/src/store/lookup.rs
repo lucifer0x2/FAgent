@@ -56,12 +56,20 @@ impl Lookup for Store {
         self.res.token_index.named_themes()
     }
 
+    fn declared_themes(&self) -> Vec<&str> {
+        self.res.token_index.declared_themes()
+    }
+
     fn aliasers(&self, token: &str) -> Vec<&str> {
         self.res.token_index.aliasers(token).collect()
     }
 
     fn style(&self, id: &str) -> Option<&Style> {
         self.res.styles.get(id)
+    }
+
+    fn styles(&self) -> Box<dyn Iterator<Item = &Style> + '_> {
+        Box::new(self.res.styles.values())
     }
 
     fn font(&self, id: &str) -> Option<&Font> {

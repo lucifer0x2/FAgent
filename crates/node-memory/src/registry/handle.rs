@@ -5,7 +5,7 @@ use crate::ops::Rejection;
 use crate::{Delta, ProjectState, Staged};
 use fagent_scene_input::read_scope::ReadView;
 use fagent_scene_input::{Operation, Result};
-use std::sync::atomic::{AtomicBool, AtomicU64, AtomicUsize, Ordering};
+use std::sync::atomic::{AtomicU64, AtomicUsize, Ordering};
 use std::sync::{Arc, PoisonError, RwLock, RwLockReadGuard};
 use std::time::Duration;
 
@@ -30,7 +30,6 @@ pub struct ProjectHandle {
     clock: Arc<dyn Clock>,
     last_access_nanos: AtomicU64,
     bytes: AtomicUsize,
-    diverged: AtomicBool,
 }
 
 impl ProjectHandle {
@@ -43,7 +42,6 @@ impl ProjectHandle {
             state: RwLock::new(state),
             published: RwLock::new(view),
             last_access_nanos: AtomicU64::new(0),
-            diverged: AtomicBool::new(false),
             clock,
         };
         handle.touch();
@@ -52,15 +50,6 @@ impl ProjectHandle {
 
     pub fn id(&self) -> &str {
         &self.id
-    }
-
-    /// Whether a batch disagreed with the reference validator; see [`crate::HotProject::diverged`].
-    pub fn diverged(&self) -> bool {
-        self.diverged.load(Ordering::Relaxed)
-    }
-
-    pub(crate) fn mark_diverged(&self) {
-        self.diverged.store(true, Ordering::Relaxed);
     }
 
     /// Which load of the project this handle is.

@@ -75,11 +75,13 @@ fn instance_with_non_object_props_fails_reads_and_commits() {
     commit_fails(&storage, &project, "r1");
 }
 
+/// Batches are judged on their delta: a stored defect is reported only when the batch
+/// reaches it (here, touching the instance), not by an unrelated write.
 #[test]
 fn instance_with_missing_master_fails_reads_and_commits() {
     let (_temp, storage, project) = corrupt("instance", r#"{"componentId":"missing"}"#);
     reads_fail(&storage, &project, "props.componentId");
-    commit_fails(&storage, &project, "r1");
+    commit_fails(&storage, &project, "instance");
 }
 
 #[test]

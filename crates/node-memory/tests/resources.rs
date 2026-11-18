@@ -88,30 +88,31 @@ fn notes_follow_their_anchor_and_cascade() {
 #[test]
 fn deleting_a_link_target_prunes_links() {
     let mut state = load(small());
-    let links = json!({"links":[{"to":"f2"},{"to":"t2","on":"hover","action":"overlay"}]});
+    let frame = || json!({"width":100,"height":100});
+    state
+        .apply(&[create("r2", NodeKind::Frame, "p2", frame())])
+        .unwrap();
+    let links = json!({"links":[{"to":"f2"},{"to":"r2","on":"hover","action":"overlay"}]});
     state
         .apply(&[
             update("a", links, false),
-            update("b", json!({"links":[{"to":"t2"}]}), false),
+            update("b", json!({"links":[{"to":"r2"}]}), false),
         ])
         .unwrap();
-    assert_eq!(state.linking_to("t2").count(), 2);
+    assert_eq!(state.linking_to("r2").count(), 2);
     // A target deleted and recreated in the same batch keeps its links.
     let delta = state
-        .apply(&[
-            delete("t2"),
-            create("t2", NodeKind::Text, "p2", text("again")),
-        ])
+        .apply(&[delete("r2"), create("r2", NodeKind::Frame, "p2", frame())])
         .unwrap();
-    assert_eq!(delta.changed_ids(), ["t2"]);
-    let delta = state.apply(&[delete("t2")]).unwrap();
+    assert_eq!(delta.changed_ids(), ["r2"]);
+    let delta = state.apply(&[delete("r2")]).unwrap();
     assert_eq!(delta.nodes.upserted, ["a", "b"]);
     assert_eq!(
         state.node("a").unwrap().props,
         json!({"links":[{"to":"f2"}]})
     );
     assert_eq!(state.node("b").unwrap().props, json!({}));
-    assert_eq!(state.linking_to("t2").count(), 0);
+    assert_eq!(state.linking_to("r2").count(), 0);
     assert_eq!(state.linking_to("f2").count(), 1);
     assert_rebuild_matches(&state);
 }

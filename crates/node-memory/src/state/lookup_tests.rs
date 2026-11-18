@@ -108,6 +108,11 @@ fn assert_same_indexes(state: &ProjectState) {
 #[test]
 fn store_indexes_match_candidate_across_writes() {
     let mut snapshot = snapshot();
+    // Writes run the end-of-batch rules, which recheck the instances of the edited
+    // master `m`: drop their stored (invalid) links.
+    for node in snapshot.nodes.iter_mut().filter(|n| n.id.starts_with('i')) {
+        node.props.as_object_mut().unwrap().remove("links");
+    }
     let tokens = json!([
         {"id":"t1","name":"T1","type":"color","value":{"default":"#000000","themes":{"dark":"#ffffff","dim":"#777777"}}},
         {"id":"t2","name":"T2","type":"color","value":{"default":{"aliasId":"t1"},"themes":{"dark":{"aliasId":"t1"}}}},

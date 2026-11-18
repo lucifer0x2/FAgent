@@ -44,9 +44,6 @@ pub struct ReadView {
     /// Header and resource vectors (tokens, styles, assets, fonts); no nodes or notes.
     pub(super) snapshot: Arc<Snapshot>,
     pub(super) resource_bytes: OnceLock<usize>,
-    /// Validation certificate belongs to this exact immutable revision, never a
-    /// structure-only load. Successors receive one only after delta validation.
-    pub(crate) validation: OnceLock<crate::validate::memory::Certificate>,
 }
 
 impl ReadView {
@@ -65,7 +62,6 @@ impl ReadView {
             source,
             snapshot: metadata,
             resource_bytes: OnceLock::new(),
-            validation: OnceLock::new(),
         }
     }
 
@@ -160,7 +156,6 @@ impl ReadView {
             + *self
                 .resource_bytes
                 .get_or_init(|| resource_bytes(&self.snapshot))
-            + self.validation.get().map_or(0, |v| v.estimated_bytes())
     }
 
     pub(super) fn ordered<'a>(&'a self, ids: impl IntoIterator<Item = &'a str>) -> Vec<&'a Node> {

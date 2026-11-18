@@ -72,17 +72,12 @@ impl NodeMemory {
     /// The resident project, refreshing its access time; `None` when cold.
     pub fn project(&self, project_id: &str) -> Option<HotProject> {
         let handle = self.registry.get(project_id)?;
-        if handle.diverged() {
-            self.evict(project_id);
-            return None;
-        }
         Some(HotProject::new(handle, self.stats.clone()))
     }
 
     /// The resident load of a project without refreshing its access time.
     pub fn resident(&self, project_id: &str) -> Option<crate::LoadId> {
-        let handle = self.registry.peek(project_id)?;
-        (!handle.diverged()).then(|| handle.load_id())
+        Some(self.registry.peek(project_id)?.load_id())
     }
 
     /// Drops a project. Holders of its [`HotProject`] keep it until they drop it.

@@ -1,7 +1,7 @@
 //! Cost of token upserts: `Candidate::apply` revalidates every token and the alias graph
 //! per operation; `Txn` checks per operation only what the write can affect (the token,
-//! its aliasers, the alias paths through it), and `begin` adds the reference (token
-//! batches are never local). Timing only; run with
+//! its aliasers, the alias paths through it), and `begin` adds the end-of-batch delta
+//! rules (the users of the written token). Timing only; run with
 //! `cargo test --release -p fagent-node-memory --test token_cost -- --ignored --nocapture`.
 mod support;
 

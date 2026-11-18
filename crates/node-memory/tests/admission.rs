@@ -1,27 +1,14 @@
-//! Admission at `NodeMemory::load`: invalid stored data is loaded, served, counted
-//! and certified when its instances expand; later commits are judged like the
-//! reference judges them.
+//! Admission at `NodeMemory::load`: invalid stored data is loaded, served and counted,
+//! and later batches are judged on their delta only (pure diff-only validation): a
+//! stored defect matters only when the batch's closure reaches it. An unrelated batch
+//! is accepted; a batch that touches the defect is rejected for it.
 mod support;
 
-use fagent_node_memory::{Begin, HotProject, ManualClock, MemoryConfig, NodeMemory, Path};
-use fagent_scene_input::validate::{memory::certified, Candidate};
-use fagent_scene_input::{Operation, Result, Snapshot, StorageError};
+use fagent_node_memory::{Begin, HotProject, ManualClock, MemoryConfig, NodeMemory};
+use fagent_scene_input::{NodeKind, Operation, Snapshot};
 use serde_json::{json, Value};
-use std::collections::BTreeSet;
 use std::sync::Arc;
 use support::*;
-
-/// The engine's reference (`batch::reference`): apply, prune links, `validate_after`.
-fn reference(snapshot: &Snapshot, ops: &[Operation]) -> Result<Vec<String>> {
-    let mut candidate = Candidate::from_snapshot(snapshot);
-    let mut changed = BTreeSet::new();
-    for (index, op) in ops.iter().enumerate() {
-        candidate.apply(op, &mut changed).map_err(|e| e.at(index))?;
-    }
-    candidate.prune_links(&mut changed);
-    candidate.validate_after(snapshot, ops, &changed)?;
-    Ok(changed.into_iter().collect())
-}
 
 fn corrupt(id: &str, props: Value) -> Snapshot {
     let mut snapshot = small();
@@ -34,6 +21,12 @@ fn corrupt(id: &str, props: Value) -> Snapshot {
     snapshot
 }
 
+fn with_note(mut snapshot: Snapshot, node: &str, text: &str) -> Snapshot {
+    let note = json!({"id":"n1","nodeId":node,"text":text});
+    snapshot.notes.push(serde_json::from_value(note).unwrap());
+    snapshot
+}
+
 fn setup(snapshot: Snapshot) -> (NodeMemory, HotProject) {
     let memory = NodeMemory::new(MemoryConfig::default(), Arc::new(ManualClock::default()));
     let project = memory
@@ -42,117 +35,37 @@ fn setup(snapshot: Snapshot) -> (NodeMemory, HotProject) {
     (memory, project)
 }
 
-fn json_of(error: &StorageError) -> Value {
-    serde_json::to_value(error).unwrap()
-}
-
-/// Begins `ops` on the published revision and compares the outcome with the
-/// reference; commits an accepted batch and returns its path.
-fn commit_like_reference(project: &HotProject, ops: &[Operation]) -> Option<Path> {
-    let base = project.view().to_snapshot();
-    let expected = reference(&base, ops);
-    match (project.begin(base.revision, ops), expected) {
-        (Ok(Begin::Ready(prepared)), Ok(changed)) => {
-            assert_eq!(prepared.changed_ids(), changed.as_slice());
-            let path = prepared.path();
-            prepared.commit();
-            Some(path)
-        }
-        (Err(actual), Err(expected)) => {
-            assert_eq!(json_of(&actual), json_of(&expected));
-            None
-        }
-        (Ok(Begin::Stale), _) => panic!("stale"),
-        (Ok(_), Err(expected)) => panic!("only the reference rejects: {expected:?}"),
-        (Err(actual), Ok(_)) => panic!("only the engine rejects: {actual:?}"),
-    }
-}
-
 fn admitted(memory: &NodeMemory, failures: u64) {
     let stats = memory.stats();
     assert_eq!((stats.loads, stats.admissions), (1, 1));
     assert_eq!(stats.admission_failures, failures);
 }
 
-#[test]
-fn a_valid_project_is_admitted_and_certified() {
-    let (memory, project) = setup(small());
-    admitted(&memory, 0);
-    assert!(certified(&project.view()));
+/// Begins and commits `ops` on the published revision; panics with the error when
+/// rejected.
+fn accept(project: &HotProject, ops: &[Operation]) {
+    let revision = project.view().metadata().revision;
+    match project.begin(revision, ops) {
+        Ok(Begin::Ready(prepared)) => {
+            prepared.commit();
+        }
+        Ok(Begin::Stale) => panic!("stale"),
+        Err(error) => panic!("rejected {ops:?}: {error:?}"),
+    }
 }
 
-#[test]
-fn an_invalid_property_is_served_and_commits_stay_local() {
-    let (memory, project) = setup(corrupt("a", json!({"width":false})));
-    admitted(&memory, 1);
-    assert_eq!(project.view().node("a").unwrap().props["width"], false);
-    assert!(certified(&project.view()));
-    let unrelated = [update("b", json!({"name":"B"}), true)];
-    assert_eq!(
-        commit_like_reference(&project, &unrelated),
-        Some(Path::Local)
-    );
-    let touching = [update("a", json!({"name":"A"}), true)];
-    assert_eq!(commit_like_reference(&project, &touching), None);
-    assert_eq!(memory.stats().divergences, 0);
+/// Begins `ops` on the published revision and returns the rejection's field.
+fn reject(project: &HotProject, ops: &[Operation]) -> Option<String> {
+    let revision = project.view().metadata().revision;
+    match project.begin(revision, ops) {
+        Ok(Begin::Ready(_)) => panic!("accepted {ops:?}"),
+        Ok(Begin::Stale) => panic!("stale"),
+        Err(error) => error.field,
+    }
 }
 
-#[test]
-fn a_dangling_alias_rejects_commits_until_the_token_is_repaired() {
-    let mut snapshot = small();
-    let token = json!({"id":"t1","name":"T1","type":"color","value":{"aliasId":"gone"}});
-    snapshot.tokens = vec![serde_json::from_value(token).unwrap()];
-    let (memory, project) = setup(snapshot);
-    admitted(&memory, 1);
-    assert!(certified(&project.view()));
-    assert_eq!(project.view().metadata().tokens.len(), 1);
-    // Every validation checks the whole token set, the reference's included.
-    let unrelated = [update("b", json!({"name":"B"}), true)];
-    assert_eq!(commit_like_reference(&project, &unrelated), None);
-    let repair: Operation = serde_json::from_value(json!({"op":"upsert_token",
-        "token":{"id":"t1","name":"T1","type":"color","value":"#ffffff"}}))
-    .unwrap();
-    assert_eq!(commit_like_reference(&project, &[repair]), Some(Path::Full));
-    assert_eq!(
-        commit_like_reference(&project, &unrelated),
-        Some(Path::Local)
-    );
-}
-
-#[test]
-fn a_broken_component_id_leaves_no_certificate() {
-    let (memory, project) = setup(corrupt("i2", json!({"componentId":"gone"})));
-    admitted(&memory, 1);
-    assert_eq!(
-        project.view().node("i2").unwrap().props["componentId"],
-        "gone"
-    );
-    // The instance does not expand: no certificate, commits take the full path, where
-    // the reference expands every instance and rejects even an unrelated batch.
-    assert!(!certified(&project.view()));
-    let unrelated = [update("b", json!({"name":"B"}), true)];
-    assert_eq!(commit_like_reference(&project, &unrelated), None);
-    let touching = [update("i2", json!({"name":"I"}), true)];
-    assert_eq!(commit_like_reference(&project, &touching), None);
-    let repair = [update("i2", json!({"componentId":"m2"}), true)];
-    assert_eq!(commit_like_reference(&project, &repair), Some(Path::Full));
-    // The repaired revision is valid: the next batch certifies it and stays local.
-    assert_eq!(
-        commit_like_reference(&project, &unrelated),
-        Some(Path::Local)
-    );
-    assert_eq!(memory.stats().divergences, 0);
-}
-
-fn with_note(mut snapshot: Snapshot, node: &str, text: &str) -> Snapshot {
-    let note = json!({"id":"n1","nodeId":node,"text":text});
-    snapshot.notes.push(serde_json::from_value(note).unwrap());
-    snapshot
-}
-
-/// Local-class batches that do not touch the corrupted rows.
+/// Batches that touch none of the corrupted rows.
 fn unrelated_batches() -> Vec<Vec<Operation>> {
-    use fagent_scene_input::NodeKind;
     vec![
         vec![update("b", json!({"name":"B"}), true)],
         vec![create("x", NodeKind::Rectangle, "f1", json!({}))],
@@ -162,67 +75,133 @@ fn unrelated_batches() -> Vec<Vec<Operation>> {
     ]
 }
 
-/// Begins `ops` on a fresh load of `snapshot`; the outcome must be the reference's.
-fn judged_like_reference(case: &str, snapshot: &Snapshot, ops: &[Operation]) {
-    let (memory, project) = setup(snapshot.clone());
-    let expected = reference(&project.view().to_snapshot(), ops);
-    match (project.begin(snapshot.revision, ops), expected) {
-        (Ok(Begin::Ready(prepared)), Ok(changed)) => {
-            assert_eq!(prepared.changed_ids(), changed.as_slice(), "{case}");
-        }
-        (Err(actual), Err(expected)) => {
-            assert_eq!(json_of(&actual), json_of(&expected), "{case}");
-        }
-        (Ok(Begin::Ready(_)), Err(expected)) => {
-            panic!("{case}: only the reference rejects {ops:?}: {expected:?}")
-        }
-        (Err(actual), Ok(_)) => panic!("{case}: only the engine rejects {ops:?}: {actual:?}"),
-        (Ok(_), _) => panic!("{case}: stale"),
+/// One corrupted base: every unrelated batch is accepted (each on a fresh load), and
+/// `touching` is rejected for `field`.
+fn judged_on_delta(case: &str, snapshot: &Snapshot, touching: &[Operation], field: &str) {
+    for ops in unrelated_batches() {
+        let (memory, project) = setup(snapshot.clone());
+        admitted(&memory, 1);
+        accept(&project, &ops);
     }
-    assert_eq!(memory.stats().divergences, 0, "{case}");
+    let (_, project) = setup(snapshot.clone());
+    assert_eq!(reject(&project, touching).as_deref(), Some(field), "{case}");
 }
 
 #[test]
-fn a_base_failing_a_project_wide_check_is_judged_like_the_reference() {
-    let frame = |extra: Value| {
-        let mut props = json!({"width":100,"height":100});
-        props
-            .as_object_mut()
-            .unwrap()
-            .extend(extra.as_object().unwrap().clone());
-        props
-    };
-    let mut flows = corrupt("f1", frame(json!({"flowStart":"x"})));
-    flows.nodes.iter_mut().find(|n| n.id == "f2").unwrap().props = frame(json!({"flowStart":"x"}));
+fn a_valid_project_is_admitted() {
+    let (memory, project) = setup(small());
+    admitted(&memory, 0);
+    accept(&project, &[update("b", json!({"name":"B"}), true)]);
+}
+
+#[test]
+fn an_invalid_property() {
+    let snapshot = corrupt("a", json!({"width":false}));
+    let (memory, project) = setup(snapshot.clone());
+    admitted(&memory, 1);
+    assert_eq!(project.view().node("a").unwrap().props["width"], false);
+    judged_on_delta(
+        "an invalid property",
+        &snapshot,
+        &[update("a", json!({"name":"A"}), true)],
+        "width",
+    );
+    // A batch that repairs the row is accepted.
+    accept(&project, &[update("a", json!({"width":10}), true)]);
+}
+
+#[test]
+fn a_dangling_alias() {
+    let mut snapshot = small();
+    let token = json!({"id":"t1","name":"T1","type":"color","value":{"aliasId":"gone"}});
+    snapshot.tokens = vec![serde_json::from_value(token).unwrap()];
+    // A node starting to use the token resolves the dangling alias.
+    let touching = [update("b", json!({"fill":{"tokenId":"t1"}}), true)];
+    judged_on_delta("a dangling alias", &snapshot, &touching, "token.aliasId");
+    let (_, project) = setup(snapshot);
+    let repair: Operation = serde_json::from_value(json!({"op":"upsert_token",
+        "token":{"id":"t1","name":"T1","type":"color","value":"#ffffff"}}))
+    .unwrap();
+    accept(&project, &[repair]);
+    accept(&project, &touching);
+}
+
+#[test]
+fn a_broken_component_id() {
+    let snapshot = corrupt("i2", json!({"componentId":"gone"}));
+    let touching = [update("i2", json!({"name":"I"}), true)];
+    judged_on_delta(
+        "a broken componentId",
+        &snapshot,
+        &touching,
+        "props.componentId",
+    );
+    let (_, project) = setup(snapshot);
+    accept(&project, &[update("i2", json!({"componentId":"m2"}), true)]);
+}
+
+#[test]
+fn an_empty_note() {
+    let snapshot = with_note(small(), "t2", "");
+    let touching = [Operation::UpdateNote {
+        id: "n1".into(),
+        text: None,
+        resolved: Some(true),
+        node_id: None,
+    }];
+    judged_on_delta("an empty note", &snapshot, &touching, "text");
+}
+
+#[test]
+fn a_link_to_a_non_root_frame() {
     let mut link = text("T");
     link["links"] = json!([{"to":"a"}]);
-    let cases = [
-        ("an empty note", with_note(small(), "t2", "")),
-        ("a link to a non-root frame", corrupt("c", link)),
-        (
-            "a trigger that is not an ancestor",
-            corrupt("a", json!({"animations":[{"triggerNodeId":"b"}]})),
-        ),
-        ("a duplicate flow start", flows),
-    ];
-    for (case, snapshot) in &cases {
-        let (_, project) = setup(snapshot.clone());
-        assert!(!certified(&project.view()), "{case}");
-        for ops in unrelated_batches() {
-            judged_like_reference(case, snapshot, &ops);
-        }
-    }
+    let snapshot = corrupt("c", link);
+    let touching = [update("c", json!({"name":"C"}), true)];
+    judged_on_delta(
+        "a link to a non-root frame",
+        &snapshot,
+        &touching,
+        "links[0].to",
+    );
 }
 
 #[test]
-fn a_note_cascade_on_an_invalid_base_takes_the_reference_path() {
-    // The reference re-validates the whole project when a delete removes a note, and
-    // so reports the stored error again; the delta path must not accept that batch.
+fn a_trigger_that_is_not_an_ancestor() {
+    let animation = json!({"name":"fade","on":"hover","triggerNodeId":"b","duration":200,
+        "keyframes":[{"opacity":0.5}]});
+    let snapshot = corrupt("a", json!({"animations":[animation]}));
+    let touching = [update("a", json!({"name":"A"}), true)];
+    let field = "props.animations[0].triggerNodeId";
+    judged_on_delta(
+        "a trigger that is not an ancestor",
+        &snapshot,
+        &touching,
+        field,
+    );
+}
+
+#[test]
+fn a_duplicate_flow_start() {
+    let frame = |flow: &str| json!({"width":100,"height":100,"flowStart":flow});
+    let mut snapshot = corrupt("f1", frame("x"));
+    snapshot
+        .nodes
+        .iter_mut()
+        .find(|n| n.id == "f2")
+        .unwrap()
+        .props = frame("x");
+    let touching = [update("f1", json!({"name":"F"}), true)];
+    judged_on_delta("a duplicate flow start", &snapshot, &touching, "flowStart");
+}
+
+/// A delete that cascades to a note is judged on its delta like any other batch: the
+/// stored error elsewhere does not reject it.
+#[test]
+fn a_note_cascade_on_an_invalid_base_is_judged_on_its_delta() {
     let snapshot = with_note(corrupt("t2", json!({"width":false})), "gt", "Hello");
-    let (_, project) = setup(snapshot.clone());
-    assert!(certified(&project.view()));
-    judged_like_reference("a note cascade", &snapshot, &[delete("g")]);
-    for ops in unrelated_batches() {
-        judged_like_reference("an invalid width", &snapshot, &ops);
-    }
+    let (memory, project) = setup(snapshot);
+    admitted(&memory, 1);
+    accept(&project, &[delete("g")]);
+    assert!(project.view().note("n1").is_none());
 }

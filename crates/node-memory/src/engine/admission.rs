@@ -1,20 +1,20 @@
-//! Admission at load: the full reference validation of a stored revision, once.
-//! Stored data that fails it is still loaded and served; the failure is counted and
-//! logged, and later commits are validated like on any other revision (see
-//! `fagent_scene_input::validate::memory::admit` for when they stay local).
+//! Admission at load: the full validation of a stored revision, once, and the facts
+//! the delta rules start from (`ProjectState::admit`). Stored data that fails it is
+//! still loaded and served; the failure is counted and logged. Later batches are judged
+//! on their delta only, like on any other revision: a stored defect matters only when a
+//! batch's closure reaches it.
 use super::{nanos, NodeMemory, Stats};
 use crate::ProjectHandle;
-use fagent_scene_input::validate::memory;
 use fagent_scene_input::StorageError;
 use serde_json::{json, Value};
 use std::sync::atomic::Ordering;
 
 impl NodeMemory {
-    /// Validates the loaded revision of `handle` and certifies it for delta
-    /// validation. Never fails the load.
+    /// Validates the loaded revision of `handle` and computes its facts. Never fails
+    /// the load.
     pub(super) fn admit(&self, handle: &ProjectHandle) {
         let start = nanos(&*self.clock);
-        let result = memory::admit(&handle.read_view());
+        let result = handle.read().admit();
         let micros = nanos(&*self.clock).saturating_sub(start) / 1_000;
         self.stats
             .admission_micros

@@ -75,6 +75,12 @@ impl TokenIndex {
         self.themes.len() - usize::from(self.themes.contains_key("default"))
     }
 
+    /// Declared theme names, `default` excluded, sorted.
+    pub(crate) fn declared_themes(&self) -> Vec<&str> {
+        let names = self.themes.keys().map(String::as_str);
+        names.filter(|name| *name != "default").collect()
+    }
+
     /// Ids of the tokens aliasing `token`, in id order.
     pub(crate) fn aliasers(&self, token: &str) -> impl Iterator<Item = &str> {
         let ids = self.aliasers.get(token).into_iter().flatten();

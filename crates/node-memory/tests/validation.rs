@@ -156,23 +156,22 @@ fn update_failures_roll_back() {
 }
 
 /// newi (created in the prefix) uses master "new". Unmarking "new" is no operation
-/// error, as in `Candidate::apply`; full validation rejects the batch on the instance,
-/// without an operation index.
+/// error, as in `Candidate::apply`; the end-of-batch instance rule rejects the batch on
+/// the instance, without an operation index, on the state and through the engine.
 #[test]
-fn unmarking_a_used_master_is_left_to_full_validation() {
+fn unmarking_a_used_master_is_an_end_of_batch_error() {
     let mut ops = prefix();
     ops.push(update("new", json!({"component":null}), true));
     let mut state = load(small());
-    assert!(state.begin(&ops).is_ok(), "per-operation checks pass");
-    let memory = NodeMemory::new(MemoryConfig::default(), Arc::new(ManualClock::default()));
-    let project = memory.load(small()).unwrap();
-    let error = project
-        .begin(1, &ops)
-        .err()
-        .expect("full validation rejects");
+    let error = state.begin(&ops).err().expect("end-of-batch rules reject");
     assert_eq!(error.field.as_deref(), Some("props.componentId"));
     assert_eq!(error.op_index, None);
-    assert_eq!(memory.stats().rejected_direct, 0);
+    let memory = NodeMemory::new(MemoryConfig::default(), Arc::new(ManualClock::default()));
+    let project = memory.load(small()).unwrap();
+    let error = project.begin(1, &ops).err().expect("rejected");
+    assert_eq!(error.field.as_deref(), Some("props.componentId"));
+    assert_eq!(error.op_index, None);
+    assert_eq!(memory.stats().rejected, 1);
 }
 
 #[test]

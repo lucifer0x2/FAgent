@@ -1,4 +1,4 @@
-//! Small persistent string map for the validation certificate: updating a key copies
+//! Small persistent string map for the delta validation facts: updating a key copies
 //! only its shared shard.
 use std::collections::{hash_map::DefaultHasher, BTreeMap};
 use std::hash::{Hash, Hasher};

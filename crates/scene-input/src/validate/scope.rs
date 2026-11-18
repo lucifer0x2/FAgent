@@ -7,7 +7,7 @@ use std::collections::BTreeMap;
 #[derive(Clone, Copy)]
 pub(super) struct Resolver<'a> {
     pub lookup: &'a dyn Lookup,
-    /// A full replacement node set (an instance expansion); `None` reads `lookup`.
+    /// Expanded nodes (every instance's expansion or some), read before `lookup`.
     pub overlay: Option<&'a BTreeMap<String, Node>>,
     pub theme: &'a str,
 }
@@ -68,19 +68,18 @@ impl Candidate {
     }
 }
 impl<'context> Resolver<'context> {
-    /// The node at `id` in the overlay when present, else in the lookup.
+    /// The node at `id` in the overlay when present, else in the lookup. An overlay may
+    /// hold some instances' expansions only: the ids it lacks are authored nodes.
     pub(super) fn find(&self, id: &str) -> Option<&'context Node> {
-        match self.overlay {
-            Some(nodes) => nodes.get(id),
-            None => {
-                let lookup: &'context dyn Lookup = self.lookup;
-                lookup.node(id)
-            }
+        let lookup: &'context dyn Lookup = self.lookup;
+        match self.overlay.and_then(|nodes| nodes.get(id)) {
+            Some(node) => Some(node),
+            None => lookup.node(id),
         }
     }
+    /// A bound on any ancestor chain: the authored nodes plus the overlay's.
     pub(super) fn node_count(&self) -> usize {
-        self.overlay
-            .map_or_else(|| self.lookup.node_count(), BTreeMap::len)
+        self.lookup.node_count() + self.overlay.map_or(0, BTreeMap::len)
     }
     pub(super) fn effective_theme<'a>(&self, node: &'a Node) -> Result<&'a str>
     where
