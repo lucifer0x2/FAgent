@@ -113,18 +113,6 @@ pub(crate) fn depth_of(store: &Store, key: Key) -> usize {
     1 + store.ancestors(key).take(MAX_DEPTH).count()
 }
 
-/// Levels below `key` in its deepest branch (0 for a leaf).
-pub(crate) fn height(store: &Store, key: Key) -> usize {
-    let mut deepest = 0;
-    let mut stack = vec![(key, 0)];
-    while let Some((key, depth)) = stack.pop() {
-        deepest = deepest.max(depth);
-        let children = store.slot(key).children.iter();
-        stack.extend(children.map(|&child| (child, depth + 1)));
-    }
-    deepest
-}
-
 /// A master would lose its component status or be deleted while instances use it.
 /// Instance ids are sorted; at most 20 are listed, with the full count.
 pub(crate) fn component_in_use(mut users: Vec<String>) -> StorageError {

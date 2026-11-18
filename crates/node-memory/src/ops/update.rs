@@ -2,7 +2,8 @@
 //! `Candidate::apply`), check the node as `Candidate` does after the write
 //! (`check_node` on the working state), and keep usage/link indexes and, when
 //! component status flips, the subtree's master index current. A master losing its
-//! status while used is checked at the end of the batch, as full validation would.
+//! status while used is not an operation error: `Candidate` finds it in full
+//! validation, as an instance whose `componentId` names no component frame.
 use super::Txn;
 use crate::checks;
 use crate::props::{self, is_master};
@@ -31,7 +32,6 @@ impl Txn<'_> {
             self.store.set_props(key, next);
         }
         check_node(&*self.store, self.store.node(key))?;
-        self.unmarked |= was_master && !now_master;
         if was_master != now_master {
             self.store.refresh(key);
         }
