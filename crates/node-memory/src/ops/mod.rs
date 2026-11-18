@@ -52,8 +52,28 @@ impl<'a> Txn<'a> {
     }
 
     /// Applies one operation with `Candidate::apply`'s checks, in its order, on the
-    /// working state (see [`Rejection`] for the few that differ).
+    /// working state (see [`Rejection`] for the few that differ). After a token upsert
+    /// every error is inexact (see [`Self::deferred`]).
     pub(crate) fn apply(&mut self, op: &Operation) -> std::result::Result<(), Rejection> {
+        let deferred = self.deferred();
+        self.run(op).map_err(|rejection| match deferred {
+            true => rejection.routed(),
+            false => rejection,
+        })
+    }
+
+    /// Whether the batch upserted a token. Token validation then waits for `finish`:
+    /// `Candidate::apply` validates every token after each upsert, which costs
+    /// O(operations x tokens) per batch. Until `finish` the token set may be one
+    /// `Candidate` already rejected, so a later error is not necessarily its error,
+    /// and a batch whose token set is repaired by a later upsert is accepted here.
+    /// The engine runs the reference on every token batch (the delta classifier does
+    /// not support them), which reports `Candidate`'s exact error in both cases.
+    pub(crate) fn deferred(&self) -> bool {
+        !self.tokens.is_empty()
+    }
+
+    fn run(&mut self, op: &Operation) -> std::result::Result<(), Rejection> {
         match op {
             Operation::CreateNode {
                 id,

@@ -12,11 +12,16 @@
 //! over the base view, all in memory. `Txn` runs `Candidate::apply`'s per-operation
 //! checks in its order on the working state, so most of its rejections are the public
 //! error as is (`MemoryStats::rejected_direct`). The few it makes at another point than
-//! `Candidate` (a reparented subtree too deep, the end-of-batch node cap and component
-//! masters) go through the reference to produce the public error
-//! (`MemoryStats::rejected_routed`). If the reference then accepts a batch the lib
-//! rejected (or the changed ids differ) the engine and the validator disagree: the
-//! project is flagged as diverged and `STORAGE_FAILED` is returned.
+//! `Candidate` (a reparented subtree too deep, the token set, the end-of-batch node cap
+//! and component masters), and every error after a token upsert, go through the
+//! reference to produce the public error (`MemoryStats::rejected_routed`). If the
+//! reference then accepts a batch the lib rejected (or the changed ids differ) the
+//! engine and the validator disagree: the project is flagged as diverged and
+//! `STORAGE_FAILED` is returned.
+//!
+//! Token batches are never local (`memory::supports` rejects them): `Txn` validates
+//! the token set once per batch, so only the reference rejects a batch whose token set
+//! was invalid after one upsert and repaired by a later one.
 mod footprint;
 mod reference;
 mod rows;

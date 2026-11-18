@@ -6,8 +6,9 @@ use fagent_scene_input::StorageError;
 /// `exact` errors are the ones `Candidate::apply` reports for the same batch (same
 /// code, field and operation index): the operation's checks run in `Candidate`'s
 /// order on the same working state. The others come from checks `Candidate` makes
-/// at another point (the descendant depth of a reparented subtree, the end-of-batch
-/// node cap and component masters) and are replaced by the reference's error.
+/// at another point (the descendant depth of a reparented subtree, the token set,
+/// the end-of-batch node cap and component masters), or follow a token upsert, and
+/// are replaced by the reference's error.
 #[derive(Debug)]
 pub(crate) struct Rejection {
     /// Boxed so every `Result` on the write path stays small.
@@ -22,6 +23,12 @@ impl Rejection {
             error: Box::new(error),
             exact: false,
         }
+    }
+
+    /// The same error, no longer taken as `Candidate`'s.
+    pub(crate) fn routed(mut self) -> Self {
+        self.exact = false;
+        self
     }
 
     /// The same rejection attributed to operation `index`.

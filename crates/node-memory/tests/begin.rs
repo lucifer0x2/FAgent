@@ -200,3 +200,42 @@ fn settled_view_waits_for_a_staged_batch() {
     prepared.commit();
     assert_eq!(waiter.join().unwrap(), 2);
 }
+
+fn color(id: &str, value: serde_json::Value) -> fagent_node_memory::Operation {
+    fagent_node_memory::Operation::UpsertToken {
+        token: Token {
+            id: id.into(),
+            name: id.into(),
+            token_type: "color".into(),
+            value,
+        },
+    }
+}
+
+/// `Txn` validates tokens once per batch; `Candidate` after every upsert. A batch
+/// whose token set is invalid after one upsert and repaired by the next one, and an
+/// error after a token upsert, still get `Candidate`'s per-operation error.
+#[test]
+fn token_errors_are_candidates_although_checked_once_per_batch() {
+    let (memory, project) = setup();
+    let repaired = [
+        color("alias", json!({"aliasId":"later"})),
+        color("later", json!("#ffffff")),
+    ];
+    let error = project.begin(1, &repaired).err().expect("rejected");
+    assert_eq!(error.op_index, Some(0));
+    assert_eq!(error.field.as_deref(), Some("token.aliasId"));
+
+    let then_bad_node = [
+        color("alias", json!({"aliasId":"missing"})),
+        update("a", json!({"width":false}), true),
+    ];
+    let error = project.begin(1, &then_bad_node).err().expect("rejected");
+    assert_eq!(error.op_index, Some(0));
+    assert_eq!(error.field.as_deref(), Some("token.aliasId"));
+
+    let stats = memory.stats();
+    assert_eq!((stats.rejected, stats.rejected_direct), (2, 0));
+    assert_eq!((stats.rejected_routed, stats.divergences), (1, 0));
+    assert!(!project.diverged());
+}
