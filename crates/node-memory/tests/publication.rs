@@ -63,7 +63,17 @@ fn published_readers_keep_their_revision_without_blocking_a_commit() {
             .props["text"],
         "new"
     );
-    assert!(handle.estimated_bytes() >= handle.read().estimated_bytes() + new.estimated_bytes());
+    // One persistent state: the published view is the writer's version, so the
+    // project counts once, and untouched nodes are shared with the old revision.
+    assert_eq!(handle.estimated_bytes(), handle.read().estimated_bytes());
+    assert!(std::ptr::eq(
+        old.node("m1").unwrap(),
+        new.node("m1").unwrap()
+    ));
+    assert!(!std::ptr::eq(
+        old.node("m1t").unwrap(),
+        new.node("m1t").unwrap()
+    ));
 }
 
 fn check(handle: &fagent_node_memory::ProjectHandle) {

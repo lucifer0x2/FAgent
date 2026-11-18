@@ -35,18 +35,15 @@ fn advance(before: &ReadView, operations: &[Operation]) -> (ReadView, Vec<String
     }
     candidate.prune_links(&mut changed);
     let reference = candidate.validate();
-    let after = before.advance(
-        before.metadata().revision + 1,
-        changed
-            .iter()
-            .map(|id| (id.as_str(), candidate.nodes.get(id))),
-        changed
-            .iter()
-            .filter(|id| before.note(id).is_some())
-            .map(|id| (id.as_str(), candidate.notes.get(id))),
-        None,
-    );
-    (after, changed.into_iter().collect(), reference)
+    let mut next = before.to_snapshot();
+    next.revision += 1;
+    next.nodes = candidate.nodes.values().cloned().collect();
+    next.notes = candidate.notes.values().cloned().collect();
+    (
+        ReadView::new(next),
+        changed.into_iter().collect(),
+        reference,
+    )
 }
 
 #[test]
@@ -92,9 +89,11 @@ fn memory_delta_replays_invalid_intermediate_props_with_operation_index() {
         {"op":"update_node","id":"r","props":{"width":false}},
         {"op":"update_node","id":"r","props":{"width":20}}
     ]));
-    let mut final_row = before.node("r").unwrap().clone();
-    final_row.props["width"] = json!(20);
-    let after = before.advance(2, [("r", Some(&final_row))], [], None);
+    let mut next = fixture();
+    next.revision = 2;
+    let row = next.nodes.iter_mut().find(|n| n.id == "r").unwrap();
+    row.props["width"] = json!(20);
+    let after = ReadView::new(next);
     let actual = validate_delta(&before, &after, &operations, &["r".into()])
         .err()
         .unwrap();

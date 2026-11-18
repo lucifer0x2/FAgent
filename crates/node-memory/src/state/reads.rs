@@ -2,10 +2,11 @@
 use super::{ProjectState, Subtree};
 use crate::store::Key;
 use fagent_scene_input::{Node, Note, Style, Token};
+use std::sync::Arc;
 
 impl ProjectState {
     pub fn node(&self, id: &str) -> Option<&Node> {
-        self.store.get(id).map(|slot| &slot.node)
+        self.store.get(id).map(|slot| slot.node.as_ref())
     }
 
     /// Pages in sibling order `(sort_key, id)`.
@@ -65,17 +66,17 @@ impl ProjectState {
     }
 
     pub fn notes(&self) -> impl ExactSizeIterator<Item = &Note> + '_ {
-        self.store.res.notes.values()
+        self.store.res.notes.values().map(Arc::as_ref)
     }
 
     pub fn note(&self, id: &str) -> Option<&Note> {
-        self.store.res.notes.get(id)
+        self.store.res.note(id)
     }
 
     /// Notes anchored to node `id`, by note id.
-    pub fn notes_on<'a>(&'a self, id: &'a str) -> impl Iterator<Item = &'a Note> {
+    pub fn notes_on<'a>(&'a self, id: &str) -> impl Iterator<Item = &'a Note> + 'a {
         let ids = self.store.res.notes_on(id);
-        ids.map(|note| &self.store.res.notes[note])
+        ids.map(|note| self.store.res.notes[note].as_ref())
     }
 
     fn nodes<'a>(&'a self, keys: &'a [Key]) -> impl ExactSizeIterator<Item = &'a Node> + 'a {

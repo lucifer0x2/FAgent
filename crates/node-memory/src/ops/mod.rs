@@ -1,7 +1,6 @@
 //! Write operations and the atomic batch that applies them. Input is the stored
-//! `Operation`; every primitive change is logged, and a failing (or panicking) batch
-//! unwinds the log, so state and indexes return exactly to their previous values
-//! without cloning the project.
+//! `Operation`. A batch runs on an O(1) clone of the project state: a failing (or
+//! panicking) batch drops the clone, so the previous version never changes.
 mod create;
 mod delete;
 mod delta;
@@ -12,15 +11,14 @@ mod resources;
 mod tree;
 mod update;
 
-use crate::store::{Key, Log, Store};
+use crate::store::{Key, Store};
 pub use delta::{Delta, RowChanges};
 use fagent_scene_input::{Operation, Result};
 use std::collections::{BTreeSet, HashMap};
 
-/// A batch in progress. Dropping it before [`Txn::into_parts`] rolls everything back.
+/// A batch in progress on a cloned store; dropping the clone discards it.
 pub(crate) struct Txn<'a> {
     store: &'a mut Store,
-    log: Log,
     /// Node id -> whether it existed before the batch (first touch wins).
     nodes: HashMap<String, bool>,
     /// Note id -> whether it existed before the batch (first touch wins).
@@ -34,14 +32,12 @@ pub(crate) struct Txn<'a> {
     max_nodes: usize,
     /// Stamp of the pending revision (offset from the load revision).
     rev: u32,
-    armed: bool,
 }
 
 impl<'a> Txn<'a> {
     pub(crate) fn new(store: &'a mut Store, max_nodes: usize, rev: u32) -> Self {
         Self {
             store,
-            log: Vec::new(),
             nodes: HashMap::new(),
             notes: HashMap::new(),
             tokens: BTreeSet::new(),
@@ -50,7 +46,6 @@ impl<'a> Txn<'a> {
             unmarked: false,
             max_nodes,
             rev,
-            armed: true,
         }
     }
 
@@ -104,12 +99,10 @@ impl<'a> Txn<'a> {
         }
     }
 
-    /// Keeps the changes: returns the undo log (to roll back later) and the changed
-    /// rows. The revision of the delta is set by the caller.
-    pub(crate) fn into_parts(mut self) -> (Log, Delta) {
-        self.armed = false;
-        // A renumbered sibling deleted later was touched by the delete; a slot reused
-        // since then holds a node created (and touched) in this batch.
+    /// The changed rows. The revision of the delta is set by the caller.
+    pub(crate) fn into_delta(mut self) -> Delta {
+        // A renumbered sibling deleted later was touched by the delete; one recreated
+        // under the same id since then was touched by its create.
         for key in std::mem::take(&mut self.renumbered) {
             if let Some(slot) = self.store.live(key) {
                 if !self.nodes.contains_key(&slot.node.id) {
@@ -117,21 +110,12 @@ impl<'a> Txn<'a> {
                 }
             }
         }
-        let delta = delta::build(
+        delta::build(
             self.store,
             std::mem::take(&mut self.nodes),
             std::mem::take(&mut self.notes),
             std::mem::take(&mut self.tokens),
             std::mem::take(&mut self.styles),
-        );
-        (std::mem::take(&mut self.log), delta)
-    }
-}
-
-impl Drop for Txn<'_> {
-    fn drop(&mut self) {
-        if self.armed {
-            self.store.rollback(std::mem::take(&mut self.log));
-        }
+        )
     }
 }

@@ -29,14 +29,13 @@ impl Txn<'_> {
         }
         checks::instance_target(self.store, self.store.node(key))?;
         let old_parent = self.store.slot(key).parent;
-        self.store.unlink(old_parent, key, &mut self.log);
+        self.store.unlink(old_parent, key);
         if old_parent != Some(parent) {
-            self.store.set_parent(key, Some(parent), &mut self.log);
+            self.store.set_parent(key, Some(parent));
         }
         self.place(key, Some(parent), index)?;
-        self.store.refresh(key, &mut self.log);
-        self.store
-            .stamp(key, Prop::Placement, self.rev, &mut self.log);
+        self.store.refresh(key);
+        self.store.stamp(key, Prop::Placement, self.rev);
         self.touch(id, true);
         Ok(())
     }
@@ -45,10 +44,9 @@ impl Txn<'_> {
         checks::not_virtual(id, None)?;
         let key = checks::existing(self.store, id)?;
         let parent = self.store.slot(key).parent;
-        self.store.unlink(parent, key, &mut self.log);
+        self.store.unlink(parent, key);
         self.place(key, parent, Some(index))?;
-        self.store
-            .stamp(key, Prop::Placement, self.rev, &mut self.log);
+        self.store.stamp(key, Prop::Placement, self.rev);
         self.touch(id, true);
         Ok(())
     }

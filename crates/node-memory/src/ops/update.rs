@@ -28,16 +28,16 @@ impl Txn<'_> {
         let was_master = is_master(&node.kind, &node.props);
         let now_master = is_master(&node.kind, &next);
         if !props::same(Some(&next), Some(&node.props)) {
-            self.store.set_props(key, next, &mut self.log);
+            self.store.set_props(key, next);
         }
         checks::instance_target(self.store, self.store.node(key))?;
         self.unmarked |= was_master && !now_master;
         if was_master != now_master {
-            self.store.refresh(key, &mut self.log);
+            self.store.refresh(key);
         }
         for (name, written) in patch.keys().zip(written) {
             if written {
-                self.store.stamp_key(key, name, self.rev, &mut self.log);
+                self.store.stamp_key(key, name, self.rev);
             }
         }
         self.touch(id, true);

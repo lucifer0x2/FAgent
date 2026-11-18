@@ -99,7 +99,9 @@ pub fn observe(state: &ProjectState) -> Observed {
 pub fn assert_unchanged(state: &ProjectState, before: &Observed) {
     let now = observe(state);
     assert!(now.snapshot == before.snapshot, "snapshot changed");
-    assert_eq!(now.bytes, before.bytes, "estimated bytes changed");
+    // Ids interned by a discarded batch stay interned (shared, append-only), so the
+    // total estimate may grow; nodes and index entries (`node_bytes`) may not.
+    assert!(now.bytes >= before.bytes, "estimated bytes shrank");
     assert_eq!(now.revision, before.revision, "revision changed");
     assert_eq!(
         now.dump.stamp_bytes, before.dump.stamp_bytes,
@@ -147,6 +149,7 @@ pub fn difference(a: &IndexDump, b: &IndexDump) -> Option<String> {
         .or_else(|| first("master_of", &a.master_of, &b.master_of))
         .or_else(|| first("instances_of", &a.instances_of, &b.instances_of))
         .or_else(|| first("linked_from", &a.linked_from, &b.linked_from))
+        .or_else(|| first("referenced_by", &a.referenced_by, &b.referenced_by))
         .or_else(|| first("notes_on", &a.notes_on, &b.notes_on))
 }
 

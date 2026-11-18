@@ -1,30 +1,34 @@
 //! One project held in memory: nodes with live indexes, the snapshot resources
-//! (tokens, styles, assets, fonts, notes) and the revision.
+//! (tokens, styles, assets, fonts, notes) and the revision, as one persistent value.
+//! Cloning a [`ProjectState`] is O(1); a batch stages on a clone, so the published
+//! version doubles as the readers' view (see `view`).
 mod dump;
 mod load;
-mod publication;
 mod reads;
 mod slice;
 mod staged;
 mod subtree;
+mod view;
 mod writes;
 
 use crate::ops::{Delta, Txn};
-use crate::store::{Log, Resources, Store};
+use crate::store::{Resources, Store};
 use crate::Limits;
 pub use dump::IndexDump;
 use fagent_scene_input::{Operation, Result, Snapshot, StorageError};
 pub use staged::Staged;
+use std::sync::Arc;
 pub use subtree::Subtree;
 pub use writes::Written;
 
 /// A loaded project. Reads borrow nodes; writes go through [`ProjectState::begin`] or
 /// [`ProjectState::apply`].
+#[derive(Clone)]
 pub struct ProjectState {
     store: Store,
-    /// The snapshot header (id, slug, name, revision, retention); its vectors are
-    /// empty because nodes and resources live in `store`.
-    meta: Snapshot,
+    /// The snapshot header (id, slug, name, revision, retention) with the token,
+    /// style, asset and font vectors in id order; no nodes or notes.
+    meta: Arc<Snapshot>,
     /// Revision at load: write stamps are offsets from it.
     loaded: u64,
     limits: Limits,
@@ -41,11 +45,12 @@ impl ProjectState {
         let nodes = std::mem::take(&mut snapshot.nodes);
         let res = Resources::take(&mut snapshot);
         let mut store = load::build(nodes, limits.max_nodes)?;
+        res.fill_resources(&mut snapshot);
         store.res = res;
         Ok(Self {
             store,
             loaded: snapshot.revision,
-            meta: snapshot,
+            meta: Arc::new(snapshot),
             limits,
         })
     }
@@ -56,7 +61,7 @@ impl ProjectState {
 
     /// A full snapshot copy: nodes in page-then-preorder order, resources by id.
     pub fn to_snapshot(&self) -> Snapshot {
-        let mut snapshot = self.meta.clone();
+        let mut snapshot = self.meta.as_ref().clone();
         snapshot.nodes = self
             .pages()
             .flat_map(|page| self.subtree(&page.id).into_iter().flatten())
@@ -64,6 +69,11 @@ impl ProjectState {
             .collect();
         self.store.res.fill(&mut snapshot);
         snapshot
+    }
+
+    /// Header and resource vectors (no nodes or notes), shared with readers.
+    pub fn metadata(&self) -> &Arc<Snapshot> {
+        &self.meta
     }
 
     pub fn project_id(&self) -> &str {
@@ -83,7 +93,8 @@ impl ProjectState {
         self.store.len() == 0
     }
 
-    /// Approximate bytes held for nodes, indexes and write stamps (not resources).
+    /// Approximate bytes held for nodes, indexes, interned ids and write stamps (not
+    /// resources). Parts shared with other versions count in full.
     pub fn estimated_bytes(&self) -> usize {
         self.store.bytes()
     }
@@ -94,16 +105,17 @@ impl ProjectState {
     }
 
     /// Applies `ops` atomically and holds them staged: the result exposes the delta and
-    /// the staged state; committing keeps it, aborting or dropping restores exactly the
-    /// previous state. On error nothing changes and the error carries the failing
-    /// operation index (end-of-batch checks carry none).
+    /// the staged state; committing keeps it, aborting or dropping leaves `self` as it
+    /// was. On error nothing changes and the error carries the failing operation index
+    /// (end-of-batch checks carry none).
     pub fn begin(&mut self, ops: &[Operation]) -> Result<Staged<'_>> {
-        let (log, delta) = self.stage(ops)?;
-        Ok(Staged::direct(self, log, delta))
+        let (next, delta) = self.stage(ops)?;
+        Ok(Staged::direct(self, next, delta))
     }
 
-    /// Runs the batch; on success the revision is already incremented.
-    pub(crate) fn stage(&mut self, ops: &[Operation]) -> Result<(Log, Delta)> {
+    /// Runs the batch on a clone; on success returns the next version (revision
+    /// incremented) and its delta. `self` never changes.
+    pub(crate) fn stage(&self, ops: &[Operation]) -> Result<(ProjectState, Delta)> {
         if ops.is_empty() {
             return Err(StorageError::validation(
                 "operations",
@@ -112,20 +124,19 @@ impl ProjectState {
         }
         let revision = self.meta.revision + 1;
         let stamp = u32::try_from(revision - self.loaded).unwrap_or(u32::MAX);
-        let mut txn = Txn::new(&mut self.store, self.limits.max_nodes, stamp);
+        let mut next = self.clone();
+        let mut txn = Txn::new(&mut next.store, self.limits.max_nodes, stamp);
         for (index, op) in ops.iter().enumerate() {
             txn.apply(op).map_err(|e| e.at(index))?;
         }
         txn.finish()?;
-        let (log, mut delta) = txn.into_parts();
+        let mut delta = txn.into_delta();
         delta.revision = revision;
-        self.meta.revision = revision;
-        Ok((log, delta))
-    }
-
-    /// Undoes a staged batch.
-    pub(crate) fn unstage(&mut self, log: Log) {
-        self.store.rollback(log);
-        self.meta.revision -= 1;
+        let meta = Arc::make_mut(&mut next.meta);
+        meta.revision = revision;
+        if !delta.tokens.is_empty() || !delta.styles.is_empty() {
+            next.store.res.fill_resources(meta);
+        }
+        Ok((next, delta))
     }
 }
