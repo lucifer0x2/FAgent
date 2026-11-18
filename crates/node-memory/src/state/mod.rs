@@ -14,7 +14,7 @@ mod view;
 mod writes;
 
 use crate::ops::{Delta, Rejection, Txn};
-use crate::store::{Resources, Store};
+use crate::store::{Interned, Resources, Store};
 use crate::Limits;
 pub use dump::IndexDump;
 use fagent_scene_input::{Operation, Result, Snapshot, StorageError};
@@ -114,17 +114,19 @@ impl ProjectState {
     /// upsert and repaired by a later one is accepted, and errors after a token upsert
     /// may differ from `Candidate`'s (the engine reports `Candidate`'s for both).
     pub fn begin(&mut self, ops: &[Operation]) -> Result<Staged<'_>> {
-        let (next, delta) = self.stage(ops).map_err(Rejection::into_error)?;
-        Ok(Staged::direct(self, next, delta))
+        let (next, delta, names) = self.stage(ops).map_err(Rejection::into_error)?;
+        Ok(Staged::direct(self, next, delta, names))
     }
 
     /// Runs the batch on a clone; on success returns the next version (revision
-    /// incremented) and its delta. `self` never changes. An empty batch is the
-    /// engine's own input error, reported as is.
+    /// incremented, with its own `meta`), its delta and the names it interned, which
+    /// [`Staged`] keeps or discards. `self` never changes. A rejected batch removes
+    /// its names again (see `store::Interned`). An empty batch is the engine's own
+    /// input error, reported as is.
     pub(crate) fn stage(
         &self,
         ops: &[Operation],
-    ) -> std::result::Result<(ProjectState, Delta), Rejection> {
+    ) -> std::result::Result<(ProjectState, Delta, Interned), Rejection> {
         if ops.is_empty() {
             return Err(StorageError::validation(
                 "operations",
@@ -132,21 +134,38 @@ impl ProjectState {
             )
             .into());
         }
+        let names = self.store.open_names();
+        let mut next = self.clone();
+        match next.run(ops) {
+            Ok(delta) => Ok((next, delta, names)),
+            Err(rejection) => {
+                // `Txn` only borrowed the clone: nothing else can hold its keys.
+                drop(next);
+                names.discard(true);
+                Err(rejection)
+            }
+        }
+    }
+
+    /// Applies the batch to this fresh clone of the base and moves it to the next
+    /// revision.
+    fn run(&mut self, ops: &[Operation]) -> std::result::Result<Delta, Rejection> {
         let revision = self.meta.revision + 1;
         let stamp = u32::try_from(revision - self.loaded).unwrap_or(u32::MAX);
-        let mut next = self.clone();
-        let mut txn = Txn::new(&mut next.store, self.limits.max_nodes, stamp);
+        let mut txn = Txn::new(&mut self.store, self.limits.max_nodes, stamp);
         for (index, op) in ops.iter().enumerate() {
             txn.apply(op).map_err(|e| e.at(index))?;
         }
         txn.finish()?;
         let mut delta = txn.into_delta();
         delta.revision = revision;
-        let meta = Arc::make_mut(&mut next.meta);
+        // Always a copy: `meta` is shared with the base, so the staged version owns
+        // its `meta` from here on (`Staged` relies on that to see it is unreachable).
+        let meta = Arc::make_mut(&mut self.meta);
         meta.revision = revision;
         if !delta.tokens.is_empty() || !delta.styles.is_empty() {
-            next.store.res.fill_resources(meta);
+            self.store.res.fill_resources(meta);
         }
-        Ok((next, delta))
+        Ok(delta)
     }
 }

@@ -62,9 +62,11 @@ pub enum Begin<'a> {
 /// the adapter persisted [`Prepared::rows`]; dropping it rolls it back exactly.
 #[must_use = "a prepared batch is rolled back when dropped; call commit() to keep it"]
 pub struct Prepared<'a> {
+    // Drops before `staged`: a rolled-back batch discards its interned names only
+    // when no view of it survives (see `Staged`).
+    after: Arc<ReadView>,
     staged: Option<Staged<'a>>,
     before: Arc<ReadView>,
-    after: Arc<ReadView>,
     path: Path,
     changed: Vec<String>,
     footprint: OnceCell<BTreeSet<String>>,
