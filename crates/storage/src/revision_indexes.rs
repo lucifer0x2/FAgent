@@ -65,6 +65,8 @@ impl RevisionIndexes {
         }
     }
 
+    /// Test oracle only (phase 4 removes it): commits stage in `NodeMemory`.
+    #[cfg(test)]
     pub(crate) fn candidate(
         before: &Arc<Self>,
         candidate: &Candidate,
@@ -220,6 +222,8 @@ impl IndexCache {
             .unwrap_or_else(std::sync::PoisonError::into_inner);
         self.entries.get_with(identity, || indexes)
     }
+    /// Test oracle only (phase 4 removes it): commits stage in `NodeMemory`.
+    #[cfg(test)]
     pub(crate) fn publish(&self, identity: SnapshotCacheIdentity, indexes: Arc<RevisionIndexes>) {
         let _gate = self
             .gate

@@ -1,4 +1,6 @@
 //! Process-local, disposable snapshots. PostgreSQL supplies the identity for every lookup.
+//! Projects resident in node memory are cached too: full-snapshot reads (export,
+//! history, the HTTP snapshot) read through it; commits evict the entry.
 
 use crate::Snapshot;
 use moka::{ops::compute::Op, sync::Cache};
@@ -17,7 +19,6 @@ pub struct SnapshotCache {
     namespace: String,
     entries: Cache<String, CachedSnapshot>,
     max_entry_weight: u32,
-    owner: crate::memory::Memory,
     gate: Arc<Mutex<()>>,
 }
 
@@ -45,7 +46,6 @@ impl SnapshotCache {
             namespace,
             entries,
             max_entry_weight,
-            owner: Default::default(),
             gate: Default::default(),
         }
     }
@@ -53,19 +53,12 @@ impl SnapshotCache {
     pub(crate) fn namespace(&self) -> &str {
         &self.namespace
     }
-    pub(crate) fn with_owner(mut self, owner: crate::memory::Memory) -> Self {
-        self.owner = owner;
-        self
-    }
     pub(crate) fn evict(&self, project: &str) {
         let _gate = self
             .gate
             .lock()
             .unwrap_or_else(std::sync::PoisonError::into_inner);
         self.entries.invalidate(project);
-    }
-    pub(crate) fn memory_owned(&self, project: &str) -> bool {
-        self.owner.owns_project(project)
     }
 
     /// A hit shares the resident snapshot; callers that need ownership clone it
@@ -76,36 +69,23 @@ impl SnapshotCache {
         generation: i64,
         revision: u64,
     ) -> Option<Arc<Snapshot>> {
-        if self.owner.owns_project(project) {
-            self.evict(project);
-            return None;
-        }
         let entry = self.entries.get(project)?;
         (entry.generation == generation && entry.snapshot.revision == revision)
             .then_some(entry.snapshot)
     }
 
-    /// Fill with the identity from the same transaction as the snapshot, or
-    /// from the committing write transaction. Keep a newer resident entry when
-    /// concurrent reads and commits finish out of order.
+    /// Fill with the identity from the same transaction as the snapshot. Keep a
+    /// newer resident entry when concurrent reads finish out of order.
     pub(crate) fn put(&self, snapshot: &Arc<Snapshot>, generation: i64) {
-        if self.owner.owns_project(&snapshot.project_id) {
-            self.evict(&snapshot.project_id);
-            return;
-        }
         let Some(weight) = snapshot_weight(snapshot, self.max_entry_weight) else {
             return;
         };
         // Count outside the cache gate: unrelated projects must not queue behind
-        // serialization. Recheck after acquiring it to close late-fill races.
+        // serialization.
         let _gate = self
             .gate
             .lock()
             .unwrap_or_else(std::sync::PoisonError::into_inner);
-        if self.owner.owns_project(&snapshot.project_id) {
-            self.entries.invalidate(&snapshot.project_id);
-            return;
-        }
         self.entries
             .entry_by_ref(&snapshot.project_id)
             .and_compute_with(|current| {

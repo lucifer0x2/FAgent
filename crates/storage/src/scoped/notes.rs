@@ -1,10 +1,11 @@
 //! Scoped notes: footprints name anchor pages; writes need guarded anchors.
-use super::{
-    index::{BatchScope, PageIndex},
-    unsupported,
-};
+use super::index::PageIndex;
+#[cfg(test)]
+use super::{index::BatchScope, unsupported};
 use crate::*;
 
+/// Part of the `scoped::check` oracle (test only until phase 4).
+#[cfg(test)]
 pub(super) fn check(
     before: &Snapshot,
     candidate: &Candidate,

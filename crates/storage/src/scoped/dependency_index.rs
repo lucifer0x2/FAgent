@@ -48,6 +48,7 @@ impl DependencyIndex {
         )
     }
 
+    #[cfg(test)]
     pub fn from_candidate(
         candidate: &Candidate,
         expanded: Option<BTreeMap<String, Node>>,

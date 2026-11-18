@@ -48,6 +48,7 @@ fn cases() -> Vec<Value> {
         json!([{"op":"update_node","id":"r1","props":{"name":"Allowed"}}]),
         json!([{"op":"update_node","id":"r1","props":{"name":"Same"}},{"op":"update_node","id":"r1","props":{"name":"Same"}}]),
         json!([{"op":"update_node","id":"r1","props":{"fill":"#00ff00"}}]),
+        json!([{"op":"update_node","id":"r1","props":{"x":-0.0}}]),
         json!([{"op":"update_node","id":"r2","props":{"width":30}}]),
         json!([{"op":"create_node","id":"new","kind":"rectangle","parentId":"f1","props":{"width":5,"height":5}}]),
         json!([{"op":"create_node","id":"new","kind":"rectangle","parentId":"f1","index":0,"props":{"width":5,"height":5}}]),

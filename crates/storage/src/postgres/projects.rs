@@ -2,6 +2,7 @@ use super::*;
 use crate::{Font, PrivacyStatus, ProjectMeta, StorageError, SCHEMA_VERSION};
 use ::postgres::{GenericClient, Row};
 
+#[derive(Clone)]
 pub(super) struct ProjectRow {
     pub meta: ProjectMeta,
     pub namespace: String,
