@@ -2,7 +2,7 @@
 
 **Priority (2026-11-18):** requested by the user after the Task 28 commit-path review; not yet placed in the order
 34 → 36 → 37 → 31/35 → 33.
-**Status:** Phase 1 done (2026-11-18, `feat/task-41-node-memory-engine`); spike 1b done (2026-11-18, `spike/task-41-1b`), user chose the radix trie (c); phase 2 done (2026-11-18, `feat/task-41-phase-2`, see `docs/TASK41-REPORT.md`); phase 3 not started. Phases run in order; each phase ends with a report to the user, and the next phase starts only
+**Status:** Phase 1 done (2026-11-18, `feat/task-41-node-memory-engine`); spike 1b done (2026-11-18, `spike/task-41-1b`), user chose the radix trie (c); phase 2 done (2026-11-18, `feat/task-41-phase-2`); phase 3 done (2026-11-19, same branch: delta rules, classifier and reference path removed; see `docs/TASK41-REPORT.md`); phase 4 not started, waits for the user's go-ahead. Phases run in order; each phase ends with a report to the user, and the next phase starts only
 after the user's go-ahead.
 **Depends on:** Task 28 code as it is on `main` (I0–I5 implemented; I4/I5 deep tests and benchmarks were deferred).
 Supersedes the open parts of Task 28 (flags, shadow modes, I5 cleanup) once this task is accepted.

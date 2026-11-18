@@ -405,6 +405,9 @@ and the token timing.
 
 ### Known limitations and open items
 
+Status after phase 3: the first three items and the uncertified-revision item are resolved (pure diff-only
+validation, exact per-upsert token checks, no reference path); see "Phase 3".
+
 - A dangling token alias or a broken `componentId` in stored data blocks every commit until repaired, as the
   reference does (the token set is always validated in full; the reference expands every instance). Repair through a
   Full-class batch; the next commit is local. Making this diff-only needs the reference to tolerate stored defects:
@@ -419,3 +422,209 @@ and the token timing.
   interned by a batch whose preview escaped stay until eviction (counted).
 - The batch of 100 updates is ~4× slower than the arena (per-op checks).
 - Phase 3 (delta rules, delete the classifier and the reference path) is not started.
+
+## Phase 3 — Delta rules, no reference path (2026-11-19)
+
+Branch `feat/task-41-phase-2`, commits `f0bc629..68a2382` (5 commits), the bench harness `6257dae` and this report. Diff over
+the phase: 74 files, +3,015 / −1,735; over `crates/node-memory/src` and `crates/scene-input/src` 53 files, +1,815 /
+−1,349. Largest touched file: `crates/node-memory/tests/support/random_cases.rs` (311 lines); largest touched source
+file `crates/node-memory/src/store/mod.rs` (218 lines); none over 1000.
+
+Every batch is now validated by the per-op checks in `Txn` (all exact) plus the end-of-batch delta rules over the
+engine state. `Candidate` is off the commit path: it runs once per load (admission) and in the test oracles. The bench
+counters confirm it: warm commits record no `validate.*` or `candidate.*` phase, only `memory.txn` and `delta.*`.
+
+### API changes
+
+- `scene_input::validate::Lookup` gains `pages()` (sorted by sort key, id), `referencing(key)` (node ids whose props
+  name a `token:`/`style:`/`font:`/`asset:`/`component:`/`link:` key, plus `theme:<name>` for a node's own
+  `props.theme`), `aliasers(token)`, `named_themes()`, `declared_themes()` and `note_count()`. `Candidate` answers by
+  scans, the store by indexes: the reference index gains the `theme:` key (`reference_keys`), and `Resources` keeps a
+  `TokenIndex` (theme refcounts, reverse alias map) in step with `put_token`, so `theme_declared` is O(log n). Token
+  envelopes are read leniently (`theme_names`, `alias_targets`).
+- `validate::check_token_write(lookup, id, previous)`: the token checks of one upsert with `validate_tokens`'
+  precedence (token count; per-token checks of the token, and of its aliasers when its type changed, in id order;
+  theme count; alias graph when the token's alias edges changed, with the full graph walked once only on that
+  rejection to report its exact message). `validate_tokens`' loop body is the shared `check_token`.
+- New `validate::delta` (`affected`, `navigation`, `themes`, `graph`, `expand`, `instances`, `facts`):
+  `validate_batch(before, after, &Batch, &Facts) -> Result<Facts>` and `facts(lookup, instances)`. `Facts` holds the
+  virtual-node count per authored instance and the expanded total, carried from revision to revision.
+- `ProjectState::stage` runs `Txn`, `finish`, then `validate_batch` and stores the new `Facts` in the staged state;
+  `ProjectState::apply` alone also runs the end-of-batch rules. `ProjectState::admit()` (called by `NodeMemory::load`)
+  runs `Candidate::validate` once for the result and computes `Facts`; a state built without it computes `Facts`
+  lazily on its first batch.
+- `HotProject::begin` returns every `Txn` and delta rejection directly. `Rejection` lost `exact`/inexact routing.
+- Shared checks moved behind `Lookup` so `Candidate::validate` and the delta rules run the same code:
+  `validate/instance_checks.rs` (per-node instance checks, properties of expanded nodes), navigation
+  (`check_node_links`, `check_flows`, `root_frames`), notes (`check_note`, `too_many_notes`) and
+  `animation_triggers::check_triggers`. A `Resolver` overlay may hold a partial expansion and falls back to the lookup
+  for ids it lacks.
+
+### Removed
+
+- `crates/node-memory/src/batch/reference.rs`, `HotProject::rejected`, divergence handling (`diverge`,
+  `ProjectHandle::diverged`/`mark_diverged`, the `node_memory_divergence` log line), `Path` and `Prepared::path()`.
+- `MemoryStats.local`, `full`, `rejected_direct`, `rejected_routed`, `divergences` (`rejected` stays and counts
+  per-op and end-of-batch rejections).
+- `scene_input::validate::memory` (`classify.rs`, `closure.rs`, `admit.rs`, `validate_delta`, `supports`) and the
+  `Certificate` on `ReadView`.
+- In `Txn`: the deferred once-per-batch token validation, the reparent descendant-height pre-check and `finish`'s
+  unmarked-master check (`Candidate::apply` makes neither check; the delta rules report what full validation does).
+
+### Survivors, with consumer
+
+- `Candidate`: admission (`ProjectState::admit`), asset/font import (`assets.rs`, `postgres/resources.rs`), bundle
+  validation, `Project::persist`, and the test oracles.
+- `validate::incremental` (`validate_after_indexed`) and storage `batch/validation.rs`: test-only database oracle
+  (`#[cfg(test)]`); phase 4.
+- Moka, `RevisionIndexes` and the `scoped/` pieces listed under phase 1: unchanged, phase 4.
+
+### Delta rules (`crates/scene-input/src/validate/delta/`)
+
+Order as in `Candidate::validate`: node cap (in `finish`) → notes → navigation → per theme styles then nodes →
+animation triggers → instances.
+
+| Rule | Seeds / recheck set | Index |
+| --- | --- | --- |
+| Closure | Written nodes whose kind, parent or props changed (sort-key-only renumbers are no seed); deleted nodes; users of every changed token and of the tokens aliasing it (transitively); users of changed styles and of styles using a changed token; nodes scoped to a theme no token declares any more. Every member adds the instances of each component master containing it (both revisions, ≤ 128 ancestors). A member descends to its children only when it is new, moved, changed `width`/`height`/`layout`/`theme`/`component`, uses a changed token inside `width`/`height`/`layout`, or names a vanished theme | `referencing`, `aliasers`, `component_users`, `declared_themes` |
+| Notes | Note count ≤ 5,000; every note the batch wrote (per-op checks and delete cascades cover the rest) | `note_count` |
+| Links | Written nodes whose props changed and carry `links`, plus nodes linking to a node the batch created, moved (kind or parent changed) or deleted | `incoming_links` |
+| Flows | When a written node is a root frame with `flowStart`: uniqueness over all root frames (O(root frames)) | `pages`, children |
+| Properties per theme | Changed styles and styles reached from changed tokens, then the closure's nodes in id order (`Resolver::node`) | – |
+| Animation triggers | Closure nodes with `animations[].triggerNodeId` | – |
+| Component graph | Masters around the closure: cycle (`INSTANCE_CYCLE`) and depth (`INSTANCE_DEPTH`) by DFS from them | `component_users` |
+| Instance expansion and budget | Expand the closure's instances (children in id order, as the reference); expanded total from `Facts` ≤ the engine's `Limits.max_nodes` (`INSTANCE_LIMIT`) | `Facts` |
+| Instance checks | Per closure node: `component` shape, instance keys, master is a component frame, override targets/keys/props per theme, in-component links/animations/`flowStart`; then properties of the expanded nodes per theme | – |
+
+Deviations from the design brief, all covered by the oracle and the scenario tests: style users and `styleId` changes
+do not descend (style values hold only fill and text properties); token users descend only for `width`/`height`/
+`layout`; link sources are limited as in the table instead of every closure node; the notes rule re-checks the notes
+the batch wrote.
+
+### Oracle results
+
+- State differential (`Txn` + delta rules against `Candidate::apply` + `validate()`): seeds 1–8 plain, 1–16 with
+  property ops, 201–212 with the new cases mix: 2,400 + 4,800 + 3,600 batches (731, 972 and 957 accepted).
+  **0 differences**; the phase 2 `after_token` allowance is gone.
+- `begin` differential: plain seeds 1–24 (7,200 batches), property seeds 101–116 (4,800), cases seeds 201–224 (7,200).
+  Accepted 2,078, 895 and 1,774 (a fifth of each dropped to exercise rollback). **0 differences** in accept/reject,
+  rows, changed ids, revisions and per-op code/field/op index; 0 end-of-batch order differences.
+- The cases mix (`support/random_cases.rs`, `random_scripted.rs`) adds instances with overrides, hover animations with
+  triggers, dimension and color tokens with theme branches and aliases used in sizes and wrapping rows, theme-scoped
+  instances, edits inside masters, and scripted batches: subtrees moved past depth 128 and back, links to frames
+  created later in the batch, masters unmarked and marked again, several end-of-batch errors.
+- `tests/delta_rules.rs` and `tests/delta_structure.rs`: one scenario per rule and dependency path (size tokens through
+  aliases and theme branches, theme scopes and vanished themes, styles, token type changes, unmarked masters, override
+  targets, nested masters, instance cycles, triggers, links, flows, depth, the note count), each on the state and on
+  the reference.
+
+### Measurements
+
+Machine: 10 cores; load average 2.3–3.5 during every run below (two rounds each, round 1 shown, a range where the
+rounds differ by more than 10%).
+
+**PostgreSQL** (`node_memory_writes_bench`, release, `--features large-project-bench`, temporary cluster), 30 measured
+runs after two warm-ups, median / p95 in ms; "validation" is `memory.begin` (`Txn` + delta rules):
+
+```bash
+WRITES_BENCH_NODES=200000 scripts/task19-check.sh cargo test --release -p fagent-storage \
+  --features large-project-bench --test node_memory_writes_bench -- --ignored --nocapture   # also 7000
+```
+
+| Case | 200k fixture (178,604 authored) | validation | persist | ~7k fixture (6,376 authored) | validation |
+| --- | ---: | ---: | ---: | ---: | ---: |
+| Small props edit (plain text node) | **2.9–4.3 / 4.9–5.4** | **0.011–0.013** | 2.2–3.2 | 1.04 / 1.32 | 0.009 |
+| Master edit (`master_0`, 929 instances; 29 at 7k) | 21.2–22.2 / 23.1–25.7 | 16.0–17.0 | 3.9 | 1.53 / 1.68 | 0.48 |
+| Reparent (152-node section across root frames) | 5.3–5.7 / 5.9–7.2 | 0.75–0.79 | 3.4–3.6 | 1.63 / 1.80 | 0.55 |
+| Token edit (color used in `master_1`, 890 instances; 26 at 7k) | 20.7–21.8 / 21.8–23.4 | 15.4–16.6 | 3.9–4.0 | 1.54 / 1.58 | 0.46 |
+| Note create | 3.1–4.4 / 5.1–5.4 | 0.005 | 2.4–3.3 | 1.09 / 1.19 | 0.004 |
+| Page create | 2.5–3.0 / 3.3–4.0 | 0.010–0.012 | 1.8–2.2 | 1.05 / 1.38 | 0.006 |
+| Cold commit: evict, load, admission, commit | 1,119–1,191 / 1,159–1,244 | – | 10.1 | 47.6 / 53.7 | – |
+| `get_design_context` `root_10`, scoped part | 0.83 / 0.97 (171 nodes) | – | – | 0.45 / 0.48 (213 nodes) | – |
+| RAM per authored node (engine estimate) | 1,252 B | | | 1,229 B | |
+
+- Phase breakdown of the master edit at 200k (round 1, ms): `delta.closure` 0.66 (930 nodes), `delta.themes` 2.65,
+  `delta.triggers` 0.04, `delta.instances.graph` 0.25, `.expand` 1.74 (3,716 expanded nodes), `.nodes` 2.29,
+  `.properties` 7.28; the token edit is within 5% of it. The small props edit, note and page create spend under
+  0.01 ms in every `delta.*` phase; the time is persist, the history envelope (0.01–0.03) and the database round
+  trips.
+- Cold commit at 200k: database load 171, `memory.load` 910 (admission `Candidate::validate` 825, of which
+  `validate.theme` 388 and `validate.instances` 279; `memory.admission.facts` 21), persist 10. At 7k: load 15,
+  admission 23, facts 0.6.
+- `get_design_context` here is the storage part of the server read: the memory view at the database revision
+  (identity probe), the frame closure with instance definitions and resolution under the default theme. The server's
+  JSON shaping and `viewports` are not included.
+- Comparison with phases 1–2: their "small props edit" request renamed the first non-instance child of a root frame
+  in fixture order, which is `master_0_title`, a master child. It is the "master edit" row here: **31.8 → 21.2 ms**
+  total, `memory.begin` 26.1 → 16.0 ms. A plain node now validates in about 0.01 ms.
+
+**Engine** (`cargo run --release -p fagent-node-memory --example bench -- --runs 101 --load-runs 7 --spike a`, 200k
+fixture, 178,415 authored nodes). The bench cap now sits above `MAX_NODES` (the fixture expands to exactly 200k and
+the engine cap bounds the expanded project since this phase):
+
+| Measure | Phase 2 | Phase 3 |
+| --- | ---: | ---: |
+| Footprint after load, per authored node | 1,594 B | 1,594 B (estimate 1,251 B) |
+| Load + index build (no admission), median / p95 | 54.9 / 55.8 ms | 52.8–54.2 / 54.4–54.9 ms |
+| Get node by id | 24 ns | 23–24 ns |
+| Read: frame closure `root_10` (291 nodes) | 74–90 µs | 70–74 µs |
+| Read: frame closure `frame_wide` (14,002 nodes) | 4.16–5.10 ms | 4.04–4.09 ms |
+| Commit: 1 props update | 3.71 µs | 5.71–5.88 µs |
+| Reject: 1 props update | 3.58 µs | 5.54–5.67 µs |
+| Commit: create node (append) | 3.96 µs | 5.46–5.54 µs |
+| Commit: create at index 0 of wide frame (14k renumbered) | 5.01 ms | 7.58–7.93 ms |
+| Commit: reparent subtree across root frames | 7.38 µs | **443–448 µs** |
+| Commit: delete root frame subtree (328 nodes) | 536 µs | 608–617 µs |
+| Commit: 100 props updates in one batch | 193 µs | 183–185 µs |
+
+Phase 2 engine rows ran structural and per-op checks only (end-of-batch validation sat in `HotProject::begin`); phase 3
+rows include the delta rules. The reparent now re-checks the moved subtree (152 nodes) under every theme; the
+renumber pays the closure walk over 14k written rows, which are no seeds. Default bench (no `--spike`): begin + commit
+of one update 2.7 µs, reparent of a wide frame across pages 22 ms.
+
+**Target:** validation of a small props edit under 5 ms — **met**: 0.011–0.013 ms on PostgreSQL at 200k (5 µs in the
+engine bench), commit total 2.9–4.3 ms median. Edits that reach ~900 instances validate in 15–17 ms.
+
+### Verification
+
+| Suite | Passed | Failed | Ignored |
+| --- | ---: | ---: | ---: |
+| scene-input + node-memory | 162 | 0 | 2 |
+| SQLite storage | 234 | 0 | 40 |
+| Server | 358 | 41 | 12 |
+| PostgreSQL default (`scripts/task19-check.sh`: storage 19 + server `postgres_backend` 2) | 21 | 0 | 0 |
+| PostgreSQL targeted (memory writes/reads, revision indexes, scoped reads, dry run, write-through, freshness) | 12 | 0 | 0 |
+
+The 41 server failures are the same environmental set as in phase 2 (no renderer build in the worktree: render worker
+`WORKER_UNAVAILABLE` and its downstream checks, `startup_env` refusing the Chromium export backend, `esbuild`
+missing); storage + server total 592 passed as in phase 2. fmt and `clippy --all-targets -D warnings` are clean on
+scene-input, node-memory, storage (also with `--features large-project-bench`) and server.
+
+### Behavior changes
+
+- Pure diff-only validation on stored invalid data: a stored defect rejects a batch only when the batch's closure
+  reaches it. Phase 2 blocked commits on project-wide defects through the reference path (notes, navigation, triggers,
+  instance graph), on a dangling token alias (whole token set validated) and on a broken `componentId` (every instance
+  expanded). `tests/admission.rs` now expects unrelated batches on such bases to be accepted.
+- Token upserts are checked right after each upsert, exactly as `Candidate::apply` does; a batch that leaves the token
+  set invalid mid-batch is rejected at that op even when a later op repairs it. The public result is unchanged
+  (phase 2 got there through the reference path); only the cost changes, O(affected tokens) per upsert.
+- The expanded-node limit follows the engine's `Limits.max_nodes` (`MAX_NODES` by default), so a raised engine cap
+  also raises the expanded cap. The engine bench now sets its cap above `MAX_NODES`.
+- `ProjectState::apply` alone also runs the end-of-batch rules (callers of the state outside `NodeMemory` get the full
+  batch validation).
+- Error order among several end-of-batch errors may differ from `validate()` (allowed by the task); none showed up
+  in the oracle runs.
+
+### Open items
+
+- Edits that reach many instances cost per instance: ~16 ms of validation for ~900 instances at 200k, mostly
+  `delta.instances.properties` and `delta.themes`. Phase 5 (lazy expansion cache) or caching resolved master
+  properties would cut it.
+- The reparent of a subtree re-checks every moved node under every theme (~0.45 ms per 150 nodes); a wide-frame
+  renumber walks every written row in the closure (7.6 ms for 14k rows, was 5 ms).
+- Admission still costs one full `Candidate::validate` per load (825 ms at 200k, half of it `validate.theme`).
+- Not measured: the server-side shaping of `get_design_context` (JSON, viewports), `get_design_context` right after a
+  write, and the real-data restore (`WRITES_BENCH_REALDATA_URL`, not available here).
+- Phase 4 (Moka, unused `RevisionIndexes`/`scoped/` code, test-only `validate_after_indexed` and `batch/validation.rs`,
+  `docs/REJECTED-APPROACHES.md` lines) is not started and waits for the user's go-ahead.
