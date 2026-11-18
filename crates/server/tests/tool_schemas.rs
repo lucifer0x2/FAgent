@@ -233,9 +233,15 @@ async fn schema_rejections_name_the_failing_field() {
         ("", r#"[""]"#),
         ("a.b", r#"["a.b"]"#),
         ("a\nb", r#"["a\nb"]"#),
+        // C1 controls (U+0085 is a line break) are escaped too; JSON leaves them raw.
+        ("a\u{85}b", r#"["a\u0085b"]"#),
     ] {
         let error = s.call("list_projects", json!({ key: 1 })).await;
         assert_eq!(error["error"]["field"], quoted, "{error}");
+        assert!(
+            message(&error).contains(&format!(" at {quoted}: ")),
+            "{error}"
+        );
     }
     // A field every form needs is named; two sources sent together are both named.
     let no_project = s.call("apply_batch", json!({"idempotencyKey":"k"})).await;
@@ -246,6 +252,17 @@ async fn schema_rejections_name_the_failing_field() {
     assert!(
         message(&both).ends_with("send only one of base64, path"),
         "{both}"
+    );
+    // Tied forms each reject a field: one no form takes is unknown, not "send only one of".
+    let stray = json!({"projectId":p,"idempotencyKey":"k","operations":[{"op":"upsert_token","token":{"id":"t","name":"T","type":"color","value":{"aliasId":"a","b":1,"default":"#fff"}}}]});
+    let stray = s.call("apply_batch", stray).await;
+    assert_eq!(
+        stray["error"]["field"], "operations[0].token.value.b",
+        "{stray}"
+    );
+    assert!(
+        message(&stray).ends_with("is not an accepted field"),
+        "{stray}"
     );
     // An object value is blamed on the object form that accepts its known fields.
     let alias = json!({"projectId":p,"idempotencyKey":"k","operations":[{"op":"upsert_token","token":{"id":"t","name":"T","type":"color","value":{"aliasId":"a","extra":true}}}]});
