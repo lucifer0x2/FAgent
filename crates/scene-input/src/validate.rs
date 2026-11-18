@@ -34,6 +34,7 @@ mod stroke;
 pub mod structural;
 mod text_props;
 mod token_graph;
+mod token_write;
 mod tokens;
 mod topology;
 mod values;
@@ -48,6 +49,7 @@ pub use refs::{
 pub use scope::{check_node, check_style};
 pub use scoped::resource_builds;
 pub(crate) use scoped::ScopedResources;
+pub use token_write::check_token_write;
 pub use tokens::{alias_targets, theme_names, token_value, validate_tokens};
 pub use topology::NodeTopology;
 pub use values::{valid_id, validate_slug};
