@@ -108,6 +108,15 @@ pub trait StorageBackend: Send + Sync {
     /// A reader failed on a memory view and the read was served again from the
     /// database snapshot.
     fn memory_read_failed(&self) {}
+    /// Drops a project, by ID, from node memory: the next read or write loads it
+    /// from the database. A no-op for backends without memory.
+    fn evict_memory(&self, _project_id: &str) {}
+    /// The latest revision node memory published for a project, by ID, as a full
+    /// snapshot (nodes, tokens, styles, assets, fonts and notes); `None` when the
+    /// project is not resident or the backend has no memory.
+    fn memory_snapshot(&self, _project_id: &str) -> Option<Snapshot> {
+        None
+    }
     /// Authoritative lookup by ID or slug. A source error must propagate.
     /// Backends that cannot provide a cheap, reliable probe return None.
     fn snapshot_cache_identity(&self, _project: &str) -> Result<Option<SnapshotCacheIdentity>> {

@@ -111,9 +111,10 @@ pub(super) fn apply_mode(
 /// A preview runs the commit path's request checks in the same order on one
 /// repeatable-read snapshot, without the project row lock, then stages the batch in
 /// memory and rolls it back. It waits for a batch another worker has staged; when
-/// that batch publishes past this snapshot's revision, the preview runs once more on
-/// a fresh snapshot. A reused key with a different canonical request still fails; a
-/// matching key still previews.
+/// memory has published past this snapshot's revision, the preview runs once more on
+/// a fresh snapshot, and if memory is past that one too, on a private load that
+/// leaves the newer resident copy alone. A reused key with a different canonical
+/// request still fails; a matching key still previews.
 fn preview(
     session: &mut Session,
     key: &str,
@@ -151,14 +152,26 @@ fn preview_once(
     let revision = project.meta.revision;
     base.check(revision, pages.is_some())?;
     let identity = identity(&project);
-    if !last && memory.ahead_of(&identity.project_id, revision) {
-        return Ok(None);
-    }
-    let hot = for_write(&mut db, &project, &identity, memory)?;
-    let prepared = match begin(&hot, revision, &request.operations)? {
+    let ops = &request.operations;
+    let resident = {
+        let load = || load_rows(&mut db, &project);
+        memory.for_preview(&identity.project_id, &identity, revision, load)?
+    };
+    let staged = match &resident {
+        Some(hot) => begin(hot, revision, ops)?,
+        None => Begin::Stale,
+    };
+    let detached: HotProject;
+    let prepared = match staged {
         Begin::Ready(prepared) => prepared,
         Begin::Stale if !last => return Ok(None),
-        Begin::Stale => return Err(StorageError::conflict(revision)),
+        Begin::Stale => {
+            detached = memory.detached(|| load_rows(&mut db, &project))?;
+            match begin(&detached, revision, ops)? {
+                Begin::Ready(prepared) => prepared,
+                Begin::Stale => return Err(StorageError::conflict(revision)),
+            }
+        }
     };
     if let (Some(pages), true) = (pages, base.strict) {
         let history = match base.history_after(revision, true) {
@@ -186,19 +199,24 @@ fn identity(project: &projects::ProjectRow) -> SnapshotCacheIdentity {
     )
 }
 
-/// The resident project at the row's revision, or a cold load of the stored rows
-/// with asset readiness, as reads see them.
+/// The stored rows with asset readiness, as reads see them.
+fn load_rows<C: GenericClient>(
+    db: &mut Db<'_, C>,
+    project: &projects::ProjectRow,
+) -> Result<crate::Snapshot> {
+    crate::bench_phase::time("load", || {
+        snapshot::entities(&mut *db, project.clone(), true)
+    })
+}
+
+/// The resident project at the row's revision, or a cold load of the stored rows.
 fn for_write<C: GenericClient>(
     db: &mut Db<'_, C>,
     project: &projects::ProjectRow,
     identity: &SnapshotCacheIdentity,
     memory: &Memory,
 ) -> Result<HotProject> {
-    let load = || {
-        crate::bench_phase::time("load", || {
-            snapshot::entities(&mut *db, project.clone(), true)
-        })
-    };
+    let load = || load_rows(&mut *db, project);
     let id = &identity.project_id;
     memory.for_write(id, Some(identity), identity.revision, load)
 }
