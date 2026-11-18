@@ -7,6 +7,7 @@
 //! `stamps`.
 mod derive;
 mod intern;
+mod lookup;
 mod mutate;
 mod order;
 mod refs;
