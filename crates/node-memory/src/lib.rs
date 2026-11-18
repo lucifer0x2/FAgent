@@ -23,8 +23,10 @@
 //! swap, untouched nodes are shared between revisions, and retaining a view never
 //! holds the writer-state lock. Storage publishes only after its database commit.
 //!
-//! `ProjectState` runs structural validation only; property, token and style validation
-//! stays in `fagent-scene-input` and is driven by `HotProject::begin`.
+//! `ProjectState` runs `Candidate::apply`'s per-operation checks (structure, node
+//! properties, tokens and styles through the scene-input `Lookup` over its working
+//! state); whole-project validation stays in `fagent-scene-input` and is driven by
+//! `HotProject::begin`.
 mod batch;
 mod checks;
 mod engine;

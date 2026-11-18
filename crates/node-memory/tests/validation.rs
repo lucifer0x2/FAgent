@@ -35,7 +35,11 @@ fn prefix() -> Vec<Operation> {
             text: "kept".into(),
             author: None,
         },
-        update("a", json!({"links":[{"to":"t2"},{"to":"f2"}]}), false),
+        update(
+            "a",
+            json!({"links":[{"to":"t2"},{"to":"f2","on":"hover","action":"overlay"}]}),
+            false,
+        ),
         delete("c"),
         delete("t2"),
         update("m1n", json!({"component":null}), true),
@@ -73,7 +77,7 @@ fn assert_fails_at(last: Operation, code: &str, field: Option<&str>, at_last: bo
     assert!(delta.changed_ids().contains(&"note".to_owned()));
     assert_eq!(
         state.node("a").unwrap().props,
-        json!({"links":[{"to":"f2"}]})
+        json!({"links":[{"to":"f2","on":"hover","action":"overlay"}]})
     );
 }
 

@@ -9,9 +9,13 @@
 //! - every other class runs the reference on the staged batch.
 //!
 //! The reference is `Candidate::apply` per operation, link pruning and `validate_after`
-//! over the base view, all in memory. A rejection by the lib's `Txn` also goes through
-//! the reference to produce the public error. If the reference then accepts a batch the
-//! lib rejected (or the changed ids differ) the engine and the validator disagree: the
+//! over the base view, all in memory. `Txn` runs `Candidate::apply`'s per-operation
+//! checks in its order on the working state, so most of its rejections are the public
+//! error as is (`MemoryStats::rejected_direct`). The few it makes at another point than
+//! `Candidate` (a reparented subtree too deep, the end-of-batch node cap and component
+//! masters) go through the reference to produce the public error
+//! (`MemoryStats::rejected_routed`). If the reference then accepts a batch the lib
+//! rejected (or the changed ids differ) the engine and the validator disagree: the
 //! project is flagged as diverged and `STORAGE_FAILED` is returned.
 mod footprint;
 mod reference;
@@ -134,7 +138,14 @@ impl HotProject {
         };
         let mut staged = match staged {
             Ok(staged) => staged,
-            Err(error) => return Err(self.rejected(&before, ops, error)),
+            Err(rejection) if rejection.exact => {
+                Stats::bump(&self.stats.rejected_direct);
+                return Err(self.reject(rejection.into_error()));
+            }
+            Err(rejection) => {
+                Stats::bump(&self.stats.rejected_routed);
+                return Err(self.rejected(&before, ops, rejection.into_error()));
+            }
         };
         let changed = staged.delta().changed_ids();
         let after = staged.preview();
@@ -168,7 +179,7 @@ impl HotProject {
         error
     }
 
-    /// The error for a batch the lib's `Txn` rejected: the reference's, which is the
+    /// The error for a batch the lib's `Txn` rejected inexactly: the reference's, which is the
     /// public one. A reference that accepts is a divergence, except when the engine's
     /// node cap is configured below the scene-input cap.
     fn rejected(&self, before: &ReadView, ops: &[Operation], txn: StorageError) -> StorageError {

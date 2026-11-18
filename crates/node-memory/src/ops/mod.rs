@@ -7,13 +7,15 @@ mod delta;
 mod finish;
 mod notes;
 mod place;
+mod rejection;
 mod resources;
 mod tree;
 mod update;
 
 use crate::store::{Key, Store};
 pub use delta::{Delta, RowChanges};
-use fagent_scene_input::{Operation, Result};
+use fagent_scene_input::Operation;
+pub(crate) use rejection::Rejection;
 use std::collections::{BTreeSet, HashMap};
 
 /// A batch in progress on a cloned store; dropping the clone discards it.
@@ -49,7 +51,9 @@ impl<'a> Txn<'a> {
         }
     }
 
-    pub(crate) fn apply(&mut self, op: &Operation) -> Result<()> {
+    /// Applies one operation with `Candidate::apply`'s checks, in its order, on the
+    /// working state (see [`Rejection`] for the few that differ).
+    pub(crate) fn apply(&mut self, op: &Operation) -> std::result::Result<(), Rejection> {
         match op {
             Operation::CreateNode {
                 id,
@@ -57,22 +61,23 @@ impl<'a> Txn<'a> {
                 parent_id,
                 props,
                 index,
-            } => self.create(id, kind, parent_id.as_deref(), props, *index),
-            Operation::UpdateNode { id, props, merge } => self.update(id, props, *merge),
+            } => self.create(id, kind, parent_id.as_deref(), props, *index)?,
+            Operation::UpdateNode { id, props, merge } => self.update(id, props, *merge)?,
             Operation::ReparentNode {
                 id,
                 parent_id,
                 index,
-            } => self.reparent(id, parent_id, *index),
-            Operation::ReorderNode { id, index } => self.reorder(id, *index),
-            Operation::DeleteSubtree { id } => self.delete(id),
-            Operation::UpsertToken { token } => self.upsert_token(token),
-            Operation::UpsertStyle { style } => self.upsert_style(style),
+            } => self.reparent(id, parent_id, *index)?,
+            Operation::ReorderNode { id, index } => self.reorder(id, *index)?,
+            Operation::DeleteSubtree { id } => self.delete(id)?,
+            Operation::UpsertToken { token } => self.upsert_token(token)?,
+            Operation::UpsertStyle { style } => self.upsert_style(style)?,
             Operation::CreateNote { .. }
             | Operation::ReplyNote { .. }
             | Operation::UpdateNote { .. }
-            | Operation::DeleteNote { .. } => self.note(op),
+            | Operation::DeleteNote { .. } => self.note(op)?,
         }
+        Ok(())
     }
 
     fn touch(&mut self, id: &str, existed: bool) {

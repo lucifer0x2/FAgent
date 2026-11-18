@@ -13,7 +13,7 @@ mod subtree;
 mod view;
 mod writes;
 
-use crate::ops::{Delta, Txn};
+use crate::ops::{Delta, Rejection, Txn};
 use crate::store::{Resources, Store};
 use crate::Limits;
 pub use dump::IndexDump;
@@ -111,18 +111,23 @@ impl ProjectState {
     /// was. On error nothing changes and the error carries the failing operation index
     /// (end-of-batch checks carry none).
     pub fn begin(&mut self, ops: &[Operation]) -> Result<Staged<'_>> {
-        let (next, delta) = self.stage(ops)?;
+        let (next, delta) = self.stage(ops).map_err(Rejection::into_error)?;
         Ok(Staged::direct(self, next, delta))
     }
 
     /// Runs the batch on a clone; on success returns the next version (revision
-    /// incremented) and its delta. `self` never changes.
-    pub(crate) fn stage(&self, ops: &[Operation]) -> Result<(ProjectState, Delta)> {
+    /// incremented) and its delta. `self` never changes. An empty batch is the
+    /// engine's own input error, reported as is.
+    pub(crate) fn stage(
+        &self,
+        ops: &[Operation],
+    ) -> std::result::Result<(ProjectState, Delta), Rejection> {
         if ops.is_empty() {
             return Err(StorageError::validation(
                 "operations",
                 "A batch needs at least one operation",
-            ));
+            )
+            .into());
         }
         let revision = self.meta.revision + 1;
         let stamp = u32::try_from(revision - self.loaded).unwrap_or(u32::MAX);

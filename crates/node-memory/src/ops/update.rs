@@ -1,12 +1,12 @@
 //! `update_node`: assign or merge-patch one node's props (the `merge` rule of
-//! `Candidate::apply`), keeping usage/link indexes and, when component status flips,
-//! the subtree's master index current. A master losing its status while used is
-//! checked at the end of the batch, as full validation would. No node is ever deeper
-//! than the maximum (load and reparent keep that), so `Candidate`'s per-update depth
-//! check always passes here.
+//! `Candidate::apply`), check the node as `Candidate` does after the write
+//! (`check_node` on the working state), and keep usage/link indexes and, when
+//! component status flips, the subtree's master index current. A master losing its
+//! status while used is checked at the end of the batch, as full validation would.
 use super::Txn;
 use crate::checks;
 use crate::props::{self, is_master};
+use fagent_scene_input::validate::check_node;
 use fagent_scene_input::{Result, StorageError};
 use serde_json::Value;
 
@@ -30,7 +30,7 @@ impl Txn<'_> {
         if !props::same(Some(&next), Some(&node.props)) {
             self.store.set_props(key, next);
         }
-        checks::instance_target(self.store, self.store.node(key))?;
+        check_node(&*self.store, self.store.node(key))?;
         self.unmarked |= was_master && !now_master;
         if was_master != now_master {
             self.store.refresh(key);
