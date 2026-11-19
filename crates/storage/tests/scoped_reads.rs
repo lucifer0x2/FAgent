@@ -61,7 +61,6 @@ fn exercise(storage: &Storage, p: &ProjectHandle) {
     let original = parity(&old);
     let again = storage.shared_snapshot(p.id()).unwrap();
     assert_eq!(parity(&again), original);
-    assert!(Arc::ptr_eq(&old.indexes, &again.indexes));
     strict(
         p,
         "reorder",

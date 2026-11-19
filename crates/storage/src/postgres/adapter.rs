@@ -32,7 +32,7 @@ impl PostgresBackend {
     /// The database shared snapshot with the identity of the same read.
     fn shared_with_identity(&self, project: &str) -> Result<crate::memory::Loaded> {
         let (snapshot, identity) = self.database_snapshot(project)?;
-        let indexes = self.indexes.for_snapshot(&snapshot, identity.clone());
+        let indexes = Arc::new(crate::RevisionIndexes::new(&snapshot.nodes));
         Ok((
             crate::SharedSnapshot::committed(snapshot, indexes),
             identity,
@@ -147,18 +147,11 @@ impl StorageBackend for PostgresBackend {
     }
 
     fn scoped_snapshot(&self, project: &str, target: &str) -> Result<crate::ScopedRead> {
-        let read = self.memory.scoped_read(
+        self.memory.scoped_read(
             target,
             || self.snapshot_cache_identity(project),
             || self.shared_with_identity(project),
-        )?;
-        if self
-            .memory
-            .claim_cache_cleanup(&read.shared.snapshot.project_id)
-        {
-            self.indexes.evict(&read.shared.snapshot.project_id);
-        }
-        Ok(read)
+        )
     }
 
     fn memory_stats(&self) -> crate::NodeMemoryStats {

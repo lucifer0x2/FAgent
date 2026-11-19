@@ -2,9 +2,8 @@ use super::*;
 #[test]
 fn actual_sqlite_commit_leaves_read_dependencies_lazy() {
     let temp = tempfile::tempdir().unwrap();
-    // The revision-index cache serves projects memory does not hold; shared
-    // snapshots never load memory. Commits stage in memory, so the test evicts
-    // the project after each one.
+    // Database shared snapshots build their indexes per read and never load memory.
+    // Commits stage in memory, so the test evicts the project after each one.
     let store = Store::open(temp.path()).unwrap();
     let memory = store.root.memory.clone();
     let storage: Storage = store.into();
@@ -23,18 +22,9 @@ fn actual_sqlite_commit_leaves_read_dependencies_lazy() {
     let old = storage.shared_snapshot(p.id()).unwrap();
     assert!(old.indexes.dependencies.lock().unwrap().is_none());
     old.edit_context(vec!["page".into()]).unwrap();
-    let dependency = old
-        .indexes
+    old.indexes
         .dependencies(|| panic!("warm read rebuilt dependencies"))
         .unwrap();
-    let again = storage.shared_snapshot(p.id()).unwrap();
-    assert!(Arc::ptr_eq(
-        &dependency,
-        &again
-            .indexes
-            .dependencies(|| panic!("read index not reused"))
-            .unwrap()
-    ));
     request.expected_revision = Some(1);
     request.idempotency_key = "sparse".into();
     request.operations = vec![Operation::UpdateNode {
@@ -45,7 +35,7 @@ fn actual_sqlite_commit_leaves_read_dependencies_lazy() {
     p.apply_batch(request).unwrap();
     memory.evict(p.id());
     let new = storage.shared_snapshot(p.id()).unwrap();
-    assert!(!Arc::ptr_eq(&old.indexes, &new.indexes));
+    assert_eq!(new.snapshot.revision, 2);
     assert!(
         new.indexes.dependencies.lock().unwrap().is_none(),
         "strict commit must not expand dependency work"
@@ -73,7 +63,6 @@ fn sqlite_readiness_identity_never_becomes_raw_write_metadata() {
     let missing = storage.shared_snapshot(p.id()).unwrap();
     assert_eq!(ready.snapshot.revision, missing.snapshot.revision);
     assert_eq!(missing.snapshot.assets[0].status, "missing");
-    assert!(!Arc::ptr_eq(&ready.indexes, &missing.indexes));
     p.apply_batch(BatchRequest {
         project_id: p.id().into(),
         expected_revision: Some(1),
@@ -119,7 +108,6 @@ fn replaced_sqlite_file_with_same_id_and_revision_reopens_writer_and_indexes() {
     let new = storage.shared_snapshot(p.id()).unwrap();
     assert_eq!(new.snapshot.revision, old.snapshot.revision);
     assert_eq!(new.snapshot.name, "New file");
-    assert!(!Arc::ptr_eq(&old.indexes, &new.indexes));
     assert!(matches!(p.reader(), Err(error) if error.code=="PROJECT_REPLACED"));
     let handle = storage.open_project(p.id()).unwrap();
     handle

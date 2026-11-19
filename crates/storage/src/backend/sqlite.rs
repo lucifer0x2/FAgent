@@ -28,11 +28,7 @@ impl SqliteBackend {
     /// Today's shared snapshot with the identity of the same read.
     fn shared_with_identity(&self, project: &str) -> Result<crate::memory::Loaded> {
         let (snapshot, identity) = self.database_snapshot(project)?;
-        let indexes = self
-            .store
-            .root
-            .indexes
-            .for_snapshot(&snapshot, identity.clone());
+        let indexes = Arc::new(crate::RevisionIndexes::new(&snapshot.nodes));
         Ok((
             crate::SharedSnapshot::committed(snapshot, indexes),
             identity,
@@ -106,23 +102,11 @@ impl StorageBackend for SqliteBackend {
     }
 
     fn scoped_snapshot(&self, project: &str, target: &str) -> Result<crate::ScopedRead> {
-        let read = self.store.root.memory.scoped_read(
+        self.store.root.memory.scoped_read(
             target,
             || self.snapshot_cache_identity(project),
             || self.shared_with_identity(project),
-        )?;
-        if self
-            .store
-            .root
-            .memory
-            .claim_cache_cleanup(&read.shared.snapshot.project_id)
-        {
-            self.store
-                .root
-                .indexes
-                .evict(&read.shared.snapshot.project_id);
-        }
-        Ok(read)
+        )
     }
 
     fn memory_stats(&self) -> crate::NodeMemoryStats {

@@ -34,7 +34,6 @@ use statements::{Db, Session};
 pub struct PostgresBackend {
     pool: Arc<pool::Pool>,
     namespace: Arc<str>,
-    indexes: crate::revision_indexes::IndexCache,
     memory: crate::memory::Memory,
 }
 
@@ -52,7 +51,6 @@ impl PostgresBackend {
         Ok(Self {
             pool,
             namespace: namespace.into(),
-            indexes: crate::revision_indexes::IndexCache::default(),
             memory,
         })
     }

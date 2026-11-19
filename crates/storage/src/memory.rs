@@ -64,16 +64,6 @@ impl Memory {
             .is_some_and(|load| inner.tags.tags_load(project, load))
     }
 
-    /// Claims the one-time removal of duplicate cache entries for the resident load
-    /// of `project`. A reload gets a new claim.
-    pub fn claim_cache_cleanup(&self, project: &str) -> bool {
-        let inner = &self.inner;
-        inner
-            .engine
-            .resident(project)
-            .is_some_and(|load| inner.tags.claim_cache_cleanup(project, load))
-    }
-
     /// Drops a project after a write the engine did not stage.
     pub fn evict(&self, project: &str) {
         self.inner.tags.remove(project);
