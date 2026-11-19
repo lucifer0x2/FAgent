@@ -133,6 +133,15 @@ pub trait StorageBackend: Send + Sync {
         self.snapshot(project)
             .map(|snapshot| (Arc::new(snapshot), None))
     }
+    /// The latest revision read from the database only, with the identity of the
+    /// same read; node memory never serves it. Backends without node memory keep
+    /// this default: their full snapshot already comes from their source.
+    fn database_snapshot(
+        &self,
+        project: &str,
+    ) -> Result<(Arc<Snapshot>, Option<SnapshotCacheIdentity>)> {
+        self.snapshot_with_cache_identity(project)
+    }
     fn apply_batch(&self, project: &str, request: BatchRequest) -> Result<BatchResult>;
     fn dry_run_batch(&self, project: &str, request: BatchRequest) -> Result<DryRunResult>;
     fn commits_after(&self, project: &str, revision: u64, limit: usize) -> Result<Vec<Commit>>;

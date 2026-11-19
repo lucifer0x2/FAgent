@@ -27,7 +27,7 @@ impl SqliteBackend {
 
     /// Today's shared snapshot with the identity of the same read.
     fn shared_with_identity(&self, project: &str) -> Result<crate::memory::Loaded> {
-        let (snapshot, identity) = self.snapshot_with_cache_identity(project)?;
+        let (snapshot, identity) = self.database_snapshot(project)?;
         let indexes = self
             .store
             .root
@@ -142,6 +142,13 @@ impl StorageBackend for SqliteBackend {
     }
 
     fn snapshot_with_cache_identity(
+        &self,
+        project: &str,
+    ) -> Result<(Arc<Snapshot>, Option<SnapshotCacheIdentity>)> {
+        self.database_snapshot(project)
+    }
+
+    fn database_snapshot(
         &self,
         project: &str,
     ) -> Result<(Arc<Snapshot>, Option<SnapshotCacheIdentity>)> {

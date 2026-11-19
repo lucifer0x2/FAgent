@@ -104,6 +104,14 @@ impl Storage {
         self.backend.snapshot_with_cache_identity(key)
     }
 
+    /// See [`StorageBackend::database_snapshot`].
+    pub fn database_snapshot(
+        &self,
+        key: &str,
+    ) -> Result<(Arc<Snapshot>, Option<SnapshotCacheIdentity>)> {
+        self.backend.database_snapshot(key)
+    }
+
     fn handle(&self, project_id: String) -> Arc<ProjectHandle> {
         Arc::new(ProjectHandle {
             storage: self.clone(),

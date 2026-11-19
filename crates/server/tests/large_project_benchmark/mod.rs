@@ -8,16 +8,15 @@ pub mod snapshots;
 pub mod source;
 pub mod stats;
 
-use fagent_storage::{PostgresBackend, PostgresConfig, SnapshotCache, Storage, Store};
+use fagent_storage::{PostgresBackend, PostgresConfig, Storage, Store};
 use std::{path::Path, sync::Arc, time::Duration};
 
-/// `primary` is the production-shaped storage (PostgreSQL with Moka); `uncached`
-/// reads the same database without any snapshot cache. SQLite has no such cache.
+/// `primary` is the production-shaped storage; `uncached` is a second storage over the
+/// same database (PostgreSQL) or the same storage (SQLite).
 #[derive(Clone)]
 pub struct Backends {
     pub primary: Storage,
     pub uncached: Storage,
-    pub moka: bool,
     _root: Option<Arc<tempfile::TempDir>>,
 }
 
@@ -27,7 +26,6 @@ impl Backends {
         Self {
             primary: storage.clone(),
             uncached: storage,
-            moka: false,
             _root: Some(root),
         }
     }
@@ -41,12 +39,9 @@ impl Backends {
             config.operation_timeout = Duration::from_secs(600);
             config
         };
-        let cached = PostgresBackend::with_config(config()).unwrap();
-        let cache = SnapshotCache::new(cached.cache_namespace());
         Self {
-            primary: Storage::new(cached.with_cache(cache).unwrap()),
+            primary: Storage::new(PostgresBackend::with_config(config()).unwrap()),
             uncached: Storage::new(PostgresBackend::with_config(config()).unwrap()),
-            moka: true,
             _root: None,
         }
     }

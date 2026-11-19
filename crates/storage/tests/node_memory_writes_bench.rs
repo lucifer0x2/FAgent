@@ -72,9 +72,7 @@ mod erased {
 
 fn storage(url: &str) -> Storage {
     let config = PostgresConfig::new(url);
-    let backend = PostgresBackend::with_config(config).unwrap();
-    let cache = SnapshotCache::new(backend.cache_namespace());
-    Storage::from_shared(Arc::new(backend.with_cache(cache).unwrap()))
+    Storage::from_shared(Arc::new(PostgresBackend::with_config(config).unwrap()))
 }
 
 /// A project handle and the revision its next request is based on.

@@ -7,7 +7,6 @@ use crate::{
 };
 use ::postgres::GenericClient;
 use serde_json::Value;
-use write_through::Committed;
 
 const ENTITY: &str = "SELECT data FROM entities WHERE project_id=$1 AND kind=$2 AND id=$3";
 const BINARY: &str = "SELECT CASE WHEN octet_length(bytes)<=$3 THEN bytes END FROM binaries WHERE project_id=$1 AND content_hash=$2";
@@ -20,7 +19,7 @@ pub(super) fn import(
     key: &str,
     request: ImportAssetsRequest,
     fields: Fields,
-) -> Result<(ImportAssetsResult, Option<Box<Committed>>)> {
+) -> Result<ImportAssetsResult> {
     let mut tx = session.client.transaction().map_err(sql)?;
     let mut db = Db::new(&mut tx, &mut session.statements);
     let project = projects::lookup(&mut db, key, true)?;
@@ -52,12 +51,11 @@ pub(super) fn import(
                 ))
             }
         };
-        return Ok((ImportAssetsResult { assets, result }, None));
+        return Ok(ImportAssetsResult { assets, result });
     }
     if project.meta.revision != request.expected_revision {
         return Err(StorageError::conflict(project.meta.revision));
     }
-    let namespace = project.namespace.clone();
     let (before, _, stored) = snapshot::entities_for_write(&mut db, project)?;
     let mut candidate = Candidate::from_snapshot(&before);
     let changed_ids = asset_import::apply(&mut candidate, &request, &assets, fields)?;
@@ -114,11 +112,7 @@ pub(super) fn import(
         Some(&manifest),
     )?;
     tx.commit().map_err(sql)?;
-    let committed = Committed::new(before.project_id, namespace);
-    Ok((
-        ImportAssetsResult { assets, result },
-        Some(Box::new(committed)),
-    ))
+    Ok(ImportAssetsResult { assets, result })
 }
 
 fn entity<T: serde::de::DeserializeOwned, C: GenericClient>(

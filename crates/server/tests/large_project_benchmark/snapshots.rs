@@ -19,20 +19,15 @@ pub fn storage(plan: &Plan, backends: &Backends, project: &str) -> Value {
         value["truncated"] = json!(false);
         serde_json::to_vec(&value).unwrap().len()
     });
-    let mut out = json!({
+    let out = json!({
         "coldLoad": cold, "snapshotJsonBytes": json_bytes,
         "cacheAdmitted": json_bytes <= CACHE_ENTRY_LIMIT, "encodeObjects": encode,
     });
-    if backends.moka {
-        backends.primary.snapshot(project).unwrap(); // fill, if admitted
-        let (warm, _) = sample(plan, |_| backends.primary.snapshot(project).unwrap());
-        out["mokaWarm"] = warm;
-    }
     out
 }
 
 pub async fn http(plan: &Plan, backends: &Backends, project: &str) -> Value {
-    let mut out = json!({});
+    let out = json!({});
     for (label, query) in [("objects", ""), ("rows", "?nodeFormat=rows")] {
         let mut cold = Vec::new();
         let mut repeat = Vec::new();

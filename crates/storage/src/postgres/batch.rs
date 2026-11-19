@@ -9,14 +9,11 @@ use crate::{BatchRequest, BatchResult, DryRunResult, SnapshotCacheIdentity, Stor
 use ::postgres::GenericClient;
 use fagent_node_memory::{Begin, HotProject, Operation};
 use request::{canonical, history_after};
-use write_through::Committed;
 
 mod request;
 
 pub(super) enum Outcome {
-    /// A new commit carries what the post-commit cache eviction needs; a replay
-    /// carries none.
-    Commit(BatchResult, Option<Box<Committed>>),
+    Commit(BatchResult),
     Preview(DryRunResult),
 }
 
@@ -44,7 +41,7 @@ pub(super) fn apply_mode(
         &hash,
     )? {
         result.replayed = true;
-        return Ok(Outcome::Commit(result, None));
+        return Ok(Outcome::Commit(result));
     }
     let revision = project.meta.revision;
     base.check(revision, pages.is_some())?;
@@ -104,8 +101,7 @@ pub(super) fn apply_mode(
     let mut next = identity;
     next.revision = result.committed_revision;
     memory.committed(hot, Some(&next));
-    let committed = Committed::new(id, project.namespace);
-    Ok(Outcome::Commit(result, Some(Box::new(committed))))
+    Ok(Outcome::Commit(result))
 }
 
 /// A preview runs the commit path's request checks in the same order on one
