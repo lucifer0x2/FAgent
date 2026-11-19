@@ -27,13 +27,11 @@ impl Drop for PausedPostgres {
 
 #[test]
 #[ignore = "requires fresh PostgreSQL via scripts/task19-check.sh"]
-fn warm_cache_cannot_mask_a_paused_postgres_authority() {
+fn warm_memory_cannot_mask_a_paused_postgres_authority() {
     let mut pg_config = config();
     pg_config.operation_timeout = Duration::from_secs(2);
     pg_config.connect_timeout = Duration::from_millis(400);
-    let backend = PostgresBackend::with_config(pg_config).unwrap();
-    let cache = SnapshotCache::new(backend.cache_namespace());
-    let storage = Storage::new(backend.with_cache(cache).unwrap());
+    let storage = Storage::new(PostgresBackend::with_config(pg_config).unwrap());
     let p = project(&storage, "pg-down");
     p.apply_batch(request(p.id(), 0, "seed", page("Warm")))
         .unwrap();

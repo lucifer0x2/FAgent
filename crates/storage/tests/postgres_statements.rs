@@ -20,8 +20,6 @@ fn invalidated_cached_statements_fail_once_then_reprepare_without_retrying_write
     let mut pg_config = config();
     pg_config.pool_size = 1;
     let backend = PostgresBackend::with_config(pg_config).unwrap();
-    let cache = SnapshotCache::new(backend.cache_namespace());
-    let backend = backend.with_cache(cache).unwrap();
     let id = backend
         .create_project(&format!("stmt-{}", uuid::Uuid::new_v4().simple()), "stmt")
         .unwrap()

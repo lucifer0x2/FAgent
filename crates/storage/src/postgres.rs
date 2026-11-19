@@ -1,6 +1,6 @@
 //! PostgreSQL persistence for the complete authored product domain.
 //! Operations run on a bounded pool of reusable, dedicated blocking workers.
-use crate::{Result, SnapshotCache};
+use crate::Result;
 use std::{sync::Arc, time::Duration};
 
 mod adapter;
@@ -23,7 +23,6 @@ mod statements;
 mod tests;
 mod transaction;
 mod viewer_auth;
-mod write_through;
 pub use config::PostgresConfig;
 use failure::{sql, unavailable};
 pub use schema_name::{DatabaseSchema, DEFAULT_DATABASE_SCHEMA};
@@ -35,8 +34,6 @@ use statements::{Db, Session};
 pub struct PostgresBackend {
     pool: Arc<pool::Pool>,
     namespace: Arc<str>,
-    cache: Option<SnapshotCache>,
-    indexes: crate::revision_indexes::IndexCache,
     memory: crate::memory::Memory,
 }
 
@@ -54,27 +51,14 @@ impl PostgresBackend {
         Ok(Self {
             pool,
             namespace: namespace.into(),
-            cache: None,
-            indexes: crate::revision_indexes::IndexCache::default(),
             memory,
         })
     }
 
-    /// Durable database identity for an opt-in snapshot cache.
-    pub fn cache_namespace(&self) -> &str {
+    /// The durable identity of this database, stored in its schema registry. Snapshot
+    /// identities carry it in their incarnation (`postgres:{generation}:{namespace}`).
+    pub fn database_namespace(&self) -> &str {
         &self.namespace
-    }
-
-    /// Cache reads are always preceded by a successful authoritative SQL probe.
-    pub fn with_cache(mut self, cache: SnapshotCache) -> Result<Self> {
-        if cache.namespace() != self.cache_namespace() {
-            return Err(crate::StorageError::new(
-                "INVALID_CACHE_CONFIG",
-                "Snapshot cache namespace does not match this database",
-            ));
-        }
-        self.cache = Some(cache);
-        Ok(self)
     }
 }
 

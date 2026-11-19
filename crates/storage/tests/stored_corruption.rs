@@ -36,7 +36,7 @@ fn options(frame: &str) -> SceneOptions {
 }
 
 fn reads_fail(storage: &Storage, project: &str, field: &str) {
-    let shared = storage.shared_snapshot(project).unwrap();
+    let shared = storage.shared_database(project).unwrap();
     let scoped = shared.trusted_scoped().unwrap().expect("builtin authority");
     for (scope, definitions) in [
         (ReadScope::Target("f1"), true),

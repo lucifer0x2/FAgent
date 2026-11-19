@@ -32,7 +32,7 @@ fn calls() -> [(&'static str, Value); 6] {
 #[test]
 fn placed_instance_with_missing_master_fails_every_trusted_read() {
     let (_dir, storage, id) = corrupt("placed", r#"{"componentId":"missing"}"#);
-    let shared = storage.shared_snapshot(&id).unwrap();
+    let shared = storage.shared_database(&id).unwrap();
     assert!(shared.trusted_scoped().unwrap().is_some());
     for (tool, args) in calls() {
         let error = read(&shared, tool, args.clone()).err();
@@ -50,7 +50,7 @@ fn placed_instance_with_missing_master_fails_every_trusted_read() {
 #[test]
 fn scalar_authored_props_fail_resolution_and_never_panic_elsewhere() {
     let (_dir, storage, id) = corrupt("outgoing", "5");
-    let shared = storage.shared_snapshot(&id).unwrap();
+    let shared = storage.shared_database(&id).unwrap();
     let error = read(&shared, "get_design_context", json!({"frameId":"frame"})).unwrap_err();
     assert_eq!(error.value()["error"]["field"], "props");
     // Authored-only reads do not resolve properties; they must still return.
@@ -65,7 +65,7 @@ fn prerender_selection_terminates_on_a_stored_parent_cycle() {
     let (_dir, storage, id) = corrupt_parent("frame", "placed");
     let (tx, rx) = std::sync::mpsc::channel();
     std::thread::spawn(move || {
-        let shared = storage.shared_snapshot(&id).unwrap();
+        let shared = storage.shared_database(&id).unwrap();
         assert!(shared.trusted_scoped().unwrap().is_some());
         let ids = |frames: Vec<&fagent_storage::Node>| -> Vec<String> {
             frames.into_iter().map(|n| n.id.clone()).collect()

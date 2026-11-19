@@ -1,4 +1,4 @@
-//! Item 1 (storage snapshot load, Moka hit) and item 2 (HTTP GET /snapshot).
+//! Item 1 (storage snapshot: database load, node-memory copy) and item 2 (HTTP GET /snapshot).
 use super::stats::{ms, sample, summary, Plan};
 use super::Backends;
 use fagent_server::{router, AppState, Config};
@@ -6,12 +6,13 @@ use flate2::{write::GzEncoder, Compression};
 use serde_json::{json, Value};
 use std::{io::Write, path::PathBuf, time::Instant};
 
-/// Moka and the HTTP response cache both refuse entries above 16 MiB.
+/// The HTTP response cache refuses entries above 16 MiB.
 pub const CACHE_ENTRY_LIMIT: usize = 16 * 1024 * 1024;
 
 /// Blocking: run on a blocking worker.
 pub fn storage(plan: &Plan, backends: &Backends, project: &str) -> Value {
-    let (cold, snapshot) = sample(plan, |_| backends.uncached.snapshot(project).unwrap());
+    let primary = &backends.primary;
+    let (cold, snapshot) = sample(plan, |_| primary.database_snapshot(project).unwrap().0);
     let json_bytes = serde_json::to_vec(&snapshot).unwrap().len();
     let (encode, _) = sample(plan, |_| {
         // Same steps as the object representation: DOM, envelope field, bytes.
@@ -19,20 +20,18 @@ pub fn storage(plan: &Plan, backends: &Backends, project: &str) -> Value {
         value["truncated"] = json!(false);
         serde_json::to_vec(&value).unwrap().len()
     });
-    let mut out = json!({
+    primary.snapshot(project).unwrap(); // loads node memory if it is cold
+    let (warm, _) = sample(plan, |_| primary.snapshot(project).unwrap());
+    let out = json!({
         "coldLoad": cold, "snapshotJsonBytes": json_bytes,
         "cacheAdmitted": json_bytes <= CACHE_ENTRY_LIMIT, "encodeObjects": encode,
+        "memoryWarm": warm,
     });
-    if backends.moka {
-        backends.primary.snapshot(project).unwrap(); // fill, if admitted
-        let (warm, _) = sample(plan, |_| backends.primary.snapshot(project).unwrap());
-        out["mokaWarm"] = warm;
-    }
     out
 }
 
 pub async fn http(plan: &Plan, backends: &Backends, project: &str) -> Value {
-    let mut out = json!({});
+    let out = json!({});
     for (label, query) in [("objects", ""), ("rows", "?nodeFormat=rows")] {
         let mut cold = Vec::new();
         let mut repeat = Vec::new();

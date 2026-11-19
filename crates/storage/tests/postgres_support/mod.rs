@@ -22,10 +22,9 @@ pub fn setup() -> (Arc<PostgresBackend>, Storage) {
     (backend, storage)
 }
 
-pub fn cached() -> (PostgresBackend, SnapshotCache) {
-    let backend = PostgresBackend::with_config(config()).unwrap();
-    let cache = SnapshotCache::new(backend.cache_namespace());
-    (backend.with_cache(cache.clone()).unwrap(), cache)
+/// A backend of its own: its node memory starts cold.
+pub fn backend() -> PostgresBackend {
+    PostgresBackend::with_config(config()).unwrap()
 }
 
 pub fn lock_entity_tables(client: &mut postgres::Client) -> postgres::Transaction<'_> {

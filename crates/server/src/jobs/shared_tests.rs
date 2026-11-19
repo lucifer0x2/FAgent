@@ -52,7 +52,7 @@ fn parity(shared: &SharedSnapshot, request: SceneRequest) {
 #[test]
 fn scoped_prepared_input_keys_resources_and_errors_match_full_reference() {
     let (_root, store, id) = fixture::fixture();
-    let shared = store.shared_snapshot(&id).unwrap();
+    let shared = store.shared_database(&id).unwrap();
     for frame in [
         "frame",
         "master",
@@ -99,7 +99,7 @@ fn scoped_prepared_input_keys_resources_and_errors_match_full_reference() {
 fn i5_persistent_preparation_preserves_revision_resources_and_note_intent() {
     use fagent_storage::{Storage, Store};
     let (root, store, id) = fixture::fixture();
-    let full = store.shared_snapshot(&id).unwrap();
+    let full = store.shared_database(&id).unwrap();
     drop(store);
     let store: Storage = Store::open(root.path()).unwrap().into();
     store.scoped_snapshot(&id, "frame").unwrap();
@@ -129,7 +129,7 @@ fn indexed_overflow_intent_matches_full_for_ancestors_master_sources_and_unrelat
         let before = project.snapshot().unwrap();
         project.apply_batch(serde_json::from_value::<BatchRequest>(json!({"projectId":id,"expectedRevision":before.revision,"idempotencyKey":anchor,
             "operations":[{"op":"create_note","id":format!("overflow-{anchor}"),"nodeId":anchor,"text":"Intentional overflow: design","author":"tester"}]})).unwrap()).unwrap();
-        let shared = store.shared_snapshot(&id).unwrap();
+        let shared = store.shared_database(&id).unwrap();
         for frame in ["frame", "placed", "placed/nested"] {
             let mut req = request(frame, "day");
             req.revision = shared.snapshot.revision;
@@ -153,7 +153,7 @@ fn indexed_overflow_intent_matches_full_for_ancestors_master_sources_and_unrelat
                 .len(),
         )
     };
-    let before = store.shared_snapshot(&id).unwrap();
+    let before = store.shared_database(&id).unwrap();
     let mut ops = Vec::new();
     for i in 0..20 {
         ops.push(fixture::node(
@@ -171,7 +171,7 @@ fn indexed_overflow_intent_matches_full_for_ancestors_master_sources_and_unrelat
         ops.push(json!({"op":"create_note","id":format!("unrelated-note-{i}"),"nodeId":format!("extra-frame-{i}"),"text":"Intentional overflow: unrelated","author":"tester"}));
     }
     project.apply_batch(serde_json::from_value::<BatchRequest>(json!({"projectId":id,"expectedRevision":before.snapshot.revision,"idempotencyKey":"unrelated","operations":ops})).unwrap()).unwrap();
-    let after = store.shared_snapshot(&id).unwrap();
+    let after = store.shared_database(&id).unwrap();
     let before_work = work(&before);
     let after_work = work(&after);
     assert_eq!(before_work, after_work);
@@ -184,7 +184,7 @@ fn indexed_overflow_intent_matches_full_for_ancestors_master_sources_and_unrelat
 #[test]
 fn untrusted_or_replaced_shared_snapshot_keeps_global_validation() {
     let (_root, store, id) = fixture::fixture();
-    let mut shared = store.shared_snapshot(&id).unwrap();
+    let mut shared = store.shared_database(&id).unwrap();
     let mut bad = shared.snapshot.as_ref().clone();
     bad.nodes
         .iter_mut()
@@ -210,7 +210,7 @@ fn trusted_preparation_over_corrupt_stored_rows_returns_errors() {
         ("outgoing", "5", "props"),
     ] {
         let (_root, store, project) = fixture::corrupt(id, props);
-        let shared = store.shared_snapshot(&project).unwrap();
+        let shared = store.shared_database(&project).unwrap();
         assert!(shared.trusted_scoped().unwrap().is_some());
         let error = Prepared::shared(&shared, request("frame", "default"), &config(), None)
             .err()

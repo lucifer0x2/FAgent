@@ -45,8 +45,8 @@ fn import(
     }
 }
 
-/// Shared resident snapshot handed out by the cache, or a busy error when the
-/// read needed the locked entity tables.
+/// A full read with the entity tables locked: served from node memory, or a busy
+/// error when the read needed SQL.
 fn resident(storage: &Storage, id: &str) -> std::result::Result<Arc<Snapshot>, String> {
     let mut control = sql();
     let lock = lock_entity_tables(&mut control);
@@ -56,28 +56,35 @@ fn resident(storage: &Storage, id: &str) -> std::result::Result<Arc<Snapshot>, S
         .map_err(|error| error.code)
 }
 
-/// A commit evicted the writer's cache entry: a read with the entity tables locked
-/// needs SQL. The next read loads and fills it, and the filled entry then serves
-/// with the tables locked, identical to a fresh uncached read.
-fn assert_evicted_then_read_through(
-    cached: &Storage,
+/// The writer's memory serves `revision` without SQL, identical (also in bytes) to a
+/// database read of another backend.
+fn assert_resident(storage: &Storage, fresh: &Storage, id: &str, revision: u64) -> Snapshot {
+    let hot = resident(storage, id).unwrap();
+    let (cold, identity) = fresh.database_snapshot(id).unwrap();
+    assert_eq!(hot.revision, revision);
+    assert_eq!(identity.unwrap().revision, revision);
+    assert_eq!(*hot, *cold);
+    // Domain equality treats -0.0 and 0.0 as equal; serialized bytes do not.
+    assert_eq!(
+        serde_json::to_string(&*hot).unwrap(),
+        serde_json::to_string(&*cold).unwrap()
+    );
+    Arc::unwrap_or_clone(cold)
+}
+
+/// A write outside the engine evicted the project: the next full read loads it from
+/// SQL and adopts it, and the read after that is served from memory.
+fn assert_evicted_then_loaded(
+    storage: &Storage,
     fresh: &Storage,
     id: &str,
     revision: u64,
 ) -> Snapshot {
-    assert_eq!(resident(cached, id).unwrap_err(), "STORAGE_BUSY");
-    let loaded = cached.snapshot(id).unwrap();
-    let hot = resident(cached, id).unwrap();
-    let cold = fresh.snapshot(id).unwrap();
-    assert_eq!(hot.revision, revision);
-    assert_eq!(*hot, loaded);
-    assert_eq!(*hot, cold);
-    // Domain equality treats -0.0 and 0.0 as equal; serialized bytes do not.
-    assert_eq!(
-        serde_json::to_string(&*hot).unwrap(),
-        serde_json::to_string(&cold).unwrap()
-    );
-    cold
+    assert_eq!(resident(storage, id).unwrap_err(), "STORAGE_BUSY");
+    let loaded = storage.snapshot(id).unwrap();
+    let hot = assert_resident(storage, fresh, id, revision);
+    assert_eq!(hot, loaded);
+    hot
 }
 
 fn zero(value: Value) -> Vec<Operation> {
@@ -89,11 +96,10 @@ fn zero(value: Value) -> Vec<Operation> {
 
 #[test]
 #[ignore = "requires fresh PostgreSQL via scripts/task19-check.sh"]
-fn every_commit_evicts_and_the_next_read_fills_the_exact_uncached_snapshot() {
-    let (backend, _) = cached();
-    let storage = Storage::new(backend);
+fn every_write_is_visible_to_the_next_full_read() {
+    let storage = Storage::new(backend());
     let (_, fresh) = setup();
-    let p = project(&storage, "write-through");
+    let p = project(&storage, "full-read-writes");
     let id = p.id();
     let mut seed = page("Seed");
     seed.extend(ops(json!([
@@ -108,7 +114,7 @@ fn every_commit_evicts_and_the_next_read_fills_the_exact_uncached_snapshot() {
         .apply_batch(request(id, 0, "seed", seed))
         .unwrap()
         .committed_revision;
-    assert_evicted_then_read_through(&storage, &fresh, id, revision);
+    assert_resident(&storage, &fresh, id, revision);
 
     let batches = [
         ops(json!([
@@ -131,7 +137,7 @@ fn every_commit_evicts_and_the_next_read_fills_the_exact_uncached_snapshot() {
             .apply_batch(request(id, revision, &key, operations))
             .unwrap()
             .committed_revision;
-        assert_evicted_then_read_through(&storage, &fresh, id, revision);
+        assert_resident(&storage, &fresh, id, revision);
     }
     let signed = resident(&storage, id).unwrap();
     let token = signed
@@ -152,12 +158,12 @@ fn every_commit_evicts_and_the_next_read_fills_the_exact_uncached_snapshot() {
             .import_asset(import(id, revision, key, bytes, font))
             .unwrap();
         revision = imported.result.committed_revision;
-        let hot = assert_evicted_then_read_through(&storage, &fresh, id, revision);
+        let hot = assert_evicted_then_loaded(&storage, &fresh, id, revision);
         assert!(hot.assets.iter().all(|asset| asset.status == "ready"));
     }
 
-    // A binary removed outside the domain is reported missing by the first read
-    // after the next commit exactly as by an uncached read.
+    // PostgreSQL identities carry no asset readiness: a binary removed outside the
+    // domain is reported missing by the next load of the project.
     let png_hash = format!("{:x}", Sha256::digest(PNG));
     sql()
         .execute(
@@ -170,7 +176,8 @@ fn every_commit_evicts_and_the_next_read_fills_the_exact_uncached_snapshot() {
         .apply_batch(request(id, revision, "after-missing", operations))
         .unwrap()
         .committed_revision;
-    let hot = assert_evicted_then_read_through(&storage, &fresh, id, revision);
+    let reloaded = Storage::new(backend());
+    let hot = assert_evicted_then_loaded(&reloaded, &fresh, id, revision);
     let png = hot
         .assets
         .iter()
@@ -188,10 +195,9 @@ fn every_commit_evicts_and_the_next_read_fills_the_exact_uncached_snapshot() {
 
 #[test]
 #[ignore = "requires fresh PostgreSQL via scripts/task19-check.sh"]
-fn replays_dry_runs_failures_and_conflicts_leave_the_cache_unchanged() {
-    let (writer, _) = cached();
-    let writer = Storage::new(writer);
-    let p = project(&writer, "no-fill");
+fn replays_dry_runs_failures_and_conflicts_keep_the_resident_revision() {
+    let writer = Storage::new(backend());
+    let p = project(&writer, "no-commit");
     let id = p.id();
     let seed = request(id, 0, "seed", page("Seed"));
     p.apply_batch(seed.clone()).unwrap();
@@ -218,13 +224,15 @@ fn replays_dry_runs_failures_and_conflicts_leave_the_cache_unchanged() {
         assert_eq!(conflict.code, "REVISION_CONFLICT");
     };
 
-    // A second backend with an empty cache proves no outcome below fills it.
-    let (empty, _) = cached();
-    let empty = Storage::new(empty);
-    outcomes(&empty.open_project(id).unwrap());
-    assert_eq!(resident(&empty, id).unwrap_err(), "STORAGE_BUSY");
-
-    // The same outcomes through the warm writer keep its resident entry.
+    // Through a second backend, then through the warm writer: nothing commits, and
+    // both serve the same revision.
+    let other = Storage::new(backend());
+    outcomes(&other.open_project(id).unwrap());
+    assert_eq!(other.snapshot(id).unwrap(), *warm);
     outcomes(&p);
-    assert!(Arc::ptr_eq(&resident(&writer, id).unwrap(), &warm));
+    let after = resident(&writer, id).unwrap();
+    assert_eq!(
+        serde_json::to_string(&*after).unwrap(),
+        serde_json::to_string(&*warm).unwrap()
+    );
 }

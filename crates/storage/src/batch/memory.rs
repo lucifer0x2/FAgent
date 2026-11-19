@@ -100,9 +100,6 @@ impl Project {
             identity
         });
         memory.committed(project, next.as_ref());
-        if memory.claim_cache_cleanup(&self.project_id) {
-            self.root.indexes.evict(&self.project_id);
-        }
         Ok(Outcome::Committed(result))
     }
 

@@ -4,7 +4,6 @@ pub(crate) struct Root {
     _lock: File,
     pub(crate) projects: Mutex<BTreeMap<String, Weak<Project>>>,
     pub(crate) viewer_db: Mutex<Option<Connection>>,
-    pub(crate) indexes: crate::revision_indexes::IndexCache,
     pub(crate) memory: crate::memory::Memory,
 }
 impl Root {
@@ -47,7 +46,6 @@ impl Store {
                 _lock: lock,
                 projects: Mutex::new(BTreeMap::new()),
                 viewer_db: Mutex::new(None),
-                indexes: crate::revision_indexes::IndexCache::default(),
                 memory,
             }),
         })
