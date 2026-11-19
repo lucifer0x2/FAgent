@@ -781,24 +781,117 @@ during every run (phase 3: 2.3–3.5); other workloads were running on the machi
 3. `/snapshot` probes the database identity twice on a response-cache miss (once in `snapshot_http`, once in
    `full_read`); a hit still probes once.
 
+The acceptance table and the open items moved to "Review fixes and final verification" below.
+
+## Review fixes and final verification (2026-11-19)
+
+An independent review of the branch at `3df4210` reported four spec findings and five standards findings. Each was
+checked against the code; the spec findings were reproduced first by a failing test (P1, notes) or by reading (flows,
+instances). Commits `093d136..86e4166` plus this docs commit.
+
+### Findings and outcome
+
+| Finding | Verdict | Change |
+| --- | --- | --- |
+| P1: a page deleted and recreated as a group keeps its frame child's id, kind and parent id, so links to that frame (no longer a root frame) were not rechecked; the engine accepted what `Candidate` rejects (`links[0].to`) | Confirmed (`a_link_target_whose_page_is_recreated_as_a_group` failed: engine accept, reference reject) | `delta/navigation.rs`: a written node is "placed" when its kind or parent changed **or its root-frame status changed**; incoming links of placed nodes are rechecked |
+| P2: stored data over 5,000 notes rejected every batch (`notes`), against the phase 3 decision | Confirmed (`too_many_stored_notes` failed on a rename) | The note limit fails only when the batch raises the count above the limit (or further above a stored excess). On a valid base this equals the reference |
+| P2: renaming a root frame that starts a flow rebuilt the flow-name table from every root frame | Confirmed by reading | `reference_keys` adds `flow:<name>` for `props.flowStart`, so the existing `referencing` index finds the frames starting a name. Only root frames whose props, kind, parent or root status changed are checked, each over the frames of its name in `root_frames` order |
+| P2: the write path expanded the closure's instances and counted virtual nodes per instance; the spec asks for per-master counters | Partly confirmed | `Facts` now keeps one size per component master (virtual nodes one instance adds), recomputed from authored rows for the masters around the closure; the total moves by the closure's instances. Admission no longer expands every instance. The expansion of the closure's instances stays for the property checks (see below) |
+| Final evidence not tied to the last commit | Confirmed | "Verification" below names the commit, commands and machine load |
+| `get_design_context` benchmark covered only the storage part; graph fallback not reported | Confirmed | New `crates/server/tests/design_context_bench.rs` times the whole MCP tool call; the fallback is described below |
+| `LOG.md` repeated report content under several Task 41 headings | Confirmed | One Task 41 heading with decisions, results link, review fixes and open items |
+| Component graph DFS written twice | Confirmed | `validate/instance_graph.rs` holds the one `Walk` (known or lazily filled edges); `delta/graph.rs` uses it, and its whole-project fallback is `walk_all` |
+| SQLite and PostgreSQL commits repeat the stale retry and the history envelope | Confirmed | `storage/src/memory/stage.rs`: `Memory::begin` (begin, evict and reload once when stale, else conflict) and `stage::outcome` (result + envelope) |
+
+Why the closure's instances are still expanded on a write: an override, a theme scope or an ancestor's size makes each
+instance's copy of a master node resolve on its own, and task rule 6 requires accept/reject equal to
+`Candidate::validate`, which checks the properties of every expanded node. Dropping the expansion would accept
+batches the reference rejects. The expansion is limited to the closure's instances (never the whole project), and the
+node budget no longer depends on it. Removing it entirely needs a decision on rule 6 versus rule 7.
+
+Component graph fallback: the scoped walk visits only masters that reach a changed master. When it finds a cycle or a
+depth fault, the graph is walked once more over every master (all pages), because which error the reference reports
+first (cycle or depth) depends on the masters walked before. Only rejected batches with a component-graph fault pay
+for this walk; accepted batches never do.
+
+### Behavior changes
+
+- On stored data over the note limit, a batch that does not raise the note count is accepted (before: rejected).
+- On stored data with an instance of a missing or non-master component, or a master cycle, the expanded total counts
+  that instance's subtree up to the broken reference (before: the instance counted 0 when its expansion failed).
+  Valid data counts exactly as before; `facts_tests.rs` checks the counters against a full expansion after nested
+  edits, retargets, creates and deletes.
+- A renumbered root frame with `flowStart` (sort key only) no longer re-checks its flow name; a stored duplicate is
+  reached when the frame's props, kind, parent or root status change, as before for renames.
+
+### Verification
+
+All runs on `86e4166` (the code of this section; the docs commit changes no code), debug build unless noted, on this
+machine (10 cores) with other workloads running: load average 5–20 during the runs.
+
+| Suite | Command | Passed | Failed | Ignored |
+| --- | --- | ---: | ---: | ---: |
+| scene-input + node-memory (incl. the differential oracle with the phase 3 seeds, `delta_rules`, `delta_structure`, `admission`, `facts_tests`) | `cargo test -p fagent-scene-input -p fagent-node-memory` | 163 | 0 | 2 |
+| scene-input, node-memory, SQLite storage and server | `cargo test -p fagent-scene-input -p fagent-node-memory -p fagent-storage -p fagent-server --no-fail-fast` (integration and unit tests; stopped during the server doctests) | 746 | 41 | 55 |
+| PostgreSQL (fresh container, `scripts/task19-check.sh`): the default set plus `node_memory_writes`, `postgres_memory_freshness`, `postgres_dry_run` | see below | 28 | 0 | 0 |
+
+- The 41 failures are all in `fagent-server` and all fail on `WORKER_UNAVAILABLE` (no renderer build here): the same
+  environmental set and count as phase 4. scene-input, node-memory and storage have no failure.
+- PostgreSQL command: `bash scripts/task19-check.sh bash -c 'cargo test --offline -p fagent-storage --test
+  postgres_contract --test postgres_domain --test postgres_transactions --test postgres_resources --test
+  postgres_full_reads --test postgres_unavailable --test postgres_full_read_writes --test postgres_namespace --test
+  postgres_fidelity --test postgres_schema_setting --test node_memory_writes --test postgres_memory_freshness --test
+  postgres_dry_run -- --ignored --test-threads=1 && cargo test --offline -p fagent-server --test postgres_backend --
+  --ignored --test-threads=1'`.
+- Differential oracle: part of the scene-input + node-memory run (state seeds 1–8, 1–16, 201–212; `begin` seeds 1–24,
+  101–116, 201–224), 0 differences.
+- New tests: `a_link_target_whose_page_is_recreated_as_a_group` and `too_many_stored_notes` failed before the fix
+  (engine accept vs reference reject; rename rejected for `notes`) and pass after; `facts_tests` fails when changed
+  masters are not recomputed.
+- `cargo fmt --all -- --check`; `cargo clippy --all-targets -D warnings` on scene-input, node-memory, storage and
+  server, also with `--features large-project-bench` on storage and server: clean. Touched files: none over 250
+  lines.
+- Not rerun after the review fixes: the PostgreSQL write benchmark (`node_memory_writes_bench`), the remaining
+  PostgreSQL-targeted suites of phase 4 (scoped reads/notes/concurrency, revision indexes, statements, reconnect,
+  asset imports) and `project_privacy` on PostgreSQL.
+
+### Measurements
+
+`crates/server/tests/design_context_bench.rs` (release, SQLite in a temporary root, generated fixture seed 7): the
+whole `get_design_context` MCP call on `root_10` (HTTP, read, scoped expansion and resolution, viewports,
+diagnostics, JSON shaping), 30 measured calls after two warm-ups; then 30 calls each right after a one-node rename
+commit. Load average 13–20 during the run, so read the numbers as upper bounds.
+
+| Case | ~7k (6,376 authored) | 200k (178,604 authored) |
+| --- | ---: | ---: |
+| `get_design_context` root_10, median / p95 ms | 3.32 / 3.64 | 2.77 / 2.98 |
+| Response size | 53,566 B | 45,481 B |
+| Right after a write, median / p95 ms | 4.29 / 4.86 | 3.62 / 4.14 |
+
+`cargo test --release -p fagent-server --test design_context_bench -- --ignored --nocapture` (set
+`DESIGN_CONTEXT_BENCH_NODES=200000` for the large row). The storage-only part measured 0.45–0.53 ms in phase 4, so
+the server side (shaping, viewports, diagnostics, transport) is most of the call.
+
 ### Task 41 acceptance
 
 | AC | Evidence |
 | --- | --- |
 | `crates/node-memory` builds without storage, rusqlite, postgres, moka; no `FAGENT_NODE_MEMORY_` outside rejected/closed docs; no `strict` mode | Phase 1 "Removed"; phase 4 "Verification" (`cargo tree`, `rg`: only task specs and the log) |
-| Commit path has no `to_snapshot`, `Candidate::from_snapshot`, whole-project `instances::expand` or note/navigation/trigger scans | Phase 3 "Removed" (classifier, reference path); phase 4 "Verification" (code reading, bench phase counters) |
-| Differential oracle over every op kind, seeds and batch counts, 0 differences | Phase 3 "Oracle results"; phase 4 "Verification" (same seeds, 0 differences) |
-| Storage and server suites on SQLite and PostgreSQL; only known environment failures | Phase 4 "Verification" (41 server failures, same names as base) |
-| Benchmarks on 200k and ~7k fixtures, median of 30 with p95, phase breakdown; small props edit validation < 5 ms | Phase 3 "Measurements" (breakdown); phase 4 "Measurements" (validation 0.01–0.02 ms) |
-| fmt and clippy clean; files over 1000 lines explained | Phase 4 "Verification"; no touched file over 1000 lines in any phase |
-| Docs (README, PERFORMANCE, ARCHITECTURE, SERVER, AGENTS, LOG; REJECTED-APPROACHES lines) | Phase 4 (this section and the docs commit) |
+| Commit path has no `to_snapshot`, `Candidate::from_snapshot`, whole-project `instances::expand` or note/navigation/trigger scans | Phase 3 "Removed"; phase 4 "Verification"; review fixes: flow names through the `flow:` index, budget per master. Exception: a batch rejected for a component-graph fault walks the graph over the whole project once (above) |
+| Differential oracle over every op kind, seeds and batch counts, 0 differences | Phase 3 "Oracle results"; this section's "Verification" (same seeds at `86e4166`, 0 differences) |
+| Storage and server suites on SQLite and PostgreSQL; only known environment failures | This section's "Verification" |
+| Benchmarks on 200k and ~7k fixtures, median of 30 with p95, phase breakdown; small props edit validation < 5 ms | Phase 3 "Measurements" (breakdown); phase 4 "Measurements" (validation 0.01–0.02 ms); this section: the whole `get_design_context` call |
+| fmt and clippy clean; files over 1000 lines explained | This section's "Verification"; no touched file over 250 lines |
+| Docs (README, PERFORMANCE, ARCHITECTURE, SERVER, AGENTS, LOG; REJECTED-APPROACHES lines) | Phase 4; this section and `docs/agents/LOG.md` |
 
 ### Open items
 
 - Phase 5 (optional): a lazy expansion cache per instance. Edits that reach ~900 instances still validate in
-  15–22 ms at 200k, mostly `delta.instances.properties` and `delta.themes`.
+  15–22 ms at 200k (phase 4 numbers), mostly `delta.instances.properties` and `delta.themes`.
+- Write-path expansion for property checks: kept for exact parity (rule 6); removing it needs a user decision.
 - Admission costs one full `Candidate::validate` per load (825–1,000 ms at 200k); it is paid on the first read or
   write of a cold project and after every eviction.
-- The asset-readiness gap of behavior change 1, if direct database edits of binaries must show up without a reload.
-- Not measured: an idle-machine rerun of the cold commit, server-side `get_design_context` shaping, the real-data
-  restore.
+- The asset-readiness gap of phase 4 behavior change 1, if direct database edits of binaries must show up without a
+  reload.
+- Not measured: an idle-machine rerun of the cold commit and of the PostgreSQL write benchmark after the review
+  fixes, the real-data restore.
