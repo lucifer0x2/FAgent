@@ -20,10 +20,11 @@ ConfigMap. Verified public reads/font/scene/PNG/SVG+PNG export, unchanged snapsh
 Funnel/Serve not enabled; see the [public listener runbook](KUBERNETES-PUBLIC-VIEWER.md).
 
 Task19 brought the product-domain PostgresBackend into StorageBackend/AppState/router.
-The CLI defaults to SQLite. `DATABASE_PROVIDER=postgresql` requires `DATABASE_URL` and enables
-an in-process Moka cache, one snapshot per project, 1-hour TTL. Every hit confirms namespace,
-canonical ID, generation and revision through PostgreSQL. See [how to run](../README.md) and
-the [current cache](MOKA-SNAPSHOT-CACHE.md).
+The CLI defaults to SQLite. `DATABASE_PROVIDER=postgresql` requires `DATABASE_URL`. Task19's
+in-process Moka snapshot cache was removed in Task 41 phase 4: latest-revision reads come from
+node memory, which serves a resident copy only when PostgreSQL confirms namespace, canonical ID,
+generation and revision. See [how to run](../README.md) and the
+[snapshot caches](MOKA-SNAPSHOT-CACHE.md).
 The Task15–17 milestones below record the historical scope of the spikes and the initial interface.
 
 Task17, 2026-11-02: the PostgreSQL certified scalar delta commit-before-ACK spike

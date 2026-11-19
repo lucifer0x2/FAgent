@@ -632,3 +632,163 @@ scene-input, node-memory, storage (also with `--features large-project-bench`) a
   write, and the real-data restore (`WRITES_BENCH_REALDATA_URL`, not available here).
 - Phase 4 (Moka, unused `RevisionIndexes`/`scoped/` code, test-only `validate_after_indexed` and `batch/validation.rs`,
   `docs/REJECTED-APPROACHES.md` lines) is not started and waits for the user's go-ahead.
+
+## Phase 4 — Cleanup (2026-11-19)
+
+Branch `feat/node-memory-optimization` (branched from `feat/task-41-phase-2` at `307b318`; it carries the whole task).
+Commits `95694d9..545b60d`: slice A (`95694d9`, `9039dbc`, `2331171`) and slices B–D (`8d0e277`, `994ab81`, `32354c8`,
+`bbdf1ab`) merged with `--no-ff` (`b969da8`, `d44d3e4`), then `19c42e2` (stale comments), `f7c7a97` (the
+large-project benchmark build under `--features large-project-bench`, broken by the Moka removal) and `545b60d` (bench
+cases for full reads), plus this report. Diff over the code: 103 files, +1,452 / −2,402; over `crates/*/src` 64
+files, +893 / −1,784. Merge conflicts: `crates/storage/src/revision_indexes.rs` and `revision_indexes/tests.rs`
+(both slices deleted parts; both deletions kept: no `candidate`, `publish`, `IndexCache` or `weight`) and the one
+`docs/agents/LOG.md` line of the pre-amend base (resolved to `80c4918`'s text). Largest touched files:
+`crates/storage/src/memory/guard_tests.rs` (343 lines), `crates/storage/src/memory/guard_golden.json` (304, data),
+`crates/scene-input/src/validate/candidate.rs` (243); none over 1000.
+
+### API changes
+
+- `PostgresBackend::cache_namespace` → `database_namespace`; `Storage`/`StorageBackend::shared_snapshot` →
+  `shared_database` (always the database, with `RevisionIndexes` built for that read).
+- New `StorageBackend::database_snapshot` (latest revision from the database only, with the identity of the same
+  read; backends without node memory default to `snapshot_with_cache_identity`).
+- `snapshot()` and `snapshot_with_cache_identity()` are memory-first on SQLite and PostgreSQL (`Memory::full_read`):
+  probe the identity, serve a copy of the published view when memory holds that revision, else read the database
+  and adopt the result into memory (a cold project is loaded and admitted). New `fagent_node_memory::full_snapshot`
+  (a full copy of a published view in the database adapters' entity order); `NodeMemory::to_snapshot` uses it.
+- `NodeMemoryStats` gains `full_hits` and `full_fallbacks`; `Tag.cache_cleaned` and `claim_cache_cleanup` are gone.
+- Export reads go through `reader_snapshot` (memory-first); the server's tree/find reads fall back to
+  `reads/memory.rs::database()` (`shared_database`) on a memory reader error and for explicit `revision` reads.
+- Guard parity is a fixed expectation: `crates/storage/src/memory/guard_golden.json` (42 cases × 9 page sets × 6
+  history shapes, 2,052 guard outcomes), captured from the removed oracle and matched exactly by both the oracle and
+  the memory guard before the oracle was deleted. Regenerate with
+  `FAGENT_UPDATE_GUARD_GOLDEN=1 cargo test -p fagent-storage guard_golden`.
+
+### Removed
+
+- Storage Moka snapshot cache: `hot_cache.rs` (+ tests), `SnapshotCache`, `PostgresBackend::with_cache`,
+  `read_through`, `postgres/write_through.rs` / `Committed`, `INVALID_CACHE_CONFIG` handling, the `pgmoka`
+  benchmark engine and the `moka`/`mokaWarm` bench fields; `moka` is no longer a storage dependency.
+- `IndexCache` (the `RevisionIndexes` Moka cache), `RevisionIndexes::weight`/`candidate`, `IndexCache::publish`.
+- Test-only candidate-path oracles: `scoped::check`, `BatchScope`, `scoped/notes.rs::check`, `batch/validation.rs`,
+  `concurrent::fill`, `scoped/parity_guard.rs`, `DependencyIndex::from_candidate`, `history::footprint_indexed`
+  (folded into `history::footprint`, the full-scan path asset/font imports use), `FontReferences::from_candidate`.
+- `scene_input::validate::incremental` (`validate_after`, `validate_after_indexed`, `ValidationWork`,
+  `ValidationStats`), `NodeIndex::affected`/`component_ancestors`/`component_users`, `NodeTopology::preserves`, the
+  always-`None` `affected` parameter of `validate_instances`; tests `incremental.rs`, `incremental_evidence.rs`.
+- Renames: PostgreSQL tests `postgres_cache` → `postgres_full_reads`, `postgres_cache_failures` →
+  `postgres_unavailable`, `postgres_write_through` → `postgres_full_read_writes`; scene-input
+  `tests/incremental_support` → `tests/fixture_support`; new `tests/candidate_validation.rs` keeps the live
+  `Candidate::validate` cases.
+
+### Survivors, with consumer
+
+- `RevisionIndexes` (built once per database read): `SharedSnapshot` from `shared_database`, the database fallback of
+  scoped reads, and `get_edit_context` (`edit_context_indexed`) when the read is not served from memory.
+- `scoped/` pieces: `history` (envelopes, footprints, coverage for the page guard), `index::PageIndex` (page-id
+  validation, guard), `dependency_index` (edit context on a database read), `navigation`, `notes`; test-only
+  `parity.rs`, `parity_notes_pages.rs`, `dependencies.rs`, `reference_history.rs` (frozen reference algorithms checked
+  against `history::footprint`, `Prepared::footprint` and both dependency closures).
+- `Candidate`: admission (`ProjectState::admit`), asset/font import (`assets.rs`, `postgres/resources.rs`), bundle
+  validation, `Project::persist` (asset import on SQLite) and the test oracles.
+- Server HTTP snapshot response cache (Moka, encoded bytes keyed by `SnapshotCacheIdentity`, format and visibility):
+  unchanged, documented in [MOKA-SNAPSHOT-CACHE](MOKA-SNAPSHOT-CACHE.md).
+- `Storage::memory_snapshot` and `evict_memory`: kept. Their consumers are integration tests (`node_memory_i4`,
+  `node_memory_i5`, `task28_review_fixes`, `node_memory_writes`, `postgres_memory_freshness`) and the bench's cold
+  cases, which cannot reach `#[cfg(test)]` items; both are two-line delegations with no production caller.
+
+### Verification
+
+| Suite | Passed | Failed | Ignored |
+| --- | ---: | ---: | ---: |
+| scene-input + node-memory | 160 | 0 | 2 |
+| SQLite storage | 224 | 0 | 40 |
+| Server | 359 | 41 | 12 |
+| PostgreSQL default (`scripts/task19-check.sh`: storage 20 + server `postgres_backend` 2) | 22 | 0 | 0 |
+| PostgreSQL targeted (full snapshots, memory reads/writes, freshness, dry run, statements, reconnect, revision indexes, scoped reads/notes/concurrency, asset imports; server `postgres_import_inbox`) | 19 | 0 | 0 |
+
+- The 41 server failures have exactly the names of base `80c4918`'s run (render worker `WORKER_UNAVAILABLE` and
+  downstream, `startup_env` refusing the Chromium export backend, `esbuild` missing); +1 pass is the new full-read
+  test. Count changes elsewhere are removals: scene-input −7 incremental tests +3 `candidate_validation`; storage −10
+  (removed cache, `IndexCache`, `parity_guard` and late-fill tests). `scoped_concurrency::postgres_scoped_contract` (which failed
+  once in the slice under a parallel build) passed at load average ~8. `project_privacy` on PostgreSQL needs
+  `FAGENT_TEST_POSTGRES_URL` and was not run.
+- Differential oracle, same seeds as phase 3 (release): state runs 2,400 + 4,800 + 3,600 batches (731, 972, 957
+  accepted); `begin` runs 7,200 (seeds 1–24, 2,078 accepted), 4,800 (101–116, 895) and 7,200 (201–224, 1,774).
+  **0 differences, 0 end-of-batch order differences.** `delta_rules` (6), `delta_structure` (9) and `error_parity`
+  (2) pass.
+- fmt and `clippy --all-targets -D warnings` are clean on scene-input, node-memory, storage and server, with and
+  without `--features large-project-bench`.
+- AC checks: `rg FAGENT_NODE_MEMORY_` finds only `tasks/28`, `tasks/41` and `docs/agents/LOG.md` (task text and log
+  history); `cargo tree -p fagent-node-memory` has no storage, rusqlite, postgres or moka; `cargo tree -p
+  fagent-storage` has no moka (only the server keeps it for the HTTP cache). In `crates/storage/src` and
+  `crates/node-memory/src`, `Candidate::from_snapshot` remains only in admission, asset import, bundle validation,
+  `Project::persist`, `scoped::dependencies`/`reference_history` (test-only) and tests; `to_snapshot` only in full
+  reads and admission. The commit path (`batch/memory.rs`, `postgres/batch.rs`, `HotProject::begin`) has none, and
+  the bench phase counters of every warm commit show only `memory.txn`, `delta.*`, `history.envelope` and `persist`
+  (no `validate.*`, `candidate.*` or `indexes.*`).
+- `scripts/check-public-content.sh`: OK.
+
+### Measurements
+
+PostgreSQL, release, `node_memory_writes_bench` (same command as phase 3), 30 measured runs after two warm-ups,
+median / p95 ms, two rounds (round 1 shown; a range where the rounds differ by more than 10%). Load average 3.5–3.9
+during every run (phase 3: 2.3–3.5); other workloads were running on the machine.
+
+| Case | 200k (178,604 authored) | Phase 3 | validation | ~7k (6,376 authored) | Phase 3 |
+| --- | ---: | ---: | ---: | ---: | ---: |
+| Small props edit | 2.1–2.5 / 3.8–4.7 | 2.9–4.3 / 4.9–5.4 | 0.010–0.024 | 1.02–1.20 / 1.26–2.60 | 1.04 / 1.32 |
+| Master edit (929 instances; 29 at 7k) | 21.2–22.3 / 21.9–25.8 | 21.2–22.2 / 23.1–25.7 | 15.6–19.2 | 1.47–1.60 / 1.53–1.95 | 1.53 / 1.68 |
+| Reparent (152 nodes) | 3.6–4.8 / 6.4–6.5 | 5.3–5.7 / 5.9–7.2 | 0.61–0.68 | 1.64–1.75 / 2.02–2.51 | 1.63 / 1.80 |
+| Token edit (890 instances; 26 at 7k) | 20.6–25.3 / 22.5–29.0 | 20.7–21.8 / 21.8–23.4 | 15.2–21.8 | 1.50–1.52 / 1.65–1.69 | 1.54 / 1.58 |
+| Note create | 2.2–3.0 / 3.7–4.2 | 3.1–4.4 / 5.1–5.4 | 0.004–0.009 | 1.02–1.06 / 1.22–1.25 | 1.09 / 1.19 |
+| Page create | 1.6–2.2 / 1.8–2.8 | 2.5–3.0 / 3.3–4.0 | 0.008–0.010 | 1.00–1.06 / 1.06–1.30 | 1.05 / 1.38 |
+| Cold commit (evict, load, admission, commit) | 1,319–1,380 / 1,977–2,400 | 1,119–1,191 / 1,159–1,244 | – | 41.3–41.7 / 49.8–51.3 | 47.6 / 53.7 |
+| `get_design_context` `root_10`, scoped part | 0.51–0.53 / 0.55–0.57 | 0.83 / 0.97 | – | 0.45–0.47 / 0.48–0.49 | 0.45 / 0.48 |
+| Full `snapshot()`, memory hit | 42.0–52.5 / 43.2–56.2 | – | – | 1.59–1.61 / 1.64–1.65 | – |
+| Full `database_snapshot` | 178–243 / 183–384 | – | – | 6.2–6.6 / 7.0–7.1 | – |
+| First full read of a cold project (evict, load, admission) | 1,157–1,352 / 1,564–2,124 | – | – | 36.0–40.7 / 36.6–44.5 | – |
+| RAM per authored node (engine estimate) | 1,252 B | 1,252 B | | 1,229 B | 1,229 B |
+
+- Over 20% slower than phase 3 in one round: the 200k cold commit (+11–23%; its `memory.admission.validate` 983–1,003
+  ms against 825) and the 200k token edit in round 2 (25.3 ms, +16–22%). Neither path changed in this phase
+  (`Candidate::validate` and the delta rules are untouched; the removed `affected` parameter was always `None`), and
+  the cold full read of the same run measured admission at 826 ms, equal to phase 3. Read both as load noise; a
+  rerun on an idle machine would confirm it.
+- Full reads: a memory hit is 3.5–4.2× faster than the database read on the 7k fixture and 4.2–4.6× at 200k (the
+  slice measured 1.46 vs 7.49 ms on PostgreSQL and 1.51 vs 4.37 ms on SQLite at 7,071 nodes). A cold project's first
+  full read now pays load and admission (1.2–1.4 s at 200k) instead of a database read (~0.2 s); later reads are
+  memory hits.
+- `get_design_context` at 200k measured 0.51–0.53 ms (phase 3: 0.83); the cause was not isolated.
+
+### Behavior changes
+
+1. PostgreSQL identities carry no asset readiness, so a binary deleted directly in the database stays "ready" for a
+   resident project until its next eviction or reload (TTL, import, restart). Before, the next commit's Moka eviction
+   exposed it on full reads; scoped reads (`list_assets`) already behaved so. `postgres_full_read_writes` checks that
+   a fresh load reports "missing". Closing it would mean probing binaries on every read.
+2. A full read of a cold project loads it into memory and pays load and admission, as scoped reads already did.
+3. `/snapshot` probes the database identity twice on a response-cache miss (once in `snapshot_http`, once in
+   `full_read`); a hit still probes once.
+
+### Task 41 acceptance
+
+| AC | Evidence |
+| --- | --- |
+| `crates/node-memory` builds without storage, rusqlite, postgres, moka; no `FAGENT_NODE_MEMORY_` outside rejected/closed docs; no `strict` mode | Phase 1 "Removed"; phase 4 "Verification" (`cargo tree`, `rg`: only task specs and the log) |
+| Commit path has no `to_snapshot`, `Candidate::from_snapshot`, whole-project `instances::expand` or note/navigation/trigger scans | Phase 3 "Removed" (classifier, reference path); phase 4 "Verification" (code reading, bench phase counters) |
+| Differential oracle over every op kind, seeds and batch counts, 0 differences | Phase 3 "Oracle results"; phase 4 "Verification" (same seeds, 0 differences) |
+| Storage and server suites on SQLite and PostgreSQL; only known environment failures | Phase 4 "Verification" (41 server failures, same names as base) |
+| Benchmarks on 200k and ~7k fixtures, median of 30 with p95, phase breakdown; small props edit validation < 5 ms | Phase 3 "Measurements" (breakdown); phase 4 "Measurements" (validation 0.01–0.02 ms) |
+| fmt and clippy clean; files over 1000 lines explained | Phase 4 "Verification"; no touched file over 1000 lines in any phase |
+| Docs (README, PERFORMANCE, ARCHITECTURE, SERVER, AGENTS, LOG; REJECTED-APPROACHES lines) | Phase 4 (this section and the docs commit) |
+
+### Open items
+
+- Phase 5 (optional): a lazy expansion cache per instance. Edits that reach ~900 instances still validate in
+  15–22 ms at 200k, mostly `delta.instances.properties` and `delta.themes`.
+- Admission costs one full `Candidate::validate` per load (825–1,000 ms at 200k); it is paid on the first read or
+  write of a cold project and after every eviction.
+- The asset-readiness gap of behavior change 1, if direct database edits of binaries must show up without a reload.
+- Not measured: an idle-machine rerun of the cold commit, server-side `get_design_context` shaping, the real-data
+  restore.

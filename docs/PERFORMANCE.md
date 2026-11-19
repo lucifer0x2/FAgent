@@ -29,7 +29,8 @@ recorded in the report; validation dominates it.
 **Node-memory (always on).** [Task28](../tasks/28-node-memory-integration.md) introduced it and
 [Task41](../tasks/41-node-memory-engine.md) phase 1 made it the only path: hot projects stay in RAM
 (`crates/node-memory`, struct `NodeMemory`) with indexes updated per operation, every latest-revision
-read and every batch goes through it, and the database stays the source of truth. There are no
+read and every batch goes through it, and the database stays the source of truth. Since phase 4 there is no
+storage snapshot cache: full snapshots of the latest revision are copies of the resident project. There are no
 flags or modes any more; the "Flag off" and "Flag on" columns below are the Task28 measurements of
 the former database-only path and the opt-in memory path. The figures below were measured on a
 generated 200k-node fixture with PostgreSQL and a release build; the source does not record the
@@ -43,23 +44,29 @@ above.
 | Same commit, real project of 7,025 nodes | 28.5 ms | **22.5 ms** |
 | Shadow mirror cost per commit (`SHADOW`) | – | 114 µs (17–26 µs on real projects); first load 76 ms |
 
-Task41 phase 3 (same 200k fixture: 178,604 authored nodes, PostgreSQL, release, 30 runs after two warm-ups,
-median / p95, load average 2.3–3.5): a commit validates only the batch's delta and the nodes that depend on it
-(per-op checks, then the end-of-batch delta rules); the whole project is validated once per load.
+Task41 phase 4 (same 200k fixture: 178,604 authored nodes, PostgreSQL, release, 30 runs after two warm-ups,
+median / p95 over two rounds, load average 3.5–3.9): a commit validates only the batch's delta and the nodes that
+depend on it (per-op checks, then the end-of-batch delta rules); the whole project is validated once per load, and
+latest-revision full snapshots are copies of the resident project (the storage snapshot cache is gone).
 
 | Case (`node_memory_writes_bench`) | 200k fixture | Validation | ~7k fixture (6,376 nodes) |
 | --- | ---: | ---: | ---: |
-| Small props edit, plain node | 2.9–4.3 / 4.9–5.4 ms | 0.01 ms | 1.0 / 1.3 ms |
-| Props edit on a master child (929 instances) | 21.2–22.2 / 23.1–25.7 ms | 16–17 ms | 1.5 / 1.7 ms |
-| Reparent of a 152-node section | 5.3–5.7 / 5.9–7.2 ms | 0.8 ms | 1.6 / 1.8 ms |
-| Token edit reaching 890 instances | 20.7–21.8 / 21.8–23.4 ms | 15–17 ms | 1.5 / 1.6 ms |
-| Note create / page create | 2.5–4.4 / 3.3–5.4 ms | 0.01 ms | 1.1 / 1.2–1.4 ms |
-| Cold commit (load + admission + commit) | 1.12–1.19 / 1.16–1.24 s | – | 48 / 54 ms |
-| `get_design_context`, storage part, one frame | 0.8 / 1.0 ms | – | 0.45 / 0.48 ms |
+| Small props edit, plain node | 2.1–2.5 / 3.8–4.7 ms | 0.01–0.02 ms | 1.0–1.2 / 1.3–2.6 ms |
+| Props edit on a master child (929 instances) | 21.2–22.3 / 21.9–25.8 ms | 16–19 ms | 1.5–1.6 / 1.5–1.9 ms |
+| Reparent of a 152-node section | 3.6–4.8 / 6.4–6.5 ms | 0.6–0.7 ms | 1.6–1.8 / 2.0–2.5 ms |
+| Token edit reaching 890 instances | 20.6–25.3 / 22.5–29.0 ms | 15–22 ms | 1.5 / 1.7 ms |
+| Note create / page create | 1.6–3.0 / 1.8–4.2 ms | 0.01 ms | 1.0–1.1 / 1.1–1.3 ms |
+| Cold commit (load + admission + commit) | 1.32–1.38 / 1.98–2.40 s | – | 41–42 / 50–51 ms |
+| `get_design_context`, storage part, one frame | 0.5 / 0.6 ms | – | 0.45–0.47 / 0.48–0.49 ms |
+| Full snapshot, memory hit | 42–53 / 43–56 ms | – | 1.6 / 1.6 ms |
+| Full snapshot, database read (`database_snapshot`) | 178–243 / 183–384 ms | – | 6.2–6.6 / 7.0–7.1 ms |
+| First full read of a cold project (load + admission) | 1.16–1.35 / 1.56–2.12 s | – | 36–41 / 37–45 ms |
 
 The same master-child edit took 36.5 ms in phase 1 and 31.8 ms in phase 2 (it was reported there as the "small props
-edit"), and 988 ms on the former database-only path. RAM is about 1.25 KB per authored node (engine estimate; 1.6 KB
-of process footprint). Phase breakdown and engine-level numbers: [TASK41-REPORT.md](TASK41-REPORT.md) "Phase 3".
+edit"), and 988 ms on the former database-only path. The cold rows ran under more load than phase 3 (1.12–1.19 s
+then; admission itself measured the same 825 ms in one run). RAM is about 1.25 KB per authored node (engine estimate;
+1.6 KB of process footprint). Phase breakdown and engine-level numbers: [TASK41-REPORT.md](TASK41-REPORT.md) "Phase 3"
+and "Phase 4".
 The Task28 stages that preceded the engine are described in the
 [I3b](TASK28-I3B-REPORT.md), [I4](TASK28-I4-REPORT.md) and
 [I5](TASK28-I5-REPORT.md) reports and the
