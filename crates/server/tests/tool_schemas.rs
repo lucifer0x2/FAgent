@@ -8,8 +8,7 @@ mod tool_names;
 use serde_json::{json, Value};
 use support::Server;
 
-const INVALID: &str =
-    "Arguments do not match the published tool schema; check required fields, types and limits";
+const INVALID: &str = "Arguments do not match the published tool schema";
 
 #[tokio::test]
 async fn every_published_input_schema_is_a_plain_object() {
@@ -53,7 +52,8 @@ async fn every_published_input_schema_is_a_plain_object() {
 async fn code(s: &Server, args: Value) -> Value {
     let result = s.call("render_frame", args.clone()).await;
     if result["error"]["code"] == "INVALID_REQUEST" {
-        assert_eq!(result["error"]["message"], INVALID, "{args}: {result}");
+        let message = result["error"]["message"].as_str().unwrap();
+        assert!(message.starts_with(INVALID), "{args}: {result}");
     }
     result["error"]["code"].clone()
 }
@@ -102,4 +102,194 @@ async fn render_frame_modes_are_still_exclusive_at_runtime() {
     for args in rejected {
         assert_eq!(code(&s, args.clone()).await, "INVALID_REQUEST", "{args}");
     }
+}
+
+/// A rejection names the failing field (message, `field`, and `opIndex` for an operation),
+/// including the operations read from an `apply_batch_file` JSON file.
+#[tokio::test]
+async fn schema_rejections_name_the_failing_field() {
+    let s = Server::start().await;
+    let p = s.project().await;
+    let inbox = s.root.path().join("test-project/inbox");
+    let ops = r#"[{"op":"create_node","id":"pg","kind":"page","parentId":null,"props":{}},
+        {"op":"create_node","id":"f","kind":"fram","parentId":"pg","props":{}}]"#;
+    std::fs::write(inbox.join("ops.json"), ops).unwrap();
+    std::fs::write(inbox.join("op.json"), r#"[{"op":"create","id":"x"}]"#).unwrap();
+    let file = |key: &str, path: &str| json!({"projectId":p,"idempotencyKey":key,"path":path});
+    let cases = [
+        (
+            "apply_batch_file",
+            file("k", "ops.json"),
+            "operations[1].kind",
+            Some(1),
+        ),
+        (
+            "apply_batch_file",
+            file("k", "op.json"),
+            "operations[0].op",
+            Some(0),
+        ),
+        (
+            "apply_batch_file",
+            file("k.1", "ops.json"),
+            "idempotencyKey",
+            None,
+        ),
+        (
+            "apply_batch_file",
+            json!({"projectId":p,"idempotencyKey":"k"}),
+            "path",
+            None,
+        ),
+        (
+            "apply_batch",
+            json!({"projectId":p,"idempotencyKey":"k","operations":[{"op":"delete_subtree","id":"x","extra":1}]}),
+            "operations[0].extra",
+            Some(0),
+        ),
+        (
+            "import_asset",
+            json!({"projectId":p,"expectedRevision":0,"idempotencyKey":"k","path":"a.png","base64":"AAAA","mediaType":"image/png"}),
+            "base64",
+            None,
+        ),
+        (
+            "render_frame",
+            json!({"projectId":p,"jobId":"j","waitMs":10_001}),
+            "waitMs",
+            None,
+        ),
+        // The variant that accepts every field sent is the one blamed.
+        (
+            "apply_batch",
+            json!({"projectId":p,"idempotencyKey":"k.1","source":"page#a \"A\""}),
+            "idempotencyKey",
+            None,
+        ),
+        (
+            "import_asset",
+            json!({"projectId":p,"expectedRevision":0,"idempotencyKey":"k","base64":"AAAA"}),
+            "mediaType",
+            None,
+        ),
+        (
+            "import_asset",
+            json!({"projectId":p,"expectedRevision":0,"idempotencyKey":"k.1","sourceProjectId":"s","assetId":"a"}),
+            "idempotencyKey",
+            None,
+        ),
+        // A missing discriminator, and a value of the right type that breaks a limit.
+        (
+            "apply_batch",
+            json!({"projectId":p,"idempotencyKey":"k","operations":[{"id":"x"}]}),
+            "operations[0].op",
+            Some(0),
+        ),
+        (
+            "apply_batch",
+            json!({"projectId":p,"idempotencyKey":"k","operations":[{"op":"upsert_token","token":{"id":"t","name":"T","type":"color","value":"#0123456789abcdef0123"}}]}),
+            "operations[0].token.value",
+            Some(0),
+        ),
+    ];
+    for (tool, args, field, op_index) in cases {
+        let error = &s.call(tool, args.clone()).await["error"];
+        assert_eq!(error["code"], "INVALID_REQUEST", "{tool} {args}: {error}");
+        assert_eq!(error["field"], field, "{tool} {args}: {error}");
+        let message = error["message"].as_str().unwrap();
+        assert!(
+            message.starts_with(&format!("{INVALID} at {field}: ")),
+            "{message}"
+        );
+        assert_eq!(error["opIndex"], json!(op_index), "{tool} {args}: {error}");
+    }
+    let message = |error: &Value| error["error"]["message"].as_str().unwrap().to_owned();
+    // Tied variants name what each needs; a missing op lists the accepted ones.
+    let neither = s
+        .call("apply_batch", json!({"projectId":p,"idempotencyKey":"k"}))
+        .await;
+    assert!(neither["error"].get("field").is_none(), "{neither}");
+    assert!(message(&neither).ends_with(": is missing fields; send one of operations, source"));
+    let no_op = json!({"projectId":p,"idempotencyKey":"k","operations":[{"id":"x"}]});
+    let no_op = s.call("apply_batch", no_op).await;
+    assert!(
+        message(&no_op).contains("op: is required: one of \"create_node\""),
+        "{no_op}"
+    );
+    let token = json!({"projectId":p,"idempotencyKey":"k","operations":[{"op":"upsert_token","token":{"id":"t","name":"T","type":"color","value":"#0123456789abcdef0123"}}]});
+    let token = s.call("apply_batch", token).await;
+    assert!(
+        message(&token).ends_with("must have at most 16 characters"),
+        "{token}"
+    );
+    // Caller-chosen key names are echoed at most 64 characters long.
+    let long = "x".repeat(5000);
+    let unknown = s.call("list_projects", json!({ long.clone(): 1 })).await;
+    let field = unknown["error"]["field"].as_str().unwrap();
+    assert_eq!(field, format!("{}…", &long[..64]));
+    assert!(message(&unknown).len() < 200, "{unknown}");
+    // Keys that are empty or could read as several steps are quoted.
+    for (key, quoted) in [
+        ("", r#"[""]"#),
+        ("a.b", r#"["a.b"]"#),
+        ("a\nb", r#"["a\nb"]"#),
+        // C1 controls (U+0085 is a line break) are escaped too; JSON leaves them raw.
+        ("a\u{85}b", r#"["a\u0085b"]"#),
+    ] {
+        let error = s.call("list_projects", json!({ key: 1 })).await;
+        assert_eq!(error["error"]["field"], quoted, "{error}");
+        assert!(
+            message(&error).contains(&format!(" at {quoted}: ")),
+            "{error}"
+        );
+    }
+    // A field every form needs is named; two sources sent together are both named.
+    let no_project = s.call("apply_batch", json!({"idempotencyKey":"k"})).await;
+    assert_eq!(no_project["error"]["field"], "projectId", "{no_project}");
+    assert!(message(&no_project).contains("send one of"), "{no_project}");
+    let both = json!({"projectId":p,"expectedRevision":0,"idempotencyKey":"k","path":"a.png","base64":"AAAA","mediaType":"image/png"});
+    let both = s.call("import_asset", both).await;
+    assert!(
+        message(&both).ends_with("send only one of base64, path"),
+        "{both}"
+    );
+    // Tied forms each reject a field: one no form takes is unknown, not "send only one of".
+    let stray = json!({"projectId":p,"idempotencyKey":"k","operations":[{"op":"upsert_token","token":{"id":"t","name":"T","type":"color","value":{"aliasId":"a","b":1,"default":"#fff"}}}]});
+    let stray = s.call("apply_batch", stray).await;
+    assert_eq!(
+        stray["error"]["field"], "operations[0].token.value.b",
+        "{stray}"
+    );
+    assert!(
+        message(&stray).ends_with("is not an accepted field"),
+        "{stray}"
+    );
+    // An object value is blamed on the object form that accepts its known fields.
+    let alias = json!({"projectId":p,"idempotencyKey":"k","operations":[{"op":"upsert_token","token":{"id":"t","name":"T","type":"color","value":{"aliasId":"a","extra":true}}}]});
+    let alias = s.call("apply_batch", alias).await;
+    assert_eq!(
+        alias["error"]["field"], "operations[0].token.value.extra",
+        "{alias}"
+    );
+    // A nested oneOf counts as its best alternative: the themed form takes two of three.
+    let themed = json!({"projectId":p,"idempotencyKey":"k","operations":[{"op":"upsert_token","token":{"id":"t","name":"T","type":"color","value":{"default":"#fff","themes":{},"extra":true}}}]});
+    let themed = s.call("apply_batch", themed).await;
+    assert_eq!(
+        themed["error"]["field"], "operations[0].token.value.extra",
+        "{themed}"
+    );
+    // The op the caller named selects the variant before field coverage: create_node
+    // accepts kind, but this is a delete_subtree with an extra field.
+    let delete = json!({"projectId":p,"idempotencyKey":"k","operations":[{"op":"delete_subtree","id":"x","kind":"frame","parentId":"p","props":{}}]});
+    let delete = s.call("apply_batch", delete).await;
+    assert_eq!(delete["error"]["opIndex"], 0, "{delete}");
+    assert_eq!(delete["error"]["field"], "operations[0].kind", "{delete}");
+    // import_assets names the same full path in the message and `field`.
+    let items = json!({"projectId":p,"expectedRevision":0,"idempotencyKey":"k","items":[{"sourceProjectId":"s","assetId":"a","mediaType":"image/png"}]});
+    let items = s.call("import_assets", items).await;
+    assert_eq!(items["error"]["field"], "items[0].mediaType", "{items}");
+    assert!(
+        message(&items).contains(" at items[0].mediaType: "),
+        "{items}"
+    );
 }
