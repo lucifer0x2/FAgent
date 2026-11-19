@@ -3,7 +3,7 @@ use crate::{Node, NodeKind, Result, StorageError, MAX_NODES};
 use serde_json::Value;
 use std::collections::HashMap;
 
-const MAX_TREE_DEPTH: usize = 128;
+pub(crate) const MAX_TREE_DEPTH: usize = 128;
 
 /// Stored rows are trusted on scoped reads; malformed props must fail, never panic.
 fn not_object() -> StorageError {

@@ -1,7 +1,12 @@
 //! Instances on the affected nodes, in `Candidate::validate_instances`' order: the
 //! component graph, the expansion of the affected instances (in id order), the expanded
-//! node budget from [`Facts`], each affected node's instance checks, then the properties
-//! of the expanded nodes under every theme.
+//! node budget from [`Facts`] (per-master counters, no expansion), each affected node's
+//! instance checks, then the properties of the expanded nodes under every theme.
+//!
+//! The expansion here serves the property checks only: an override or a theme scope
+//! makes each instance's copy of a master node resolve on its own, and accepting a batch
+//! must equal `Candidate::validate`, which checks every copy. It covers the closure's
+//! instances, never the whole project.
 use super::{affected::Affected, expand::expand, graph, Facts};
 use crate::bench_phase::{count, time};
 use crate::validate::instance_checks::{check_expanded, check_instance_node};
@@ -24,8 +29,9 @@ pub(super) fn check(
         .collect();
     let expanded = time("delta.instances.expand", || expand(after, &instances))?;
     count("delta.instances.expanded", expanded.len());
-    let counts = (before.node_count(), after.node_count());
-    let next = facts.update(counts, ids(), &expanded, max_nodes)?;
+    let next = time("delta.instances.budget", || {
+        facts.update((before, after), ids(), max_nodes)
+    })?;
     let order: Vec<String> = expanded.iter().map(|n| n.id.clone()).collect();
     let placed: BTreeMap<String, _> = expanded.into_iter().map(|n| (n.id.clone(), n)).collect();
     time("delta.instances.nodes", || -> Result<()> {
