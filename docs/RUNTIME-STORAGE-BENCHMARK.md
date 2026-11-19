@@ -4,10 +4,7 @@ Runs A and B measured the Redis/bitcode implementation of Task19.
 [Run C](#results--release-run-c-with-moka-2026-11-03) measured the
 [PostgreSQL snapshot cache](MOKA-SNAPSHOT-CACHE.md) before the HTTP response cache.
 [Run D](#results--release-run-d-with-http-response-cache-2026-11-03) measures
-the HTTP response cache and both node formats. Runs A–D are history: since Task 41
-phase 4 (2026-11-19) the harness measures the engines `sqlite` and `pg-mem`
-(PostgreSQL with node memory, always on); the `pgonly` and `pgmoka` engines and the
-storage Moka cache are gone.
+the HTTP response cache and both node formats.
 
 This measures the Task19 product adapters, not the simplified scalar database
 spike. SQLite is still the default CLI engine. No production engine, dependency,
@@ -15,8 +12,8 @@ service or user data is changed by this benchmark.
 
 ## Run command
 
-Use the same command for the current `sqlite` and `pg-mem` fixtures. Runs A–D
-used it on the historical sources recorded below.
+Use the same command for the current SQLite, PostgreSQL and PostgreSQL+Moka
+fixtures. Runs A and B used it on the historical source recorded below.
 
 ```sh
 bash scripts/task19-bench.sh
@@ -55,9 +52,8 @@ and `http.rows`, with each 304 group under `notModified`. The byte counts are
 response payload bytes. Token counts and the cost to reconstruct objects on a
 rows client are outside the timers.
 
-Node memory and the server's serialized HTTP cache are separate (runs C and D
-measured the former storage Moka cache instead of node memory). `storageHotProof`
-checks the storage side on direct reads.
+The backend's typed Moka snapshot cache and the server's serialized HTTP cache
+are separate. `storageHotProof` checks the former on direct PG+Moka reads.
 HTTP `hotProof` checks both PostgreSQL cells, with one authoritative identity
 probe per request and zero SQL entity reads across the 120 calls per warmed
 group. Thus, a PostgreSQL-only cell can still hit the HTTP cache. The warm HTTP

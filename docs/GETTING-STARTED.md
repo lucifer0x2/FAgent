@@ -109,7 +109,7 @@ Optional PostgreSQL limits (positive integers; unset keeps the default; an inval
 
 `FAGENT_DATABASE_SCHEMA` selects the schema that holds the runtime tables (default `fagent_runtime_v1`, for example `public`); it must be 1–63 lowercase letters, digits or `_`, starting with a letter or `_`.
 
-`npm run dev` accepts the same environment variables. Both providers keep hot projects in node memory (idle projects are dropped after one hour); PostgreSQL reads only `import_asset`/`import_assets` and `apply_batch_file` files from `<data-root>/<slug>/inbox` and stores nothing in the data root. Changing providers selects a different store. SQLite projects stay in the data root and require a separate migration to appear in PostgreSQL. See the [PostgreSQL adapter](POSTGRES-BACKEND.md) for database permissions and transport details, and [backup/restore](BACKUP.md) for project bundles.
+`npm run dev` accepts the same environment variables. PostgreSQL uses an in-process snapshot cache with a one-hour TTL; it reads only `import_asset`/`import_assets` and `apply_batch_file` files from `<data-root>/<slug>/inbox` and stores nothing in the data root. Changing providers selects a different store. SQLite projects stay in the data root and require a separate migration to appear in PostgreSQL. See the [PostgreSQL adapter](POSTGRES-BACKEND.md) for database permissions and transport details, and [backup/restore](BACKUP.md) for project bundles.
 
 ## Share a read-only viewer
 

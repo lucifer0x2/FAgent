@@ -24,7 +24,7 @@ pub fn staged(state: &mut ProjectState, runs: usize) {
             staged.abort()
         },
     );
-    row("begin + abort (1 update)", abort, "clone dropped");
+    row("begin + abort (1 update)", abort, "rolled back");
     let wide = each(
         runs,
         |run| format!("bench_staged_{run}"),
@@ -38,7 +38,7 @@ pub fn staged(state: &mut ProjectState, runs: usize) {
     row(
         "begin + abort (index 0 in wide frame)",
         wide,
-        "renumbered clone dropped",
+        "renumber undone",
     );
 }
 
