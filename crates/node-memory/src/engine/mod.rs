@@ -12,7 +12,7 @@ mod stats;
 
 use crate::{Clock, Eviction, Registry, RegistryConfig};
 pub use config::MemoryConfig;
-use fagent_scene_input::{Result, Snapshot};
+use fagent_scene_input::{read_scope::ReadView, Result, Snapshot};
 pub use project::HotProject;
 pub use stats::MemoryStats;
 pub(crate) use stats::Stats;
@@ -118,15 +118,9 @@ impl NodeMemory {
         evicted
     }
 
-    /// A full copy of the latest committed revision in the public entity order (nodes
-    /// by parent, sort key and id; tokens, styles, assets, fonts and notes by id).
+    /// A full copy of the latest committed revision; see [`full_snapshot`].
     pub fn to_snapshot(&self, project_id: &str) -> Option<Snapshot> {
-        let mut snapshot = self.project(project_id)?.view().to_snapshot();
-        snapshot.tokens.sort_by(|a, b| a.id.cmp(&b.id));
-        snapshot.styles.sort_by(|a, b| a.id.cmp(&b.id));
-        snapshot.assets.sort_by(|a, b| a.id.cmp(&b.id));
-        snapshot.fonts.sort_by(|a, b| a.id.cmp(&b.id));
-        Some(snapshot)
+        Some(full_snapshot(&self.project(project_id)?.view()))
     }
 
     pub fn stats(&self) -> MemoryStats {
@@ -147,6 +141,19 @@ impl NodeMemory {
             Stats::bump(counter);
         }
     }
+}
+
+/// A full copy of one published revision in the public entity order, as the
+/// database adapters return it: nodes by parent, sort key and id; tokens, styles,
+/// assets, fonts and notes by id (bytewise).
+pub fn full_snapshot(view: &ReadView) -> Snapshot {
+    let mut snapshot = view.to_snapshot();
+    snapshot.tokens.sort_by(|a, b| a.id.cmp(&b.id));
+    snapshot.styles.sort_by(|a, b| a.id.cmp(&b.id));
+    snapshot.assets.sort_by(|a, b| a.id.cmp(&b.id));
+    snapshot.fonts.sort_by(|a, b| a.id.cmp(&b.id));
+    snapshot.notes.sort_by(|a, b| a.id.cmp(&b.id));
+    snapshot
 }
 
 fn nanos(clock: &dyn Clock) -> u64 {

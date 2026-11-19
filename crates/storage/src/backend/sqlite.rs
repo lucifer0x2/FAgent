@@ -25,7 +25,7 @@ impl SqliteBackend {
         }
     }
 
-    /// Today's shared snapshot with the identity of the same read.
+    /// The database shared snapshot with the identity of the same read.
     fn shared_with_identity(&self, project: &str) -> Result<crate::memory::Loaded> {
         let (snapshot, identity) = self.database_snapshot(project)?;
         let indexes = Arc::new(crate::RevisionIndexes::new(&snapshot.nodes));
@@ -83,12 +83,8 @@ impl StorageBackend for SqliteBackend {
     }
 
     fn snapshot(&self, project: &str) -> Result<Snapshot> {
-        self.pins
-            .read(&self.store, project, |handle| {
-                let snapshot = handle.snapshot()?;
-                Ok((identity::snapshot_meta(&snapshot), snapshot))
-            })
-            .map(|(_, snapshot)| snapshot)
+        self.snapshot_with_cache_identity(project)
+            .map(|(snapshot, _)| Arc::unwrap_or_clone(snapshot))
     }
 
     fn snapshot_cache_identity(&self, project: &str) -> Result<Option<SnapshotCacheIdentity>> {
@@ -97,7 +93,7 @@ impl StorageBackend for SqliteBackend {
             .map(|(_, identity)| identity)
     }
 
-    fn shared_snapshot(&self, project: &str) -> Result<crate::SharedSnapshot> {
+    fn shared_database(&self, project: &str) -> Result<crate::SharedSnapshot> {
         self.shared_with_identity(project).map(|(shared, _)| shared)
     }
 
@@ -129,7 +125,10 @@ impl StorageBackend for SqliteBackend {
         &self,
         project: &str,
     ) -> Result<(Arc<Snapshot>, Option<SnapshotCacheIdentity>)> {
-        self.database_snapshot(project)
+        self.store.root.memory.full_read(
+            || self.snapshot_cache_identity(project),
+            || self.database_snapshot(project),
+        )
     }
 
     fn database_snapshot(

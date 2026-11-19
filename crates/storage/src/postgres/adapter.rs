@@ -102,8 +102,8 @@ impl StorageBackend for PostgresBackend {
     }
 
     fn snapshot(&self, project: &str) -> Result<Snapshot> {
-        self.read_snapshot(project)
-            .map(|(snapshot, _, _)| Arc::unwrap_or_clone(snapshot))
+        self.snapshot_with_cache_identity(project)
+            .map(|(snapshot, _)| Arc::unwrap_or_clone(snapshot))
     }
 
     fn snapshot_cache_identity(&self, project: &str) -> Result<Option<SnapshotCacheIdentity>> {
@@ -124,7 +124,10 @@ impl StorageBackend for PostgresBackend {
         &self,
         project: &str,
     ) -> Result<(Arc<Snapshot>, Option<SnapshotCacheIdentity>)> {
-        self.database_snapshot(project)
+        self.memory.full_read(
+            || self.snapshot_cache_identity(project),
+            || self.database_snapshot(project),
+        )
     }
 
     fn database_snapshot(
@@ -142,7 +145,7 @@ impl StorageBackend for PostgresBackend {
         Ok((snapshot, Some(identity)))
     }
 
-    fn shared_snapshot(&self, project: &str) -> Result<crate::SharedSnapshot> {
+    fn shared_database(&self, project: &str) -> Result<crate::SharedSnapshot> {
         self.shared_with_identity(project).map(|(shared, _)| shared)
     }
 

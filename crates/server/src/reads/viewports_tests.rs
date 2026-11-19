@@ -5,7 +5,7 @@ use crate::reads::scoped_tree_fixture::fixture;
 #[test]
 fn scoped_viewport_ids_match_full_expansion_for_authored_frames() {
     let (_dir, storage, id) = fixture();
-    let shared = storage.shared_snapshot(&id).unwrap();
+    let shared = storage.shared_database(&id).unwrap();
     let scoped = shared
         .trusted_scoped()
         .unwrap()

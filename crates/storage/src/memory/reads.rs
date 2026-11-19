@@ -1,4 +1,5 @@
-//! Scoped reads from the engine's published views.
+//! Latest-revision reads from the engine's published views: scoped reads and full
+//! snapshots.
 //!
 //! A read is served from an immutable whole-project view only when memory holds the
 //! database's current revision of the same incarnation, as the backend's identity
@@ -8,10 +9,11 @@
 use super::identity::Tag;
 use super::stats::bump;
 use super::{Loaded, Memory, ScopedRead};
-use crate::{Result, SharedSnapshot, SnapshotCacheIdentity};
+use crate::{Result, SharedSnapshot, Snapshot, SnapshotCacheIdentity};
 use fagent_scene_input::read_scope::ReadView;
 use std::cmp::Ordering;
 use std::panic::{catch_unwind, AssertUnwindSafe};
+use std::sync::atomic::AtomicU64;
 use std::sync::Arc;
 
 enum Served {
@@ -24,10 +26,19 @@ enum Served {
     Pass,
 }
 
+/// What one latest-revision read runs on.
+enum Latest<T> {
+    Memory(Arc<ReadView>),
+    Database(T),
+}
+
+/// A full snapshot with the identity of the read that produced it.
+pub(crate) type Full = (Arc<Snapshot>, Option<SnapshotCacheIdentity>);
+
 impl Memory {
     /// The snapshot a scoped read of `target` runs on: a published view when it is
     /// at the revision `probe` reports, else `load`, which then (re)loads memory.
-    /// `load`'s errors are the database path's.
+    /// `load`'s errors are the database path's; a failed probe only skips memory.
     pub fn scoped_read(
         &self,
         target: &str,
@@ -36,6 +47,47 @@ impl Memory {
     ) -> Result<ScopedRead> {
         let counters = &self.inner.counters;
         let identity = probe().ok().flatten();
+        let hits = (&counters.read_hits, &counters.read_fallbacks);
+        let (latest, _) = self.latest(target, identity, load, |shared| &shared.snapshot, hits)?;
+        Ok(match latest {
+            Latest::Memory(view) => ScopedRead {
+                shared: SharedSnapshot::memory(view),
+                from_memory: true,
+            },
+            Latest::Database(shared) => ScopedRead::database(shared),
+        })
+    }
+
+    /// The latest revision as a full snapshot, with the identity of the same read: a
+    /// copy of the published view when memory holds the revision `probe` reports,
+    /// else `load` (the database), which then (re)loads memory. Probe errors are the
+    /// read's errors, as for a database read.
+    pub fn full_read(
+        &self,
+        probe: impl FnOnce() -> Result<Option<SnapshotCacheIdentity>>,
+        load: impl FnOnce() -> Result<Full>,
+    ) -> Result<Full> {
+        let counters = &self.inner.counters;
+        let identity = probe()?;
+        let hits = (&counters.full_hits, &counters.full_fallbacks);
+        let (latest, identity) = self.latest("", identity, load, |s| s.as_ref(), hits)?;
+        Ok(match latest {
+            Latest::Memory(view) => (Arc::new(fagent_node_memory::full_snapshot(&view)), identity),
+            Latest::Database(snapshot) => (snapshot, identity),
+        })
+    }
+
+    /// A published view of `target` at `identity`, or `load`'s value, adopted into
+    /// memory when memory was cold or behind. Returns the identity the result is at.
+    fn latest<T>(
+        &self,
+        target: &str,
+        identity: Option<SnapshotCacheIdentity>,
+        load: impl FnOnce() -> Result<(T, Option<SnapshotCacheIdentity>)>,
+        snapshot: impl FnOnce(&T) -> &Snapshot,
+        (hits, fallbacks): (&AtomicU64, &AtomicU64),
+    ) -> Result<(Latest<T>, Option<SnapshotCacheIdentity>)> {
+        let counters = &self.inner.counters;
         let served = match &identity {
             Some(identity) => catch_unwind(AssertUnwindSafe(|| self.serve(identity, target)))
                 .unwrap_or_else(|_| {
@@ -46,22 +98,19 @@ impl Memory {
         };
         self.inner.engine.maybe_expire();
         if let Served::Hit(view) = served {
-            bump(&counters.read_hits);
-            return Ok(ScopedRead {
-                shared: SharedSnapshot::memory(view),
-                from_memory: true,
-            });
+            bump(hits);
+            return Ok((Latest::Memory(view), identity));
         }
-        bump(&counters.read_fallbacks);
-        let (shared, loaded) = load()?;
-        if let (Served::Cold | Served::Stale, Some(loaded)) = (&served, loaded) {
+        bump(fallbacks);
+        let (value, loaded) = load()?;
+        if let (Served::Cold | Served::Stale, Some(loaded)) = (&served, &loaded) {
             let reload = matches!(served, Served::Stale);
-            let adopt = AssertUnwindSafe(|| self.adopt(&shared, loaded, reload));
+            let adopt = AssertUnwindSafe(|| self.adopt(snapshot(&value), loaded.clone(), reload));
             if catch_unwind(adopt).is_err() {
                 bump(&counters.read_errors);
             }
         }
-        Ok(ScopedRead::database(shared))
+        Ok((Latest::Database(value), loaded))
     }
 
     fn serve(&self, identity: &SnapshotCacheIdentity, target: &str) -> Served {
@@ -89,9 +138,8 @@ impl Memory {
     /// Loads the database snapshot into memory, tagged with the incarnation it came
     /// from. A failed load (for example stored rows the engine rejects) is remembered
     /// for that identity so later reads do not retry it.
-    fn adopt(&self, shared: &SharedSnapshot, identity: SnapshotCacheIdentity, reload: bool) {
+    fn adopt(&self, snapshot: &Snapshot, identity: SnapshotCacheIdentity, reload: bool) {
         let (engine, tags, counters) = (&self.inner.engine, &self.inner.tags, &self.inner.counters);
-        let snapshot = &shared.snapshot;
         if identity.revision != snapshot.revision || identity.project_id != snapshot.project_id {
             return;
         }
@@ -114,7 +162,7 @@ impl Memory {
             }
         }
         engine.evict(&id);
-        let tag = match engine.load(snapshot.as_ref().clone()) {
+        let tag = match engine.load(snapshot.clone()) {
             Ok(project) => {
                 bump(if reload {
                     &counters.read_reloads

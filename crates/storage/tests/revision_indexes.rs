@@ -6,8 +6,8 @@ use serde_json::json;
 
 fn exercise(storage: &Storage, p: &ProjectHandle) {
     seed(p);
-    let old = storage.shared_snapshot(p.id()).unwrap();
-    let again = storage.shared_snapshot(p.id()).unwrap();
+    let old = storage.shared_database(p.id()).unwrap();
+    let again = storage.shared_database(p.id()).unwrap();
     assert_eq!(old.indexes.page("instance"), Some("p1"));
     assert_eq!(
         old.indexes.component_users("master").collect::<Vec<_>>(),
@@ -42,7 +42,7 @@ fn exercise(storage: &Storage, p: &ProjectHandle) {
         .push(update("missing", json!({"width":1})));
     assert!(p.apply_batch(failed).is_err());
     assert_eq!(
-        storage.shared_snapshot(p.id()).unwrap().snapshot.revision,
+        storage.shared_database(p.id()).unwrap().snapshot.revision,
         base
     );
 
@@ -52,7 +52,7 @@ fn exercise(storage: &Storage, p: &ProjectHandle) {
         ..preview.clone()
     };
     p.apply_batch(committed.clone()).unwrap();
-    let next = storage.shared_snapshot(p.id()).unwrap();
+    let next = storage.shared_database(p.id()).unwrap();
     assert_eq!(next.snapshot.revision, base + 1);
     assert!(next.indexes.reference_users("style:fill").next().is_none());
     assert_eq!(
@@ -67,7 +67,7 @@ fn exercise(storage: &Storage, p: &ProjectHandle) {
     );
     assert!(p.apply_batch(committed).unwrap().replayed);
     assert_eq!(
-        storage.shared_snapshot(p.id()).unwrap().snapshot.revision,
+        storage.shared_database(p.id()).unwrap().snapshot.revision,
         base + 1
     );
     // Node memory is always on: the commit left the project resident at its
@@ -81,7 +81,7 @@ fn exercise(storage: &Storage, p: &ProjectHandle) {
         "new-user",
         vec![update("instance", json!({"componentId":"leaf"}))],
     );
-    let moved = storage.shared_snapshot(p.id()).unwrap();
+    let moved = storage.shared_database(p.id()).unwrap();
     assert!(moved.indexes.component_users("master").next().is_none());
     assert_eq!(
         moved.indexes.component_users("leaf").collect::<Vec<_>>(),
@@ -101,7 +101,7 @@ fn exercise(storage: &Storage, p: &ProjectHandle) {
 
     // A resource write gets a fresh identity even if topology is unchanged.
     strict(p, "resource-index", vec![token("base", json!("#445566"))]);
-    let resources = storage.shared_snapshot(p.id()).unwrap();
+    let resources = storage.shared_database(p.id()).unwrap();
     assert_eq!(resources.snapshot.revision, base + 3);
     assert_eq!(
         resources.edit_context(vec!["p1".into()]).unwrap(),
@@ -142,16 +142,16 @@ fn postgres_generation_namespace_and_schema_are_authoritative() {
     let _restore = Restore(namespace);
     let storage = Storage::new(backend);
     let p = project(&storage, "recreated-index");
-    let old = storage.shared_snapshot(p.id()).unwrap();
+    let old = storage.shared_database(p.id()).unwrap();
     sql()
         .execute(
             "DELETE FROM fagent_runtime_v1.projects WHERE project_id=$1",
             &[&p.id()],
         )
         .unwrap();
-    assert!(storage.shared_snapshot(p.id()).is_err());
+    assert!(storage.shared_database(p.id()).is_err());
     sql().execute("INSERT INTO fagent_runtime_v1.projects(project_id,slug,name,schema_version,revision) VALUES($1,$2,$3,$4,0)", &[&p.id(), &old.snapshot.slug, &b"Replacement".to_vec(), &(SCHEMA_VERSION as i32)]).unwrap();
-    let recreated = storage.shared_snapshot(p.id()).unwrap();
+    let recreated = storage.shared_database(p.id()).unwrap();
     assert_eq!(old.snapshot.revision, recreated.snapshot.revision);
     let replacement = uuid::Uuid::new_v4().to_string();
     sql()
@@ -160,10 +160,10 @@ fn postgres_generation_namespace_and_schema_are_authoritative() {
             &[&replacement],
         )
         .unwrap();
-    let rotated = storage.shared_snapshot(p.id()).unwrap();
+    let rotated = storage.shared_database(p.id()).unwrap();
     assert_eq!(rotated.snapshot.revision, recreated.snapshot.revision);
     sql().execute("UPDATE fagent_runtime_v1.projects SET schema_version=schema_version+1 WHERE project_id=$1", &[&p.id()]).unwrap();
     assert!(
-        matches!(storage.shared_snapshot(p.id()), Err(error) if error.code=="SCHEMA_UNSUPPORTED")
+        matches!(storage.shared_database(p.id()), Err(error) if error.code=="SCHEMA_UNSUPPORTED")
     );
 }

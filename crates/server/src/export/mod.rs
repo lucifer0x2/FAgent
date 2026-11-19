@@ -34,8 +34,10 @@ pub(crate) async fn export_nodes(state: &AppState, args: Value) -> Result<Value>
     if let Some(settings) = &req.settings {
         check_export_settings(settings, "settings")?;
     }
+    // The latest revision's read capability: a node-memory view when memory is
+    // current (resolved through `trusted_scoped`), else the database snapshot.
     let shared = state
-        .db(move |store| store.shared_snapshot(&req.project_id))
+        .db(move |store| Ok(store.reader_snapshot(&req.project_id)?.shared))
         .await?;
     let snapshot = &shared.snapshot;
     if req.revision.is_some_and(|r| r != snapshot.revision) {
