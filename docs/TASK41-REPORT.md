@@ -61,7 +61,7 @@ on: every latest-revision read and every batch on SQLite and PostgreSQL goes thr
   snapshot is never served (test `a_late_fill_of_the_pre_commit_snapshot_is_never_served_at_the_new_revision`).
 - New: `Storage::memory_stats()` (`NodeMemoryStats`: engine stats, resident bytes, read
   hits/fallbacks/loads/reloads/errors, write hits/loads/aborts), `memory_read_failed()`,
-  `evict_memory`, `memory_snapshot`.
+  `evict_memory`, `memory_snapshot` (the last two removed in phase 4; see its "Survivors").
 
 ### Removed
 
@@ -100,8 +100,8 @@ on: every latest-revision read and every batch on SQLite and PostgreSQL goes thr
   shapes (current, old unrelated, old overlapping, legacy without scope, gap, base ahead), more than
   1,500 comparisons with `scoped::check`/`BatchScope`: identical changed ids, footprint, guard errors
   and `BatchResult`.
-- `node_memory_writes`: a warm store against a store evicted before every request; after every
-  commit the memory snapshot equals the database snapshot; at the current base every result or
+- `node_memory_writes`: a warm store against a store evicted before every request (since phase 4 a
+  newly opened store per request); after every commit the memory snapshot equals the database snapshot; at the current base every result or
   error equals `Candidate` apply + `prune_links` + `validate()`. PostgreSQL run: 243 committed, 81
   rejected, 35 conflicts, 174 checked against `Candidate`, 0 divergences.
 - New `postgres_memory_freshness`: two backends on one namespace; after B commits, A never reads
@@ -693,9 +693,16 @@ files, +893 / −1,784. Merge conflicts: `crates/storage/src/revision_indexes.rs
   validation, `Project::persist` (asset import on SQLite) and the test oracles.
 - Server HTTP snapshot response cache (Moka, encoded bytes keyed by `SnapshotCacheIdentity`, format and visibility):
   unchanged, documented in [MOKA-SNAPSHOT-CACHE](MOKA-SNAPSHOT-CACHE.md).
-- `Storage::memory_snapshot` and `evict_memory`: kept. Their consumers are integration tests (`node_memory_i4`,
-  `node_memory_i5`, `task28_review_fixes`, `node_memory_writes`, `postgres_memory_freshness`) and the bench's cold
-  cases, which cannot reach `#[cfg(test)]` items; both are two-line delegations with no production caller.
+- `Storage`/`StorageBackend::memory_snapshot` and `evict_memory`: first kept for their test and bench consumers, then
+  removed by the user's decision on 2026-11-19 (no production caller), with the internal `Memory::snapshot`.
+  `Memory::evict` stays (imports, privacy updates, `open_project`, persist failures). Tests now read "what memory
+  holds" through the memory-first `snapshot()`, asserting a `full_hits` increment (no `full_fallbacks`) and equality
+  with `database_snapshot`; an eviction shows as `memory.evictions` + 1 and a next full read that falls back and
+  loads (`full_fallbacks`, `read_loads`). "Cold" is a newly opened `Store`/`Storage`/`PostgresBackend` on the same
+  database or data root, whose memory starts empty (`node_memory_writes`, `task28_review_fixes`). The bench's cold
+  rows open a new backend per run outside the timed region (probing the identity so a session is open) and assert one
+  load and one admission per run; they no longer time freeing the previous resident copy, and the commit's statements
+  are prepared on that run's new session.
 
 ### Verification
 
@@ -760,6 +767,9 @@ during every run (phase 3: 2.3–3.5); other workloads were running on the machi
   full read now pays load and admission (1.2–1.4 s at 200k) instead of a database read (~0.2 s); later reads are
   memory hits.
 - `get_design_context` at 200k measured 0.51–0.53 ms (phase 3: 0.83); the cause was not isolated.
+- The cold rows above evicted the project on the same backend inside the timed region. Since the removal of
+  `evict_memory` (see "Survivors") the bench names them "cold commit (load, admission)" and "cold full snapshot()
+  (load, admission)" and runs each on a newly opened backend; they were not remeasured at 200k.
 
 ### Behavior changes
 
