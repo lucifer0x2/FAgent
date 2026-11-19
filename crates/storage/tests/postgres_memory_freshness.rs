@@ -28,14 +28,18 @@ fn read(storage: &Storage, id: &str) -> (bool, u64, Value) {
     (read.from_memory, read.shared.snapshot.revision, name)
 }
 
-/// Memory's copy equals the database's, node order aside.
+/// The latest full snapshot is served from memory and, node order aside, equals the
+/// database's.
 fn assert_memory_matches_database(storage: &Storage, id: &str) {
     let sorted = |mut snapshot: Snapshot| {
         snapshot.nodes.sort_by(|a, b| a.id.cmp(&b.id));
         normalized(snapshot)
     };
-    let memory = storage.memory_snapshot(id).expect("resident");
-    assert_eq!(sorted(memory), sorted(storage.snapshot(id).unwrap()));
+    let hits = storage.memory_stats().full_hits;
+    let memory = storage.snapshot(id).unwrap();
+    assert_eq!(storage.memory_stats().full_hits, hits + 1, "resident");
+    let database = storage.database_snapshot(id).unwrap().0.as_ref().clone();
+    assert_eq!(sorted(memory), sorted(database));
 }
 
 #[test]

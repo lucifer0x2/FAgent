@@ -78,11 +78,6 @@ impl Memory {
         bump(&counters.read_fallbacks);
     }
 
-    /// The resident project's latest published revision as a full snapshot.
-    pub fn snapshot(&self, project: &str) -> Option<crate::Snapshot> {
-        self.inner.engine.to_snapshot(project)
-    }
-
     pub fn stats(&self) -> NodeMemoryStats {
         self.inner
             .counters

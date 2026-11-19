@@ -89,17 +89,20 @@ fn sqlite_i4_delta_smoke_and_db_failure_rollback() {
     }
     smoke(&pair);
     let old = pair.warm.snapshot(&pair.project).unwrap();
+    let before = pair.warm.memory_stats();
     let result = pair.both(&json!({"projectId":pair.project,"idempotencyKey":"db-fail","operations":[{"op":"update_node","id":"r0","props":{"name":"fail"}}]}), false);
     assert!(result.get("error").is_some());
-    assert!(
-        pair.warm.memory_snapshot(&pair.project).is_none(),
-        "evicted"
-    );
-    assert_eq!(pair.warm.memory_stats().write_aborts, 1);
+    let failed = pair.warm.memory_stats();
+    assert_eq!(failed.write_aborts, 1);
+    assert_eq!(failed.memory.evictions, before.memory.evictions + 1);
     assert_eq!(
         pair.warm.snapshot(&pair.project).unwrap().revision,
         old.revision
     );
+    // Evicted: the next full read came from the database and loaded the project.
+    let reread = pair.warm.memory_stats();
+    assert_eq!(reread.full_fallbacks, failed.full_fallbacks + 1, "evicted");
+    assert_eq!(reread.read_loads, failed.read_loads + 1);
     pair.assert_rows(1);
     let result = pair.both(&json!({"projectId":pair.project,"idempotencyKey":"after-fail","operations":[{"op":"update_node","id":"r0","props":{"width":22}}]}), false);
     assert_eq!(result["committedRevision"], old.revision + 1);

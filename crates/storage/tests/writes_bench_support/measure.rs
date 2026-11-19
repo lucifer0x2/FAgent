@@ -19,14 +19,26 @@ pub struct Samples {
 impl Samples {
     /// Times `action(run)` for every run; warm-up runs are recorded nowhere.
     pub fn collect(mut action: impl FnMut(usize)) -> Self {
+        Self::collect_prepared(|_| (), |run, _| action(run), drop)
+    }
+
+    /// As `collect`, timing only `action(run, &state)`: `setup(run)` builds the state
+    /// before the clock starts and `finish(state)` checks and drops it after it stops.
+    pub fn collect_prepared<S>(
+        mut setup: impl FnMut(usize) -> S,
+        mut action: impl FnMut(usize, &S),
+        mut finish: impl FnMut(S),
+    ) -> Self {
         let mut samples = Self::default();
         for run in 0..WARMUP + RUNS {
+            let state = setup(run);
             bench_phase::take();
             bench_phase::take_counts();
             let start = Instant::now();
-            action(run);
+            action(run, &state);
             let total = start.elapsed().as_secs_f64() * 1e3;
             let (phases, counts) = (bench_phase::take(), bench_phase::take_counts());
+            finish(state);
             if run >= WARMUP {
                 samples.push(total, phases, counts);
             }

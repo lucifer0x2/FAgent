@@ -62,6 +62,7 @@ fn i5_sqlite_stale_strict_dispatch_rollback_and_retained_reader() {
     );
     assert_eq!(conflict["error"]["code"], "REVISION_CONFLICT");
     let old = hot_reader();
+    let before = pair.warm.memory_stats();
     let failed = send(
         "sql-fail",
         4,
@@ -70,8 +71,9 @@ fn i5_sqlite_stale_strict_dispatch_rollback_and_retained_reader() {
     );
     assert!(failed.get("error").is_some());
     // The failed persist dropped the staged batch and evicted the project.
-    assert!(pair.warm.memory_snapshot(&pair.project).is_none());
-    assert_eq!(pair.warm.memory_stats().write_aborts, 1);
+    let aborted = pair.warm.memory_stats();
+    assert_eq!(aborted.write_aborts, 1);
+    assert_eq!(aborted.memory.evictions, before.memory.evictions + 1);
     assert_eq!(old.shared.snapshot.revision, 4);
     assert_eq!(
         old.shared.scoped().unwrap().node("r0").unwrap().props["name"],
@@ -79,6 +81,9 @@ fn i5_sqlite_stale_strict_dispatch_rollback_and_retained_reader() {
     );
     let after = pair.warm.snapshot(&pair.project).unwrap();
     assert_eq!(after.revision, 4);
+    let reread = pair.warm.memory_stats();
+    assert_eq!(reread.full_fallbacks, aborted.full_fallbacks + 1, "evicted");
+    assert_eq!(reread.read_loads, aborted.read_loads + 1);
     assert_eq!(
         after.nodes.iter().find(|n| n.id == "r0").unwrap().props["name"],
         "Allowed stale"

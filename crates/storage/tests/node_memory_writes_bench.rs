@@ -4,8 +4,10 @@
 //! warm-ups (median, p95, min, per-phase medians): small props edit, master edit with
 //! many instances, reparent, token edit, note create, page create, the scoped part of
 //! `get_design_context` on one frame, a latest-revision full `snapshot()` from memory
-//! against `database_snapshot`, the first full read of a cold project (evict, load,
-//! admission), and a cold commit (evict, load, admission).
+//! against `database_snapshot`, the first full read of a cold project (load,
+//! admission), and a cold commit (load, admission). A cold case runs on a newly
+//! opened backend, whose node memory is empty; opening it and its first database
+//! round trip are not timed.
 //! Prints counts and timings only, one JSON line per row.
 //!
 //! `scripts/task19-check.sh cargo test --release -p fagent-storage \
@@ -86,17 +88,52 @@ struct Writer {
 
 impl Writer {
     fn commit(&mut self, pages: &[String], ops: Value) {
+        let project = self.project.clone();
+        self.commit_on(&project, pages, ops);
+    }
+
+    /// `commit` through another backend's handle of the same project.
+    fn commit_on(&mut self, project: &ProjectHandle, pages: &[String], ops: Value) {
         let request: ScopedBatchRequest = serde_json::from_value(json!({"projectId":self.id,
             "expectedRevision":self.revision,
             "idempotencyKey":format!("bench-{}", uuid::Uuid::new_v4().simple()),
             "pageIds":pages,"operations":ops}))
         .unwrap();
-        self.revision = self
-            .project
+        self.revision = project
             .apply_scoped_batch(request)
             .unwrap()
             .committed_revision;
     }
+}
+
+/// A newly opened backend (empty node memory) and its handle of `id`. The identity
+/// probe opens its database session, so a timed run starts with a connection.
+fn cold(url: &str, id: &str) -> (Storage, Arc<ProjectHandle>) {
+    let storage = storage(url);
+    storage.snapshot_cache_identity(id).unwrap();
+    let project = storage.open_project(id).unwrap();
+    assert_eq!(
+        storage.memory_stats().memory.loads,
+        0,
+        "memory starts empty"
+    );
+    (storage, project)
+}
+
+/// A cold run loaded and admitted the project once, outside reads.
+fn assert_one_load(storage: &Storage, writes: u64, full_fallbacks: u64) {
+    let stats = storage.memory_stats();
+    assert_eq!(
+        (stats.memory.loads, stats.memory.admissions),
+        (1, 1),
+        "{stats:?}"
+    );
+    assert_eq!(
+        (stats.write_hits, stats.write_loads),
+        (0, writes),
+        "{stats:?}"
+    );
+    assert_eq!((stats.full_hits, stats.full_fallbacks), (0, full_fallbacks));
 }
 
 fn print(label: &str, nodes: usize, case: &str, report: Value) {
@@ -160,27 +197,25 @@ fn generated(url: &str, nodes: usize) {
         &format!("get_design_context root_10 ({closure} resolved nodes)"),
         report,
     );
-    full_reads(&storage, label, authored, &id);
+    full_reads(&storage, url, label, authored, &id);
     let pages = vec![targets.page(&targets.text)];
     let text = targets.text.clone();
-    let report = Samples::collect(|run| {
-        storage.evict_memory(&id);
-        let ops = json!([{"op":"update_node","id":text,"props":{"name":format!("cold{run}")}}]);
-        writer.commit(&pages, ops);
-    })
+    let report = Samples::collect_prepared(
+        |_| cold(url, &id),
+        |run, (_, project)| {
+            let ops = json!([{"op":"update_node","id":text,"props":{"name":format!("cold{run}")}}]);
+            writer.commit_on(project, &pages, ops);
+        },
+        |(storage, _)| assert_one_load(&storage, 1, 0),
+    )
     .report();
-    print(
-        label,
-        authored,
-        "cold commit (evict, load, admission)",
-        report,
-    );
+    print(label, authored, "cold commit (load, admission)", report);
 }
 
 /// Latest-revision full reads: `snapshot()` served from the resident copy, the same
-/// revision read from the database only, and `snapshot()` of a cold project (the
-/// read loads it into memory and pays the admission).
-fn full_reads(storage: &Storage, label: &str, authored: usize, id: &str) {
+/// revision read from the database only, and `snapshot()` on a newly opened backend
+/// (the read loads the project into memory and pays the admission).
+fn full_reads(storage: &Storage, url: &str, label: &str, authored: usize, id: &str) {
     // The write cases above added nodes; every read must return the current revision.
     let current = storage.database_snapshot(id).unwrap().0.nodes.len();
     let hits = storage.memory_stats().full_hits;
@@ -201,15 +236,19 @@ fn full_reads(storage: &Storage, label: &str, authored: usize, id: &str) {
     })
     .report();
     print(label, authored, "full database_snapshot", report);
-    let report = Samples::collect(|_| {
-        storage.evict_memory(id);
-        assert_eq!(storage.snapshot(id).unwrap().nodes.len(), current);
-    })
+    let report = Samples::collect_prepared(
+        |_| cold(url, id).0,
+        |_, storage| assert_eq!(storage.snapshot(id).unwrap().nodes.len(), current),
+        |storage| {
+            assert_one_load(&storage, 0, 1);
+            assert_eq!(storage.memory_stats().read_loads, 1, "the read loaded it");
+        },
+    )
     .report();
     print(
         label,
         authored,
-        "cold full snapshot() (evict, load, admission)",
+        "cold full snapshot() (load, admission)",
         report,
     );
 }
