@@ -128,7 +128,7 @@ fn closure(
 }
 
 /// `id` and its ancestors that are component masters, nearest first (bounded walk).
-fn component_ancestors<'a>(view: &'a dyn Lookup, id: &str) -> Vec<&'a str> {
+pub(super) fn component_ancestors<'a>(view: &'a dyn Lookup, id: &str) -> Vec<&'a str> {
     let mut current = view.node(id);
     let mut masters = Vec::new();
     for _ in 0..128 {
