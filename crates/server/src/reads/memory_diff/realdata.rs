@@ -1,6 +1,6 @@
 //! Real-data differential and timing on a disposable restore of a native backup
 //! (never the live cluster). Both states share the restored database, each with its
-//! own node memory and snapshot cache as in production; `off` reads the database
+//! own node memory as in production; `off` reads the database
 //! snapshot only. Commits alternate between the two, so `on` also sees writes of
 //! another writer and must catch up through the freshness probe.
 //!
@@ -8,14 +8,12 @@
 //!   --release -p fagent-server --lib memory_diff::realdata -- --ignored --nocapture`
 use super::queries::{edges, edits, inner, roots, Caps, Targets};
 use super::{timing, Pair};
-use fagent_storage::{PostgresBackend, PostgresConfig, SnapshotCache, Storage};
+use fagent_storage::{PostgresBackend, PostgresConfig, Storage};
 use serde_json::json;
 
 pub(super) fn storage(url: &str) -> Storage {
     let config = PostgresConfig::new(url);
-    let backend = PostgresBackend::with_config(config).unwrap();
-    let cache = SnapshotCache::new(backend.cache_namespace());
-    Storage::new(backend.with_cache(cache).unwrap())
+    Storage::new(PostgresBackend::with_config(config).unwrap())
 }
 
 #[tokio::test(flavor = "multi_thread")]

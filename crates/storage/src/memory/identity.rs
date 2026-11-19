@@ -17,8 +17,6 @@ pub(super) struct Tag {
     pub failed: bool,
     /// The error a write got when loading this identity, returned to later writes.
     pub error: Option<StorageError>,
-    /// Duplicate cache entries are removed once per load.
-    pub cache_cleaned: bool,
 }
 
 impl Tag {
@@ -47,7 +45,6 @@ impl Tag {
             revision: identity.revision,
             failed: false,
             error: None,
-            cache_cleaned: false,
         }
     }
 
@@ -95,18 +92,6 @@ impl Tags {
             .and_then(|tag| tag.error.clone())
     }
 
-    pub fn claim_cache_cleanup(&self, project: &str, load: LoadId) -> bool {
-        let mut tags = self.lock();
-        let Some(tag) = tags.get_mut(project) else {
-            return false;
-        };
-        if tag.load_id != Some(load) || tag.cache_cleaned {
-            return false;
-        }
-        tag.cache_cleaned = true;
-        true
-    }
-
     /// Records `tag` for `project`, dropping tags of loads that are no longer
     /// resident (failed tags stay: they stop repeated loads of a bad identity).
     pub fn insert(&self, engine: &NodeMemory, project: String, tag: Tag) {
@@ -117,19 +102,15 @@ impl Tags {
         all.insert(project, tag);
     }
 
-    /// Moves the tag of `load` to `identity` after a commit this process published;
-    /// keeps its cache cleanup claim. Without an identity the load is untagged.
+    /// Moves the tag of `load` to `identity` after a commit this process published.
+    /// Without an identity the load is untagged.
     pub fn retag(&self, project: &str, load: LoadId, identity: Option<&SnapshotCacheIdentity>) {
         let mut all = self.lock();
         let Some(tag) = all.get_mut(project).filter(|tag| tag.load_id == Some(load)) else {
             return;
         };
         match identity {
-            Some(identity) => {
-                let cleaned = tag.cache_cleaned;
-                *tag = Tag::loaded(load, identity);
-                tag.cache_cleaned = cleaned;
-            }
+            Some(identity) => *tag = Tag::loaded(load, identity),
             None => {
                 all.remove(project);
             }

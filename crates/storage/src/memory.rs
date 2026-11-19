@@ -1,9 +1,9 @@
 //! The storage adapter around [`NodeMemory`]: always on, no modes.
 //!
 //! The engine knows nothing about databases. This adapter keeps, per project, the
-//! database incarnation a resident load came from ([`identity`]), serves scoped
-//! reads of the latest revision from the engine's published views ([`reads`]) and
-//! counts what it did ([`stats`]). Batches and previews stage in the resident
+//! database incarnation a resident load came from ([`identity`]), serves scoped and
+//! full-snapshot reads of the latest revision from the engine's published views
+//! ([`reads`]) and counts what it did ([`stats`]). Batches and previews stage in the resident
 //! project ([`writes`]) after the backend probed the database identity under its
 //! write lock; strict page guards run on the engine views ([`guard`]). Writes outside
 //! the engine (asset and font imports, privacy updates, bundle opens, a failed
@@ -62,16 +62,6 @@ impl Memory {
             .engine
             .resident(project)
             .is_some_and(|load| inner.tags.tags_load(project, load))
-    }
-
-    /// Claims the one-time removal of duplicate cache entries for the resident load
-    /// of `project`. A reload gets a new claim.
-    pub fn claim_cache_cleanup(&self, project: &str) -> bool {
-        let inner = &self.inner;
-        inner
-            .engine
-            .resident(project)
-            .is_some_and(|load| inner.tags.claim_cache_cleanup(project, load))
     }
 
     /// Drops a project after a write the engine did not stage.

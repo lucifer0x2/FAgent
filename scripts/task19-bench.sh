@@ -27,7 +27,7 @@ task19_bench_fingerprint_before=$(task19_bench_fingerprint)
   printf 'Timestamp UTC: '; date -u '+%Y-%m-%dT%H:%M:%SZ'
   printf '\nBuild: cargo test --offline --release -p fagent-server --test runtime_storage_benchmark -j2\n'
   printf 'PostgreSQL pool=4; pg_stat_statements enabled for all PG cells\n'
-  printf 'Moka TTL=3600s, 64MiB total and 16MiB entry JSON-byte weight limits\n'
+  printf 'Node memory on; HTTP /snapshot response cache 64MiB total, 16MiB entry limit\n'
   printf 'Host: '; uname -sm
   rustc -vV
   cargo --version

@@ -14,7 +14,7 @@ use serde_json::Value;
 
 pub(super) async fn read(state: &AppState, name: &str, req: ReadRequest) -> Result<Value> {
     let Some(target) = target(name, &req) else {
-        let shared = today(state, &req.project_id).await?;
+        let shared = database(state, &req.project_id).await?;
         return run(state, name, req, &shared).await;
     };
     let source = state
@@ -31,7 +31,7 @@ pub(super) async fn read(state: &AppState, name: &str, req: ReadRequest) -> Resu
         return memory;
     }
     state.store.memory_read_failed();
-    let shared = today(state, &req.project_id).await?;
+    let shared = database(state, &req.project_id).await?;
     run(state, name, req, &shared).await
 }
 
@@ -39,7 +39,7 @@ pub(super) async fn read(state: &AppState, name: &str, req: ReadRequest) -> Resu
 /// compares it.
 #[cfg(test)]
 pub(super) async fn read_database(state: &AppState, name: &str, req: ReadRequest) -> Result<Value> {
-    let shared = today(state, &req.project_id).await?;
+    let shared = database(state, &req.project_id).await?;
     run(state, name, req, &shared).await
 }
 
@@ -61,9 +61,10 @@ fn target(name: &str, req: &ReadRequest) -> Option<String> {
     Some(id.clone())
 }
 
-async fn today(state: &AppState, project: &str) -> Result<SharedSnapshot> {
+/// The latest revision from the database only, never from node memory.
+async fn database(state: &AppState, project: &str) -> Result<SharedSnapshot> {
     let id = project.to_owned();
-    state.db(move |store| store.shared_snapshot(&id)).await
+    state.db(move |store| store.shared_database(&id)).await
 }
 
 /// One tree or find read on `shared`, the same on memory views and database snapshots.

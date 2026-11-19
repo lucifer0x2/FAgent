@@ -1,5 +1,5 @@
 use super::*;
-use crate::{Retention, Snapshot, SnapshotCache};
+use crate::{Retention, Snapshot};
 use ::postgres::GenericClient;
 use std::{collections::BTreeSet, sync::Arc};
 
@@ -31,35 +31,9 @@ pub(super) fn identity(
 /// Content hashes with a stored binary for one project.
 pub(super) type Binaries = BTreeSet<String>;
 
-pub(super) enum Read {
-    /// Served from the cache after this call's successful SQL probe.
-    Hit(Identified),
-    /// Loaded from SQL; the identity comes from the same transaction.
-    Loaded(Identified),
-}
-
-/// With a cache, an autocommit identity probe precedes any hit. A miss then
-/// loads the canonical ID in one repeatable-read transaction on this worker.
-pub(super) fn read_through(
-    session: &mut Session,
-    key: &str,
-    cache: Option<&SnapshotCache>,
-    namespace: &str,
-) -> Result<Read> {
-    let Some(cache) = cache else {
-        return read(session, key).map(Read::Loaded);
-    };
-    let current = projects::lookup(&mut session.db(), key, false)?;
-    if current.namespace == namespace {
-        let (id, generation) = (&current.meta.project_id, current.generation);
-        if let Some(snapshot) = cache.get(id, generation, current.meta.revision) {
-            return Ok(Read::Hit((snapshot, generation, current.namespace)));
-        }
-    }
-    read(session, &current.meta.project_id).map(Read::Loaded)
-}
-
-fn read(session: &mut Session, key: &str) -> Result<Identified> {
+/// The project's entities in one repeatable-read transaction, with the identity of
+/// that same transaction.
+pub(super) fn read(session: &mut Session, key: &str) -> Result<Identified> {
     let (mut tx, statements) = session.read_only()?;
     let mut db = Db::new(&mut tx, statements);
     let project = projects::lookup(&mut db, key, false)?;

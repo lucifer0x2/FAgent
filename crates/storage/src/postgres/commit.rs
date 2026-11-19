@@ -1,5 +1,5 @@
 //! One PostgreSQL commit as the adapter runs it: the batch staged in node memory
-//! and persisted on a pool worker, then the snapshot cache entry is evicted.
+//! and persisted on a pool worker.
 use super::*;
 use crate::{BatchRequest, BatchResult};
 
@@ -12,14 +12,12 @@ impl PostgresBackend {
     ) -> Result<BatchResult> {
         let key = project.to_owned();
         let memory = self.memory.clone();
-        let (result, committed) = self.pool.run(move |session| {
+        self.pool.run(move |session| {
             match batch::apply_mode(session, &key, request, false, pages, &memory)? {
-                batch::Outcome::Commit(result, committed) => Ok((result, committed)),
+                batch::Outcome::Commit(result) => Ok(result),
                 _ => unreachable!("commit operation"),
             }
-        })?;
-        self.evict_cached(committed);
-        Ok(result)
+        })
     }
 
     /// A preview stages the batch in memory and rolls it back.
