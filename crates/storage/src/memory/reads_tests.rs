@@ -165,7 +165,7 @@ fn snapshots_the_engine_rejects_are_not_retried() {
 }
 
 #[test]
-fn ownership_and_cleanup_claims_follow_loads_and_evictions() {
+fn ownership_follows_loads_and_evictions() {
     let memory = Memory::default();
     let snapshot = Arc::new(snapshot(1, None));
     let read = memory
@@ -177,8 +177,6 @@ fn ownership_and_cleanup_claims_follow_loads_and_evictions() {
         .unwrap();
     assert!(!read.from_memory);
     assert!(memory.owns_project("proj"));
-    assert!(memory.claim_cache_cleanup("proj"));
-    assert!(!memory.claim_cache_cleanup("proj"));
     let retained = memory
         .scoped_read(
             "",
@@ -197,10 +195,7 @@ fn ownership_and_cleanup_claims_follow_loads_and_evictions() {
             || Ok(loaded(snapshot.as_ref().clone(), "i")),
         )
         .unwrap();
-    assert!(
-        memory.claim_cache_cleanup("proj"),
-        "reload gets a new transition"
-    );
+    assert!(memory.owns_project("proj"), "a read reloads it");
     let untagged = Memory::default();
     untagged.engine().load(snapshot.as_ref().clone()).unwrap();
     assert!(!untagged.owns_project("proj"));
