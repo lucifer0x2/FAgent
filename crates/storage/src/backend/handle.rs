@@ -79,16 +79,6 @@ impl Storage {
         self.backend.memory_read_failed()
     }
 
-    /// See [`StorageBackend::evict_memory`].
-    pub fn evict_memory(&self, project_id: &str) {
-        self.backend.evict_memory(project_id)
-    }
-
-    /// See [`StorageBackend::memory_snapshot`].
-    pub fn memory_snapshot(&self, project_id: &str) -> Option<Snapshot> {
-        self.backend.memory_snapshot(project_id)
-    }
-
     /// See [`StorageBackend::scoped_snapshot`].
     pub fn scoped_snapshot(&self, key: &str, target: &str) -> Result<crate::ScopedRead> {
         self.backend.scoped_snapshot(key, target)

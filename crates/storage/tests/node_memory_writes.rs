@@ -1,7 +1,8 @@
-//! Node memory is always on. Two stores over identical data, one keeping its memory
-//! warm and one evicted before every request, give the same results and the same
-//! stored rows on SQLite and PostgreSQL; after every commit both memories equal the
-//! database, and batches at the current base match `Candidate` apply + `validate()`.
+//! Node memory is always on. Two databases with identical data, one served by a
+//! storage that keeps its memory warm and one by a newly opened (cold) storage for
+//! every request, give the same results and the same stored rows on SQLite and
+//! PostgreSQL; after every commit both storages serve the database's state from
+//! memory, and batches at the current base match `Candidate` apply + `validate()`.
 //! Random batches come from agents with stale bases, strict and scoped requests,
 //! rejections, replays and previews; writers also race on threads (replayed
 //! afterwards in commit order).
@@ -13,6 +14,7 @@ mod postgres_support;
 use fagent_storage::*;
 use memory_writes_support::{gen, rows, Pair};
 use serde_json::{json, Value};
+use std::cell::Cell;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
@@ -41,9 +43,10 @@ fn sqlite_pair(temp: &Path) -> Pair {
     let (warm_db, cold_db) = (db(&warm_root), db(&cold_root));
     Pair {
         warm: Store::open(&warm_root).unwrap().into(),
-        cold: Store::open(&cold_root).unwrap().into(),
+        cold: Box::new(move || Store::open(&cold_root).unwrap().into()),
         project,
         rows: Box::new(move |warm| rows::sqlite(if warm { &warm_db } else { &cold_db })),
+        cold_writes: Cell::default(),
     }
 }
 
@@ -81,12 +84,14 @@ fn postgres_pair(label: &str) -> Pair {
         let (kind, id, data): (String, String, String) = (row.get(0), row.get(1), row.get(2));
         target.execute("INSERT INTO fagent_runtime_v1.entities(project_id,kind,id,data) VALUES($1,$2,$3,$4)", &[&project, &kind, &id, &data]).unwrap();
     }
-    let id = project.clone();
+    drop(cold);
+    let (id, cold_url) = (project.clone(), url.clone());
     Pair {
         warm,
-        cold,
+        cold: Box::new(move || postgres_store(&cold_url)),
         project,
         rows: Box::new(move |warm| rows::postgres(if warm { &other } else { &url }, &id)),
+        cold_writes: Cell::default(),
     }
 }
 
@@ -103,17 +108,21 @@ fn differential(pair: &Pair, seeds: std::ops::Range<u64>, steps: usize) {
         total.previews += tally.previews;
         total.oracle += tally.oracle;
     }
-    let (warm, cold) = (pair.warm.memory_stats(), pair.cold.memory_stats());
-    eprintln!("node-memory writes differential: {total:?}\n  warm {warm:?}\n  cold {cold:?}");
+    let (warm, (cold_hits, cold_loads)) = (pair.warm.memory_stats(), pair.cold_writes.get());
+    eprintln!(
+        "node-memory writes differential: {total:?}\n  warm {warm:?}\n  \
+         cold writeHits={cold_hits} writeLoads={cold_loads}"
+    );
     assert!(total.committed > 0 && total.rejected > 0 && total.conflicts > 0);
     assert!(
         total.concurrent > 0,
         "stale bases must report concurrent writes"
     );
     assert!(total.oracle > 0, "batches at the current base were checked");
-    // The warm store staged in its resident copy; the cold one loaded every time.
+    // The warm storage staged in its resident copy; the cold ones loaded every time.
     assert!(warm.write_hits > warm.write_loads, "{warm:?}");
-    assert_eq!(cold.write_hits, 0, "{cold:?}");
+    assert_eq!(cold_hits, 0, "cold storages start empty");
+    assert!(cold_loads > 0, "cold storages loaded the project");
 }
 
 /// Writers race on threads against `warm`; replaying their requests in the order
@@ -159,11 +168,15 @@ fn racing(pair: &Pair) {
             .map(|v| v["committedRevision"].as_u64().unwrap())
     };
     done.sort_by_key(|(_, r)| committed(r).unwrap_or(u64::MAX));
-    let p = pair.cold.open_project(&pair.project).unwrap();
+    let mut last = None;
     for (request, warm) in done.iter().filter(|(_, r)| r.is_ok()) {
         let r: BatchRequest = serde_json::from_value(request.clone()).unwrap();
-        pair.cold.evict_memory(&pair.project);
+        drop(last.take());
+        let fresh = (pair.cold)();
+        let p = fresh.open_project(&pair.project).unwrap();
         let cold = p.apply_batch(r).map(|r| serde_json::to_value(r).unwrap());
+        pair.count_cold(&fresh);
+        last = Some(fresh);
         assert_eq!(
             cold.ok().as_ref(),
             warm.as_ref().ok(),
@@ -172,13 +185,19 @@ fn racing(pair: &Pair) {
         );
     }
     pair.assert_rows(0);
-    for storage in [&pair.warm, &pair.cold] {
+    let cold = last.expect("replayed commits");
+    for storage in [&pair.warm, &cold] {
         memory_writes_support::assert_memory_matches_database(storage, &pair.project, "racing");
     }
+    assert_eq!(
+        pair.cold_writes.get().0,
+        0,
+        "every replay loaded the project"
+    );
 }
 
 #[test]
-fn sqlite_warm_and_evicted_memory_writes_agree() {
+fn sqlite_warm_and_cold_memory_writes_agree() {
     let temp = tempfile::tempdir().unwrap();
     differential(&sqlite_pair(temp.path()), 1..4, 300);
 }
@@ -191,7 +210,7 @@ fn sqlite_racing_writers_match_a_sequential_replay() {
 
 #[test]
 #[ignore = "requires fresh PostgreSQL via scripts/task19-check.sh"]
-fn postgres_warm_and_evicted_memory_writes_agree() {
+fn postgres_warm_and_cold_memory_writes_agree() {
     differential(&postgres_pair("i3-diff"), 1..3, 200);
 }
 

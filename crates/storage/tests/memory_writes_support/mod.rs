@@ -1,9 +1,10 @@
-//! Writes differential: one project (same id) in two storages over identical data.
-//! `warm` keeps its node memory between requests; `cold` has the project evicted
-//! before every request, so each batch stages in a fresh load of the stored rows.
-//! Every outcome and stored row must be identical, both memories must equal the
-//! database snapshot after each commit, and a batch at the current base must give
-//! what `Candidate` apply + `validate()` gives.
+//! Writes differential: one project (same id) in two databases with identical data.
+//! `warm` is one storage that keeps its node memory between requests; every request
+//! to `cold` goes to a newly opened storage, whose memory starts empty, so each batch
+//! stages in a fresh load of the stored rows. Every outcome and stored row must be
+//! identical, after each commit both storages must serve the database's state from
+//! memory, and a batch at the current base must give what `Candidate` apply +
+//! `validate()` gives.
 #![allow(dead_code)]
 pub mod gen;
 pub mod rows;
@@ -12,15 +13,19 @@ use fagent_scene_input::validate::Candidate;
 use fagent_storage::*;
 use gen::{Ids, Rng};
 use serde_json::{json, Value};
+use std::cell::Cell;
 use std::collections::BTreeSet;
 
-/// Two storages holding the same project id. `rows(warm)` dumps one side's stored
-/// rows as comparable text.
+/// Two databases holding the same project id. `cold()` opens a new storage over the
+/// cold database (on SQLite it holds the data root's lock until dropped);
+/// `rows(warm)` dumps one side's stored rows as comparable text.
 pub struct Pair {
     pub warm: Storage,
-    pub cold: Storage,
+    pub cold: Box<dyn Fn() -> Storage>,
     pub project: String,
     pub rows: Box<dyn Fn(bool) -> Vec<String>>,
+    /// Write counters summed over the cold storages: (hits, loads).
+    pub cold_writes: Cell<(u64, u64)>,
 }
 
 #[derive(Debug, Default)]
@@ -77,17 +82,33 @@ fn reference(before: &Snapshot, operations: &Value) -> std::result::Result<Vec<S
     }
 }
 
-/// Node order aside, the published memory copy equals the database snapshot.
+/// The latest full snapshot is served from memory and, node order aside, equals the
+/// database snapshot.
 pub fn assert_memory_matches_database(storage: &Storage, project: &str, at: &str) {
     let sorted = |mut snapshot: Snapshot| {
         snapshot.nodes.sort_by(|a, b| a.id.cmp(&b.id));
         snapshot
     };
-    let memory = storage
-        .memory_snapshot(project)
-        .unwrap_or_else(|| panic!("{at}: not resident after a commit"));
-    let database = storage.snapshot(project).unwrap();
-    assert_eq!(sorted(memory), sorted(database), "{at}: memory differs");
+    let before = storage.memory_stats();
+    let memory = storage.snapshot(project).unwrap();
+    let after = storage.memory_stats();
+    assert_eq!(
+        (after.full_hits, after.full_fallbacks),
+        (before.full_hits + 1, before.full_fallbacks),
+        "{at}: not resident after a commit"
+    );
+    let database = storage.database_snapshot(project).unwrap().0;
+    assert_eq!(
+        sorted(memory),
+        sorted(database.as_ref().clone()),
+        "{at}: memory differs"
+    );
+}
+
+/// The cold database's latest snapshot, read without node memory.
+pub fn cold_snapshot(pair: &Pair) -> Snapshot {
+    let snapshot = (pair.cold)().database_snapshot(&pair.project).unwrap().0;
+    snapshot.as_ref().clone()
 }
 
 impl Pair {
@@ -96,26 +117,35 @@ impl Pair {
         self.both(&request, false);
     }
 
-    /// Sends `request` to the warm store, then to the cold one after evicting its
-    /// memory, and asserts identical outcomes; after a commit both memories hold the
-    /// database's state.
+    /// Sends `request` to the warm storage, then to a newly opened cold one, and
+    /// asserts identical outcomes; after a commit both memories hold the database's
+    /// state.
     pub fn both(&self, request: &Value, dry: bool) -> Value {
         let warm = send(&self.warm, &self.project, request, dry);
-        self.cold.evict_memory(&self.project);
-        let cold = send(&self.cold, &self.project, request, dry);
+        let fresh = (self.cold)();
+        let cold = send(&fresh, &self.project, request, dry);
+        self.count_cold(&fresh);
         let key = &request["idempotencyKey"];
         assert_eq!(warm, cold, "outcomes differ for {key}");
         if warm.get("committedRevision").is_some() && warm["replayed"] != true {
-            for storage in [&self.warm, &self.cold] {
+            for storage in [&self.warm, &fresh] {
                 assert_memory_matches_database(storage, &self.project, &key.to_string());
             }
         }
         warm
     }
 
+    /// Adds a cold storage's write counters to `cold_writes`.
+    pub fn count_cold(&self, storage: &Storage) {
+        let stats = storage.memory_stats();
+        let (hits, loads) = self.cold_writes.get();
+        self.cold_writes
+            .set((hits + stats.write_hits, loads + stats.write_loads));
+    }
+
     /// `both`, and for a request at the current base the outcome `Candidate` gives.
     fn checked(&self, request: &Value, dry: bool, tally: &mut Tally) -> Value {
-        let before = self.cold.snapshot(&self.project).unwrap();
+        let before = cold_snapshot(self);
         let base = request["expectedRevision"].as_u64();
         let guarded = request["strict"] == true && request.get("pageIds").is_some();
         let current = base.is_none_or(|base| base == before.revision) && !guarded;
@@ -175,7 +205,7 @@ impl Pair {
                 tally.replays += 1;
                 continue;
             }
-            ids.refresh(&self.cold.snapshot(&self.project).unwrap());
+            ids.refresh(&cold_snapshot(self));
             let count = 1 + rng.below(3);
             let operations: Vec<Value> = (0..count)
                 .map(|_| gen::operation(&mut rng, &mut ids))

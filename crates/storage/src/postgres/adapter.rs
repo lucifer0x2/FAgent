@@ -165,14 +165,6 @@ impl StorageBackend for PostgresBackend {
         self.memory.read_failed()
     }
 
-    fn evict_memory(&self, project_id: &str) {
-        self.memory.evict(project_id)
-    }
-
-    fn memory_snapshot(&self, project_id: &str) -> Option<Snapshot> {
-        self.memory.snapshot(project_id)
-    }
-
     fn apply_batch(&self, project: &str, request: BatchRequest) -> Result<BatchResult> {
         self.commit(project, request, None)
     }

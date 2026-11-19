@@ -3,22 +3,29 @@ mod common;
 use common::*;
 use fagent_storage::*;
 use serde_json::{json, Value};
+use std::path::Path;
+use std::sync::Arc;
 
 /// Node memory is always on. Each case runs with the project resident, as commits
-/// leave it (`warm`), or evicted from memory before the batches under test.
+/// leave it (`warm`), or on a newly opened store whose memory is empty (cold).
 fn store(root: &std::path::Path) -> Store {
     Store::open(root).unwrap()
 }
 
-fn prepare(store: &Store, p: &Project, warm: bool) {
-    let storage: Storage = store.clone().into();
+fn prepare(root: &Path, store: Store, p: Arc<Project>, warm: bool) -> (Store, Arc<Project>) {
     if warm {
+        let storage: Storage = store.clone().into();
         let read = storage.reader_snapshot(p.id()).unwrap();
         assert!(read.from_memory, "commits leave the project resident");
-    } else {
-        storage.evict_memory(p.id());
-        assert!(storage.memory_snapshot(p.id()).is_none());
+        return (store, p);
     }
+    let id = p.id().to_owned();
+    drop((p, store));
+    let store = self::store(root);
+    let stats = Storage::from(store.clone()).memory_stats();
+    assert_eq!((stats.memory.loads, stats.resident_bytes), (0, 0), "cold");
+    let p = store.open_project(&id).unwrap();
+    (store, p)
 }
 
 /// After a commit memory serves the committed revision.
@@ -63,7 +70,7 @@ fn malformed_page_ids_never_commit_or_reserve_replay_keys() {
         p.apply_batch(request(&p, 0, "seed", initial())).unwrap();
         p.apply_batch(request(&p, 1, "warm", update(json!({"name":"warm"}))))
             .unwrap();
-        prepare(&store, &p, warm);
+        let (store, p) = prepare(temp.path(), store, p, warm);
         let before = p.snapshot().unwrap();
         let db = rusqlite::Connection::open(temp.path().join("fixture/db.sql")).unwrap();
         let invalid = [
@@ -202,7 +209,7 @@ fn stale_lww_keeps_latest_conflicts_across_asset_import_and_bundle_restore() {
             .unwrap();
         p.apply_batch(request(&p, 5, "latest", update(json!({"width":140}))))
             .unwrap();
-        prepare(&store, &p, warm);
+        let (store, p) = prepare(temp.path(), store, p, warm);
         let bundle = p.export_bundle().unwrap();
         let target = tempfile::tempdir().unwrap();
         let restored_store = Store::open(target.path()).unwrap();
