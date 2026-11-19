@@ -21,32 +21,18 @@ pub(crate) fn operations(value: Value) -> Value {
     }
 }
 
+/// Every key a change from `before` to `after` touches, comparing all entities.
+/// Resource imports record it in their history envelope; batches use the
+/// engine's footprint.
 pub(crate) fn footprint(before: &Snapshot, after: &Candidate) -> Result<BTreeSet<String>> {
-    footprint_indexed(
-        before,
-        after,
-        None,
-        &PageIndex::new(&before.nodes),
-        &PageIndex::new(after.nodes.values()),
-    )
-}
-
-pub(super) fn footprint_indexed(
-    before: &Snapshot,
-    after: &Candidate,
-    changed: Option<&[String]>,
-    old_pages: &PageIndex,
-    new_pages: &PageIndex,
-) -> Result<BTreeSet<String>> {
+    let old_pages = &PageIndex::new(&before.nodes);
+    let new_pages = &PageIndex::new(after.nodes.values());
     let old_nodes: BTreeMap<_, _> = before.nodes.iter().map(|n| (n.id.as_str(), n)).collect();
-    let ids: BTreeSet<_> = match changed {
-        Some(ids) => ids.iter().map(String::as_str).collect(),
-        None => old_nodes
-            .keys()
-            .copied()
-            .chain(after.nodes.keys().map(String::as_str))
-            .collect(),
-    };
+    let ids: BTreeSet<_> = old_nodes
+        .keys()
+        .copied()
+        .chain(after.nodes.keys().map(String::as_str))
+        .collect();
     let mut keys = BTreeSet::new();
     bench_phase::count("history.compared_ids", ids.len());
     let global = super::navigation::changed(&old_nodes, after, &ids, old_pages, new_pages);
@@ -72,14 +58,11 @@ pub(super) fn footprint_indexed(
     macro_rules! diff {
         ($field:ident, $kind:literal) => {
             let old: BTreeMap<_, _> = before.$field.iter().map(|v| (v.id.as_str(), v)).collect();
-            let resource_ids: BTreeSet<_> = match changed {
-                Some(_) => ids.clone(),
-                None => old
-                    .keys()
-                    .copied()
-                    .chain(after.$field.keys().map(String::as_str))
-                    .collect(),
-            };
+            let resource_ids: BTreeSet<_> = old
+                .keys()
+                .copied()
+                .chain(after.$field.keys().map(String::as_str))
+                .collect();
             for id in resource_ids {
                 if !same(old.get(id).copied(), after.$field.get(id))? {
                     keys.insert(format!(concat!($kind, ":{}"), id));
@@ -91,19 +74,9 @@ pub(super) fn footprint_indexed(
     diff!(styles, "style");
     diff!(assets, "asset");
     diff!(fonts, "font");
-    super::notes::footprint(
-        before,
-        after,
-        changed.map(|_| &ids),
-        old_pages,
-        new_pages,
-        &mut keys,
-    )?;
+    super::notes::footprint(before, after, old_pages, new_pages, &mut keys)?;
     let old_fonts: BTreeMap<_, _> = before.fonts.iter().map(|f| (f.id.as_str(), f)).collect();
     for font in before.fonts.iter().chain(after.fonts.values()) {
-        if changed.is_some() && !ids.contains(font.id.as_str()) {
-            continue;
-        }
         if !same(
             old_fonts.get(font.id.as_str()).copied(),
             after.fonts.get(&font.id),

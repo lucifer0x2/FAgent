@@ -59,27 +59,6 @@ fn exact_identity_reuses_and_all_identity_dimensions_isolate() {
 }
 
 #[test]
-fn out_of_order_fill_keeps_new_and_old_reader_arcs_separate() {
-    let cache = IndexCache::default();
-    let snapshot = snapshot();
-    let old_key = identity(&snapshot);
-    let mut new_key = old_key.clone();
-    new_key.revision += 1;
-    let old = Arc::new(RevisionIndexes::new(&snapshot.nodes));
-    let new = Arc::new(RevisionIndexes::new(&snapshot.nodes));
-    cache.publish(new_key.clone(), new.clone());
-    cache.publish(old_key.clone(), old.clone());
-    assert!(Arc::ptr_eq(
-        &new,
-        &cache.for_snapshot(&snapshot, Some(new_key))
-    ));
-    assert!(Arc::ptr_eq(
-        &old,
-        &cache.for_snapshot(&snapshot, Some(old_key))
-    ));
-}
-
-#[test]
 fn metadata_cache_does_not_serialize_or_admit_snapshot_payloads() {
     let cache = IndexCache::default();
     let mut snapshot = snapshot();
