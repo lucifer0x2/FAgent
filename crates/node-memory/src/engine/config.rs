@@ -2,7 +2,7 @@
 use crate::Limits;
 use std::time::Duration;
 
-/// Idle projects are dropped after this, like the snapshot cache TTL.
+/// Idle projects are dropped after this.
 pub const DEFAULT_TTL: Duration = Duration::from_secs(60 * 60);
 /// Soft cap on the estimated bytes of resident projects.
 pub const DEFAULT_BUDGET_BYTES: usize = 2 << 30;

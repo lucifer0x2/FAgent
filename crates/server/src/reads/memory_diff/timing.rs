@@ -87,8 +87,8 @@ fn median(mut values: Vec<u64>) -> u64 {
 }
 
 /// First read after each of a few small commits to the frame, each state reading
-/// after its own write (write-through cache and new revision indexes, vs memory
-/// reloaded after the commit evicted it). With one shared database the states take turns, each after a warm-up
+/// after its own write (a database read with new revision indexes, vs memory
+/// published by the commit). With one shared database the states take turns, each after a warm-up
 /// commit so memory does not start behind the other state's writes.
 pub(super) async fn after_writes(pair: &mut Pair, frame: &str, shared_db: bool) -> Value {
     let args = json!({"projectId": pair.project, "frameId": frame});
