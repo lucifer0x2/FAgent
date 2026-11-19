@@ -79,4 +79,8 @@ impl ViewSource for ProjectState {
     fn estimated_bytes(&self) -> usize {
         self.estimated_bytes()
     }
+
+    fn max_expanded(&self) -> usize {
+        self.limits.max_nodes
+    }
 }

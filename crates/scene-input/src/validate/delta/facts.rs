@@ -68,10 +68,7 @@ impl Facts {
         next.total = total;
         // A stored excess the batch leaves alone does not block it; growing it does.
         if next.total > max_nodes && next.total > self.total {
-            return Err(StorageError::new(
-                "INSTANCE_LIMIT",
-                &format!("Expanded project exceeds {max_nodes} nodes"),
-            ));
+            return Err(over_limit(max_nodes));
         }
         Ok(next)
     }
@@ -112,6 +109,14 @@ pub fn facts<'a>(lookup: &dyn Lookup, instances: impl Iterator<Item = &'a str>) 
 }
 
 /// The master an instance expands (`componentId`), if `node` is an instance.
+/// The expanded-node limit error, naming the limit in force.
+pub(super) fn over_limit(max_nodes: usize) -> StorageError {
+    StorageError::new(
+        "INSTANCE_LIMIT",
+        &format!("Expanded project exceeds {max_nodes} nodes"),
+    )
+}
+
 fn target(node: &Node) -> Option<&str> {
     (node.kind == NodeKind::Instance)
         .then(|| node.props["componentId"].as_str())

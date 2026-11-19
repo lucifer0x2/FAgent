@@ -34,6 +34,10 @@ pub trait ViewSource: Send + Sync {
     fn reference_users(&self, key: &str) -> Vec<&str>;
     /// Approximate retained bytes of the nodes, notes and indexes.
     fn estimated_bytes(&self) -> usize;
+    /// The expanded-node cap for reads: the engine's node cap, `MAX_NODES` by default.
+    fn max_expanded(&self) -> usize {
+        crate::MAX_NODES
+    }
 }
 
 /// A published revision. Keeping an old `Arc` never keeps the writer locked and never

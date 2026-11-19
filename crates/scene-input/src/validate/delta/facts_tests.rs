@@ -162,3 +162,53 @@ fn an_invalid_deep_master_chain_counts_without_overflow() {
     let total = of(&c).total();
     assert!(total > c.nodes.len() && total < 1 << 20, "{total}");
 }
+
+/// Five instances of a three-rectangle master hold a stored total of 26 over a limit of
+/// 12. Deleting a master rectangle shrinks the total to 20 although the five instances
+/// still expand to 15 nodes, past the limit, so it is accepted; growing is not.
+#[test]
+fn a_repair_that_shrinks_a_stored_excess_is_accepted() {
+    let node = |id: &str, kind: &str, parent: Option<&str>, props: Value| json!({"id":id,"kind":kind,"parentId":parent,"sortKey":0,"props":props});
+    let mut nodes = vec![
+        node("p", "page", None, json!({})),
+        node("f", "frame", Some("p"), json!({"width":10,"height":10})),
+        node(
+            "m",
+            "frame",
+            Some("p"),
+            json!({"width":10,"height":10,"component":{"name":"M"}}),
+        ),
+    ];
+    for i in 0..3 {
+        nodes.push(node(&format!("r{i}"), "rectangle", Some("m"), json!({})));
+    }
+    for i in 0..5 {
+        nodes.push(node(
+            &format!("i{i}"),
+            "instance",
+            Some("f"),
+            json!({"componentId":"m"}),
+        ));
+    }
+    let snapshot: Snapshot = serde_json::from_value(json!({
+        "schemaVersion":4,"projectId":"p","slug":"p","name":"p","revision":1,
+        "retention":{"oldestCommitRevision":0,"idempotencyPolicy":"bounded"},
+        "tokens":[],"styles":[],"assets":[],"fonts":[],"notes":[],"nodes":nodes
+    }))
+    .unwrap();
+    let c = Candidate::from_snapshot(&snapshot);
+    let facts = of(&c);
+    assert_eq!(facts.total(), 26);
+    let shrink = [json!({"op":"delete_subtree","id":"r0"})];
+    let (after, next) = judged(&c, &facts, &shrink, 12);
+    assert_eq!(next.expect("the excess shrinks").total(), expanded(&after));
+    let grow = [json!({"op":"create_node","id":"r3","kind":"rectangle","parentId":"m","props":{}})];
+    let error = judged(&c, &facts, &grow, 12)
+        .1
+        .err()
+        .expect("the excess grows");
+    assert_eq!(
+        (error.code.as_str(), error.message.as_str()),
+        ("INSTANCE_LIMIT", "Expanded project exceeds 12 nodes")
+    );
+}
