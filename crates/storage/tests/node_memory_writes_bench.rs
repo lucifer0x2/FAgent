@@ -3,7 +3,9 @@
 //! project of a disposable backup restore. Every row is 30 measured runs after two
 //! warm-ups (median, p95, min, per-phase medians): small props edit, master edit with
 //! many instances, reparent, token edit, note create, page create, the scoped part of
-//! `get_design_context` on one frame, and a cold commit (evict, load, admission).
+//! `get_design_context` on one frame, a latest-revision full `snapshot()` from memory
+//! against `database_snapshot`, the first full read of a cold project (evict, load,
+//! admission), and a cold commit (evict, load, admission).
 //! Prints counts and timings only, one JSON line per row.
 //!
 //! `scripts/task19-check.sh cargo test --release -p fagent-storage \
@@ -158,6 +160,7 @@ fn generated(url: &str, nodes: usize) {
         &format!("get_design_context root_10 ({closure} resolved nodes)"),
         report,
     );
+    full_reads(&storage, label, authored, &id);
     let pages = vec![targets.page(&targets.text)];
     let text = targets.text.clone();
     let report = Samples::collect(|run| {
@@ -170,6 +173,43 @@ fn generated(url: &str, nodes: usize) {
         label,
         authored,
         "cold commit (evict, load, admission)",
+        report,
+    );
+}
+
+/// Latest-revision full reads: `snapshot()` served from the resident copy, the same
+/// revision read from the database only, and `snapshot()` of a cold project (the
+/// read loads it into memory and pays the admission).
+fn full_reads(storage: &Storage, label: &str, authored: usize, id: &str) {
+    // The write cases above added nodes; every read must return the current revision.
+    let current = storage.database_snapshot(id).unwrap().0.nodes.len();
+    let hits = storage.memory_stats().full_hits;
+    let report =
+        Samples::collect(|_| assert_eq!(storage.snapshot(id).unwrap().nodes.len(), current))
+            .report();
+    assert_eq!(
+        storage.memory_stats().full_hits - hits,
+        32,
+        "every full read is a memory hit"
+    );
+    print(label, authored, "full snapshot() memory hit", report);
+    let report = Samples::collect(|_| {
+        assert_eq!(
+            storage.database_snapshot(id).unwrap().0.nodes.len(),
+            current
+        )
+    })
+    .report();
+    print(label, authored, "full database_snapshot", report);
+    let report = Samples::collect(|_| {
+        storage.evict_memory(id);
+        assert_eq!(storage.snapshot(id).unwrap().nodes.len(), current);
+    })
+    .report();
+    print(
+        label,
+        authored,
+        "cold full snapshot() (evict, load, admission)",
         report,
     );
 }
