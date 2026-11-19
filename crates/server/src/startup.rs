@@ -3,7 +3,7 @@ mod options;
 mod postgres_env;
 
 use fagent_server::{PublicViewer, RenderBackend};
-use fagent_storage::{PostgresBackend, PostgresConfig, SnapshotCache, Storage, Store};
+use fagent_storage::{PostgresBackend, PostgresConfig, Storage, Store};
 use options::{
     bind_host, env_port, live_updates, render_backend, switch, trusted_proxy, viewer_overscan,
 };
@@ -18,9 +18,9 @@ RENDER_BACKEND defaults to the backend chosen at build time by FAGENT_RENDER_BAC
 unless the binary was built with vello). --render-backend overrides RENDER_BACKEND. chromium
 needs the Node worker runtime (worker/, renderer/dist, layout-step) in the workspace; a build
 made with FAGENT_RENDER_BACKEND=vello does not package it, and starting it with chromium fails.
-DATABASE_PROVIDER defaults to sqlite. Use postgresql with DATABASE_URL to enable PostgreSQL
-with an in-process snapshot cache (1 hour TTL). PostgreSQL uses the data root only to read
-import_asset files from <data-root>/<slug>/inbox; it creates nothing there.
+DATABASE_PROVIDER defaults to sqlite. Use postgresql with DATABASE_URL to enable PostgreSQL.
+PostgreSQL uses the data root only to read import_asset files from <data-root>/<slug>/inbox;
+it creates nothing there.
 Optional PostgreSQL limits: DATABASE_POOL_SIZE (1-32, default 4) and, in milliseconds,
 DATABASE_CONNECT_TIMEOUT_MS (3000), DATABASE_STATEMENT_TIMEOUT_MS (15000),
 DATABASE_LOCK_TIMEOUT_MS (3000), DATABASE_OPERATION_TIMEOUT_MS (30000).
@@ -209,8 +209,7 @@ impl StorageOptions {
                 let backend = PostgresBackend::with_config(config).map_err(|_| {
                     "PostgreSQL startup failed. Check DATABASE_URL and database access"
                 })?;
-                let cache = SnapshotCache::new(backend.cache_namespace());
-                let storage = Storage::new(backend.with_cache(cache)?);
+                let storage = Storage::new(backend);
                 Ok(match inbox_root {
                     Some(root) => storage.with_inbox_root(root),
                     None => storage,

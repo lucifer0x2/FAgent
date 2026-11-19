@@ -1,5 +1,5 @@
 use fagent_server::{router, AppState, Config};
-use fagent_storage::{PostgresBackend, SnapshotCache, Storage};
+use fagent_storage::{PostgresBackend, Storage};
 use reqwest::Client;
 use serde_json::{json, Value};
 use std::{
@@ -32,9 +32,7 @@ impl Server {
         let dsn = std::env::var("TASK19_POSTGRES_URL")
             .expect("run scripts/task19-check.sh: fresh real PostgreSQL required");
         let storage = tokio::task::spawn_blocking(move || {
-            let backend = PostgresBackend::connect(&dsn).unwrap();
-            let cache = SnapshotCache::new(backend.cache_namespace());
-            let storage = Storage::new(backend.with_cache(cache).unwrap());
+            let storage = Storage::new(PostgresBackend::connect(&dsn).unwrap());
             match inbox_root {
                 Some(root) => storage.with_inbox_root(root),
                 None => storage,

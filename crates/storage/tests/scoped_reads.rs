@@ -121,7 +121,7 @@ fn sqlite_scope_pairing_warm_commit_order_old_readers_and_field_swap() {
 #[test]
 #[ignore = "fresh disposable PostgreSQL via scripts/task19-check.sh"]
 fn postgres_scope_pairing_warm_commit_order_old_readers_and_field_swap() {
-    let (backend, _) = postgres_support::cached();
+    let backend = postgres_support::backend();
     let storage = Storage::new(backend);
     let p = postgres_support::project(&storage, "scoped-reads");
     exercise(&storage, &p);

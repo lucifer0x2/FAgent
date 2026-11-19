@@ -1,6 +1,5 @@
 use fagent_storage::{
-    BatchRequest, NodeKind, Operation, PostgresBackend, ProjectHandle, Snapshot, SnapshotCache,
-    Storage, Store,
+    BatchRequest, NodeKind, Operation, PostgresBackend, ProjectHandle, Snapshot, Storage, Store,
 };
 use serde_json::{json, Value};
 use std::sync::Arc;
@@ -8,7 +7,8 @@ use std::sync::Arc;
 pub struct Project {
     pub storage: Storage,
     pub handle: Arc<ProjectHandle>,
-    pub moka: bool,
+    /// PostgreSQL: hot reads are checked against the database statement counters.
+    pub postgres: bool,
     pub count: usize,
     pub seed_revision: u64,
     pub _root: Option<tempfile::TempDir>,
@@ -16,21 +16,15 @@ pub struct Project {
 
 pub fn prepare(engine: &str, count: usize) -> Project {
     let mut root = None;
-    let moka = engine == "pgmoka";
+    let postgres = engine != "sqlite";
     let storage = if engine == "sqlite" {
         let temp = tempfile::tempdir().unwrap();
         let storage = Storage::from(Store::open(temp.path()).unwrap());
         root = Some(temp);
         storage
     } else {
-        let backend =
-            PostgresBackend::connect(&std::env::var("TASK19_POSTGRES_URL").unwrap()).unwrap();
-        if moka {
-            let cache = SnapshotCache::new(backend.cache_namespace());
-            Storage::new(backend.with_cache(cache).unwrap())
-        } else {
-            Storage::new(backend)
-        }
+        let url = std::env::var("TASK19_POSTGRES_URL").unwrap();
+        Storage::new(PostgresBackend::connect(&url).unwrap())
     };
     // Engine tags are all six bytes; project UUIDs are all the same length.
     let slug = format!("bench-{count:04}-{engine}");
@@ -54,7 +48,7 @@ pub fn prepare(engine: &str, count: usize) -> Project {
     Project {
         storage,
         handle,
-        moka,
+        postgres,
         count,
         seed_revision,
         _root: root,

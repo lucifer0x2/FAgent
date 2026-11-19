@@ -122,7 +122,7 @@ fn sqlite_commits_reads_previews_replays_and_old_readers_share_revision_indexes(
 #[test]
 #[ignore = "fresh temporary PostgreSQL via scripts/task19-check.sh"]
 fn postgres_commits_reads_previews_replays_and_old_readers_share_revision_indexes() {
-    let (backend, _) = postgres_support::cached();
+    let backend = postgres_support::backend();
     let storage = Storage::new(backend);
     let p = postgres_support::project(&storage, "revision-index");
     exercise(&storage, &p);
@@ -132,8 +132,8 @@ fn postgres_commits_reads_previews_replays_and_old_readers_share_revision_indexe
 #[ignore = "fresh temporary PostgreSQL via scripts/task19-check.sh"]
 fn postgres_generation_namespace_and_schema_are_authoritative() {
     use postgres_support::*;
-    let (backend, _) = cached();
-    let namespace = backend.cache_namespace().to_owned();
+    let backend = backend();
+    let namespace = backend.database_namespace().to_owned();
     struct Restore(String);
     impl Drop for Restore {
         fn drop(&mut self) {

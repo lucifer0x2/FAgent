@@ -8,7 +8,7 @@ use serde_json::Value;
 use std::sync::Arc;
 
 impl PostgresBackend {
-    /// One import commit: the transaction, then memory and cache evictions.
+    /// One import commit: the transaction, then the memory eviction.
     fn import(
         &self,
         project: &str,
@@ -16,51 +16,27 @@ impl PostgresBackend {
         fields: crate::asset_import::Fields,
     ) -> Result<ImportAssetsResult> {
         let key = project.to_owned();
-        let (result, committed) = self
+        let result = self
             .pool
             .run(move |session| resources::import(session, &key, request, fields))?;
         self.memory.evict(&result.result.project_id);
-        self.evict_cached(committed);
         Ok(result)
     }
-    /// One worker checkout: the probe and, on a miss, the repeatable-read load.
-    /// A hit returns the shared snapshot; any owned copy is made by the caller.
+
+    /// One repeatable-read load on a pool worker, with the identity of that read.
     fn read_snapshot(&self, project: &str) -> Result<snapshot::Identified> {
         let key = project.to_owned();
-        let cache = self.cache.clone();
-        let namespace = self.namespace.clone();
-        let read = self.pool.run(move |session| {
-            snapshot::read_through(session, &key, cache.as_ref(), &namespace)
-        })?;
-        let (snapshot, generation, namespace) = match read {
-            snapshot::Read::Hit(read) => return Ok(read),
-            snapshot::Read::Loaded(read) => read,
-        };
-        // Fill off the worker, with the identity of the snapshot's own transaction.
-        if let Some(cache) = &self.cache {
-            if namespace == self.cache_namespace() {
-                cache.put(&snapshot, generation);
-            }
-        }
-        Ok((snapshot, generation, namespace))
+        self.pool.run(move |session| snapshot::read(session, &key))
     }
 
     /// The database shared snapshot with the identity of the same read.
     fn shared_with_identity(&self, project: &str) -> Result<crate::memory::Loaded> {
-        let (snapshot, identity) = self.snapshot_with_cache_identity(project)?;
+        let (snapshot, identity) = self.database_snapshot(project)?;
         let indexes = self.indexes.for_snapshot(&snapshot, identity.clone());
         Ok((
             crate::SharedSnapshot::committed(snapshot, indexes),
             identity,
         ))
-    }
-
-    /// Drops the committed project's snapshot cache entry after the worker reported
-    /// a commit. Replays carry nothing.
-    pub(super) fn evict_cached(&self, committed: Option<Box<write_through::Committed>>) {
-        if let Some(committed) = committed {
-            committed.evict(self.cache.as_ref());
-        }
     }
 }
 
@@ -126,7 +102,6 @@ impl StorageBackend for PostgresBackend {
     }
 
     fn snapshot(&self, project: &str) -> Result<Snapshot> {
-        // A hit shares the cached Arc; the owned copy is made here, not on a worker.
         self.read_snapshot(project)
             .map(|(snapshot, _, _)| Arc::unwrap_or_clone(snapshot))
     }
@@ -146,6 +121,13 @@ impl StorageBackend for PostgresBackend {
     }
 
     fn snapshot_with_cache_identity(
+        &self,
+        project: &str,
+    ) -> Result<(Arc<Snapshot>, Option<SnapshotCacheIdentity>)> {
+        self.database_snapshot(project)
+    }
+
+    fn database_snapshot(
         &self,
         project: &str,
     ) -> Result<(Arc<Snapshot>, Option<SnapshotCacheIdentity>)> {
