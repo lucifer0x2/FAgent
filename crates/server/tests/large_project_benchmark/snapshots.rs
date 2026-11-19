@@ -22,16 +22,15 @@ pub fn storage(plan: &Plan, backends: &Backends, project: &str) -> Value {
     });
     primary.snapshot(project).unwrap(); // loads node memory if it is cold
     let (warm, _) = sample(plan, |_| primary.snapshot(project).unwrap());
-    let out = json!({
+    json!({
         "coldLoad": cold, "snapshotJsonBytes": json_bytes,
         "cacheAdmitted": json_bytes <= CACHE_ENTRY_LIMIT, "encodeObjects": encode,
         "memoryWarm": warm,
-    });
-    out
+    })
 }
 
 pub async fn http(plan: &Plan, backends: &Backends, project: &str) -> Value {
-    let out = json!({});
+    let mut out = json!({});
     for (label, query) in [("objects", ""), ("rows", "?nodeFormat=rows")] {
         let mut cold = Vec::new();
         let mut repeat = Vec::new();
