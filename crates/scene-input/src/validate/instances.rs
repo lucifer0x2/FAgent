@@ -5,19 +5,15 @@ use crate::{instances::expand, *};
 use std::collections::{BTreeMap, BTreeSet};
 
 impl Candidate {
-    /// Component graph, expansion and instance checks of `affected` nodes (all when
-    /// `None`); returns the expansion, or `None` when no instance or master exists.
-    pub(super) fn validate_instances(
-        &self,
-        affected: Option<&BTreeSet<String>>,
-        themes: &BTreeSet<String>,
-    ) -> Result<Option<BTreeMap<String, Node>>> {
+    /// Component graph, expansion and instance checks of every node; nothing to
+    /// check when no instance or master exists.
+    pub(super) fn validate_instances(&self, themes: &BTreeSet<String>) -> Result<()> {
         if !self
             .nodes
             .values()
             .any(|n| n.kind == NodeKind::Instance || n.props.get("component").is_some())
         {
-            return Ok(None);
+            return Ok(());
         }
         let has_instances = self.nodes.values().any(|n| n.kind == NodeKind::Instance);
         self.instance_graph()?;
@@ -26,8 +22,7 @@ impl Candidate {
         })?;
         let order: Vec<_> = expanded.iter().map(|node| node.id.clone()).collect();
         let placed: BTreeMap<_, _> = expanded.into_iter().map(|n| (n.id.clone(), n)).collect();
-        let selected = |id: &str| affected.is_none_or(|ids| ids.contains(id));
-        for node in self.nodes.values().filter(|node| selected(&node.id)) {
+        for node in self.nodes.values() {
             check_instance_node(self, node, &placed, themes)?;
         }
         if has_instances {
@@ -35,16 +30,15 @@ impl Candidate {
             // Preserve the expander's authored-ID/depth-first order, rather than
             // BTreeMap's virtual-ID order, for failure precedence.
             let order = order.iter().map(|id| &placed[id]).filter(|n| {
-                (n.id.contains('/')
+                n.id.contains('/')
                     || self
                         .nodes
                         .get(&n.id)
-                        .is_some_and(|n| n.kind == NodeKind::Instance))
-                    && selected(n.id.split('/').next().unwrap())
+                        .is_some_and(|n| n.kind == NodeKind::Instance)
             });
             check_expanded(self, &placed, order, themes)?;
         }
-        Ok(Some(placed))
+        Ok(())
     }
 
     pub(super) fn instance_write_guard(&self, op: &Operation) -> Result<()> {

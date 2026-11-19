@@ -1,11 +1,26 @@
-//! `guard` and the engine footprint against the candidate path they replace
-//! (`validated_candidate`, `BatchScope`, `scoped::check`, `concurrent::fill`): the
-//! same changed ids, footprint, guard errors and results for every operation class,
-//! guarded page set and history shape, including stale bases and legacy history.
+//! The strict page guard, the engine footprint and last-writer-wins results for
+//! every operation class, guarded page set and history shape (current, old
+//! unrelated, old overlapping, legacy without scope, gap, base ahead), pinned in
+//! `guard_golden.json`. The fixture was captured from the candidate path these
+//! replaced. After an intended change, regenerate it with
+//! `FAGENT_UPDATE_GUARD_GOLDEN=1 cargo test -p fagent-storage guard_golden` and
+//! review the diff.
 use super::guard;
-use crate::scoped::{self, parity, BatchScope};
+use crate::scoped::{self, parity};
 use crate::*;
-use fagent_node_memory::{Begin, MemoryConfig, NodeMemory, SystemClock};
+use fagent_node_memory::{Begin, MemoryConfig, NodeMemory, Prepared, SystemClock};
+
+const GOLDEN: &str = include_str!("guard_golden.json");
+const GOLDEN_PATH: &str = concat!(env!("CARGO_MANIFEST_DIR"), "/src/memory/guard_golden.json");
+const UPDATE: &str = "FAGENT_UPDATE_GUARD_GOLDEN";
+const HISTORIES: [&str; 6] = [
+    "current",
+    "old unrelated",
+    "old overlapping",
+    "legacy without scope",
+    "gap",
+    "base ahead",
+];
 
 type Public<T> = std::result::Result<T, Value>;
 
@@ -17,30 +32,76 @@ fn ops(value: Value) -> Vec<Operation> {
     serde_json::from_value(value).unwrap()
 }
 
+/// What one case produced: a validation rejection, or the staged batch's changed
+/// ids and footprint, its guard outcome per page set and history, and its result
+/// per history.
+enum Outcome {
+    Rejected(Value),
+    Staged {
+        changed: Vec<String>,
+        footprint: BTreeSet<String>,
+        guards: Vec<Vec<Public<()>>>,
+        results: Vec<BatchResult>,
+    },
+}
+
+fn engine() -> NodeMemory {
+    NodeMemory::new(MemoryConfig::default(), Arc::new(SystemClock::new()))
+}
+
+fn ready(begin: Result<Begin<'_>>) -> Prepared<'_> {
+    match begin.unwrap() {
+        Begin::Ready(prepared) => prepared,
+        Begin::Stale => panic!("stale base"),
+    }
+}
+
 /// The seeded project after one unrelated commit (revision 2), and the history
-/// envelopes of two commits at revision 2: that unrelated one and one on `r1`.
+/// envelopes of two commits on revision 1: that unrelated one and one on `r1`.
 fn fixture() -> (Snapshot, Value, Value) {
     let initial = parity::seed();
-    let envelope = |operations: Vec<Operation>| {
-        let (candidate, changed, _) =
-            crate::batch::validated_candidate(&initial, &operations).unwrap();
-        let scope = BatchScope::new(&initial, &candidate, &changed).unwrap();
+    let engine = engine();
+    let project = engine.load(initial.clone()).unwrap();
+    let envelope = |operations: &[Operation], footprint: &BTreeSet<String>| {
         let body = json!({"projectId":initial.project_id,"expectedRevision":1,"idempotencyKey":"h","operations":operations});
-        let history =
-            scoped::envelope_with_scopes(scope.footprint, body.clone(), body["operations"].clone())
-                .unwrap();
-        (candidate, history)
+        scoped::envelope_with_scopes(footprint.clone(), body.clone(), body["operations"].clone())
+            .unwrap()
     };
-    let unrelated = ops(json!([
+    let theirs = ops(json!([{"op":"update_node","id":"r1","props":{"name":"Theirs"}}]));
+    // Dropping the prepared batch rolls it back.
+    let overlapping = envelope(&theirs, ready(project.begin(1, &theirs)).footprint());
+    let unused = ops(json!([
         {"op":"upsert_token","token":{"id":"unused","name":"Unused","type":"number","value":1}}
     ]));
-    let (candidate, unrelated) = envelope(unrelated);
-    let (_, overlapping) = envelope(ops(
-        json!([{"op":"update_node","id":"r1","props":{"name":"Theirs"}}]),
-    ));
-    let mut before = parity::snapshot(&initial, &candidate);
-    before.revision = 2;
+    let prepared = ready(project.begin(1, &unused));
+    let unrelated = envelope(&unused, prepared.footprint());
+    let _ = prepared.commit();
+    let before = engine.to_snapshot(&initial.project_id).unwrap();
+    assert_eq!(before.revision, 2);
     (before, unrelated, overlapping)
+}
+
+/// (expected revision, history after it), in `HISTORIES` order.
+fn histories(unrelated: Value, overlapping: Value) -> Vec<(u64, Vec<(u64, Value)>)> {
+    let legacy = json!([{"op":"update_node","id":"f2","props":{"name":"Legacy"}}]);
+    vec![
+        (2, vec![]),
+        (1, vec![(2, unrelated)]),
+        (1, vec![(2, overlapping)]),
+        (1, vec![(2, legacy)]),
+        (0, vec![]),
+        (3, vec![]),
+    ]
+}
+
+fn request(before: &Snapshot, expected: u64, operations: &[Operation]) -> BatchRequest {
+    BatchRequest {
+        project_id: before.project_id.clone(),
+        expected_revision: Some(expected),
+        strict: true,
+        idempotency_key: "guard".into(),
+        operations: operations.to_vec(),
+    }
 }
 
 fn cases() -> Vec<Value> {
@@ -108,94 +169,175 @@ fn page_sets() -> Vec<Vec<String>> {
         .collect()
 }
 
-#[test]
-fn guard_footprint_and_result_match_the_candidate_path() {
-    let (before, unrelated, overlapping) = fixture();
-    let engine = NodeMemory::new(MemoryConfig::default(), Arc::new(SystemClock::new()));
+/// Every case staged in `NodeMemory` on the fixture, checked by `guard`.
+fn memory_outcomes(before: &Snapshot, unrelated: Value, overlapping: Value) -> Vec<Outcome> {
+    let engine = engine();
     let project = engine.load(before.clone()).unwrap();
-    let legacy = json!([{"op":"update_node","id":"f2","props":{"name":"Legacy"}}]);
-    // (expected revision, history after it)
-    let histories: Vec<(u64, Vec<(u64, Value)>)> = vec![
-        (2, vec![]),
-        (1, vec![(2, unrelated)]),
-        (1, vec![(2, overlapping)]),
-        (1, vec![(2, legacy)]),
-        (0, vec![]),
-        (3, vec![]),
-    ];
-    let (mut compared, mut accepted) = (0, 0);
+    let histories = histories(unrelated, overlapping);
+    let mut outcomes = Vec::new();
     for case in cases() {
-        let operations = ops(case.clone());
-        let reference = public(crate::batch::validated_candidate(&before, &operations));
-        let staged = public(project.begin(before.revision, &operations));
-        let (candidate, changed, prepared) = match (reference, staged) {
-            (Err(expected), Err(actual)) => {
-                assert_eq!(actual, expected, "validation error, case={case}");
+        let operations = ops(case);
+        let prepared = match public(project.begin(before.revision, &operations)) {
+            Err(error) => {
+                outcomes.push(Outcome::Rejected(error));
                 continue;
             }
-            (Ok((candidate, changed, _)), Ok(Begin::Ready(prepared))) => {
-                (candidate, changed, prepared)
-            }
-            (reference, staged) => panic!(
-                "case={case}: reference ok={} engine ok={}",
-                reference.is_ok(),
-                staged.is_ok()
-            ),
+            Ok(Begin::Ready(prepared)) => prepared,
+            Ok(Begin::Stale) => panic!("stale base"),
         };
-        assert_eq!(prepared.changed_ids(), changed, "changed ids, case={case}");
-        let scope = BatchScope::new(&before, &candidate, &changed).unwrap();
-        assert_eq!(
-            prepared.footprint(),
-            &scope.footprint,
-            "footprint, case={case}"
-        );
-        for pages in page_sets() {
-            for (expected, commits) in &histories {
-                let request = BatchRequest {
-                    project_id: before.project_id.clone(),
-                    expected_revision: Some(*expected),
-                    strict: true,
-                    idempotency_key: "guard".into(),
-                    operations: operations.clone(),
-                };
-                let mut work = crate::batch::validated_candidate(&before, &operations)
-                    .unwrap()
-                    .2;
-                let old = public(scoped::check(
-                    &before, &candidate, &request, &pages, commits, &scope, &mut work,
-                ));
-                let new = public(guard::check(&prepared, &request, &pages, commits));
-                assert_eq!(
-                    new, old,
-                    "guard, case={case} pages={pages:?} base={expected}"
-                );
-                accepted += usize::from(new.is_ok());
-                let operations = serde_json::to_value(&request.operations).unwrap();
-                let mut old = BatchResult {
-                    project_id: before.project_id.clone(),
-                    committed_revision: before.revision + 1,
-                    changed_ids: changed.clone(),
-                    render_status: "pending".into(),
-                    ..Default::default()
-                };
-                let base = concurrent::Base::of(&request).unwrap();
-                concurrent::fill(
-                    &mut old,
-                    base,
-                    before.revision,
-                    commits,
-                    &operations,
-                    &candidate,
-                );
-                let new = guard::result(&prepared, &request, commits, &operations);
-                assert_eq!(new, old, "result, case={case} base={expected}");
-                compared += 1;
-            }
-        }
+        let guards = page_sets()
+            .iter()
+            .map(|pages| {
+                histories
+                    .iter()
+                    .map(|(expected, commits)| {
+                        let request = request(before, *expected, &operations);
+                        public(guard::check(&prepared, &request, pages, commits))
+                    })
+                    .collect()
+            })
+            .collect();
+        let canonical = serde_json::to_value(&operations).unwrap();
+        let results = histories
+            .iter()
+            .map(|(expected, commits)| {
+                let request = request(before, *expected, &operations);
+                guard::result(&prepared, &request, commits, &canonical)
+            })
+            .collect();
+        outcomes.push(Outcome::Staged {
+            changed: prepared.changed_ids().to_vec(),
+            footprint: prepared.footprint().clone(),
+            guards,
+            results,
+        });
         // Dropping the prepared batch rolls it back for the next case.
         drop(prepared);
         assert_eq!(project.view().metadata().revision, before.revision);
     }
-    assert!(compared > 1500, "{compared} comparisons");
+    outcomes
+}
+
+/// The golden document: distinct errors sorted once and referenced by index;
+/// results keep only the fields that differ from a plain commit of the case.
+fn golden(before: &Snapshot, outcomes: &[Outcome]) -> Value {
+    let mut errors = BTreeMap::new();
+    let mut collect = |error: &Value| {
+        errors.insert(serde_json::to_string(error).unwrap(), error.clone());
+    };
+    for outcome in outcomes {
+        match outcome {
+            Outcome::Rejected(error) => collect(error),
+            Outcome::Staged { guards, .. } => guards.iter().flatten().for_each(|guard| {
+                if let Err(error) = guard {
+                    collect(error)
+                }
+            }),
+        }
+    }
+    let keys: Vec<_> = errors.keys().cloned().collect();
+    let index = |error: &Value| {
+        let key = serde_json::to_string(error).unwrap();
+        json!(keys.iter().position(|k| *k == key).unwrap())
+    };
+    let cases = cases()
+        .into_iter()
+        .zip(outcomes)
+        .map(|(operations, outcome)| match outcome {
+            Outcome::Rejected(error) => json!({"operations":operations,"error":index(error)}),
+            Outcome::Staged {
+                changed,
+                footprint,
+                guards,
+                results,
+            } => {
+                let plain = json!({"projectId":before.project_id,"committedRevision":before.revision + 1,
+                    "changedIds":changed,"renderStatus":"pending","replayed":false});
+                let results: Vec<_> = results
+                    .iter()
+                    .map(|result| {
+                        let mut result = serde_json::to_value(result).unwrap();
+                        let fields = result.as_object_mut().unwrap();
+                        fields.retain(|key, value| plain.get(key) != Some(value));
+                        result
+                    })
+                    .collect();
+                let guards: Vec<Vec<_>> = guards
+                    .iter()
+                    .map(|row| {
+                        row.iter()
+                            .map(|guard| guard.as_ref().err().map_or(Value::Null, index))
+                            .collect()
+                    })
+                    .collect();
+                json!({"operations":operations,"changedIds":changed,"footprint":footprint,
+                    "results":results,"guards":guards})
+            }
+        })
+        .collect::<Vec<_>>();
+    json!({"histories":HISTORIES,"pageSets":page_sets(),"errors":errors.into_values().collect::<Vec<_>>(),
+        "cases":cases})
+}
+
+/// One line per error and per case field, so a regenerated fixture diffs well.
+fn format(golden: &Value) -> String {
+    let line = |value: &Value| serde_json::to_string(value).unwrap();
+    let items = |values: &Value, render: &dyn Fn(&Value) -> String| {
+        values
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(render)
+            .collect::<Vec<_>>()
+            .join(",\n")
+    };
+    let case = |case: &Value| {
+        let fields = case.as_object().unwrap();
+        let fields: Vec<_> = fields
+            .iter()
+            .map(|(key, value)| format!("      {}: {}", line(&json!(key)), line(value)))
+            .collect();
+        format!("    {{\n{}\n    }}", fields.join(",\n"))
+    };
+    format!(
+        "{{\n  \"histories\": {},\n  \"pageSets\": {},\n  \"errors\": [\n{}\n  ],\n  \"cases\": [\n{}\n  ]\n}}\n",
+        line(&golden["histories"]),
+        line(&golden["pageSets"]),
+        items(&golden["errors"], &|error| format!("    {}", line(error))),
+        items(&golden["cases"], &case),
+    )
+}
+
+#[test]
+fn guard_golden_matrix_matches_the_memory_guard() {
+    let (before, unrelated, overlapping) = fixture();
+    let actual = golden(&before, &memory_outcomes(&before, unrelated, overlapping));
+    if std::env::var_os(UPDATE).is_some() {
+        std::fs::write(GOLDEN_PATH, format(&actual)).unwrap();
+        return;
+    }
+    let expected: Value = serde_json::from_str(GOLDEN).unwrap();
+    assert_eq!(actual["histories"], expected["histories"]);
+    assert_eq!(actual["pageSets"], expected["pageSets"]);
+    assert_eq!(actual["errors"], expected["errors"], "error table");
+    let (actual_cases, expected_cases) = (
+        actual["cases"].as_array().unwrap(),
+        expected["cases"].as_array().unwrap(),
+    );
+    assert_eq!(actual_cases.len(), expected_cases.len());
+    for (actual, expected) in actual_cases.iter().zip(expected_cases) {
+        assert_eq!(actual, expected, "case={}", expected["operations"]);
+    }
+    let (mut compared, mut accepted) = (0, 0);
+    for case in expected_cases {
+        for row in case["guards"].as_array().into_iter().flatten() {
+            let row = row.as_array().unwrap();
+            compared += row.len();
+            accepted += row.iter().filter(|guard| guard.is_null()).count();
+            // An unrelated commit since the base changes nothing.
+            assert_eq!(row[0], row[1], "case={}", case["operations"]);
+        }
+    }
+    assert!(compared > 1500, "{compared} guard outcomes");
     assert!(accepted > 50, "{accepted} accepted guards");
 }

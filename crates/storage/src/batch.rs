@@ -4,12 +4,6 @@ use crate::*;
 use serde::Serialize;
 mod history;
 mod memory;
-/// The candidate path batches used before `NodeMemory`, kept as the test oracle
-/// for `memory::guard` and the scoped parity tests until phase 4.
-#[cfg(test)]
-mod validation;
-#[cfg(test)]
-pub(crate) use validation::validated_candidate;
 
 #[derive(Debug, Clone, Serialize, PartialEq)]
 #[serde(rename_all = "camelCase")]
