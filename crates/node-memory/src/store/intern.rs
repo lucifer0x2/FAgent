@@ -77,6 +77,11 @@ impl Interner {
         names.names.reserve(additional);
     }
 
+    /// Names interned so far (live or not).
+    pub(crate) fn len(&self) -> usize {
+        self.read().names.len()
+    }
+
     /// Estimated heap bytes of every name.
     pub(crate) fn bytes(&self) -> usize {
         self.read().bytes

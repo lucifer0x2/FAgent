@@ -125,6 +125,12 @@ impl ProjectHandle {
         Some((before, staged))
     }
 
+    /// Whether a reload would compact many deleted ids. Never waits for a writer and
+    /// never refreshes the access time.
+    pub(super) fn sparse(&self) -> bool {
+        self.state.try_read().is_ok_and(|state| state.sparse())
+    }
+
     /// Estimated bytes as of the last load or successful batch, plus the names a
     /// discarded batch left interned (see `Staged`).
     pub fn estimated_bytes(&self) -> usize {

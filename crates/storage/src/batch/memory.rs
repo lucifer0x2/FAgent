@@ -89,7 +89,9 @@ impl Project {
     }
 
     /// The resident project at `revision`, or a cold load of the stored rows with
-    /// asset readiness, as reads see them.
+    /// asset readiness, as reads see them. A load tagged with `current` takes the asset
+    /// readiness `current` observed, so the snapshot and its tag agree even when a file
+    /// appears or disappears in between.
     fn for_write(
         &self,
         conn: &mut Connection,
@@ -98,7 +100,12 @@ impl Project {
     ) -> Result<HotProject> {
         let load = || {
             let mut snapshot = bench_phase::time("load", || read_snapshot(conn))?;
-            self.apply_readiness(&mut snapshot);
+            match current {
+                Some(identity) => {
+                    self.apply_readiness_from(&mut snapshot, &identity.asset_readiness)
+                }
+                None => self.apply_readiness(&mut snapshot),
+            }
             Ok(snapshot)
         };
         let memory = &self.root.memory;

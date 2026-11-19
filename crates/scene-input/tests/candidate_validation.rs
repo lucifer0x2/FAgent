@@ -112,3 +112,59 @@ fn deleting_a_linked_frame_with_notes_prunes_links_and_cascades_notes() {
         validate(&before, &[op]).unwrap();
     }
 }
+
+/// Untrusted stored rows (bundle import): a link to a frame on a parent cycle fails
+/// instead of walking the cycle forever.
+#[test]
+fn a_link_to_a_frame_on_a_parent_cycle_fails() {
+    let mut before = fixture(1, 0);
+    let frame = |id: &str, parent: &str| {
+        node(
+            id,
+            NodeKind::Frame,
+            Some(parent),
+            json!({"width":10,"height":10}),
+        )
+    };
+    before.nodes.push(frame("loop_a", "loop_b"));
+    before.nodes.push(frame("loop_b", "loop_a"));
+    let page = before
+        .nodes
+        .iter()
+        .find(|n| n.kind == NodeKind::Page)
+        .unwrap()
+        .id
+        .clone();
+    before.nodes.push(node(
+        "linker",
+        NodeKind::Frame,
+        Some(&page),
+        json!({"width":10,"height":10,"links":[{"on":"click","action":"navigate","to":"loop_a"}]}),
+    ));
+    assert!(Candidate::from_snapshot(&before).validate().is_err());
+}
+
+/// The override-target suggestion lists the master's descendants, nested included.
+#[test]
+fn a_mistyped_override_target_suggests_a_master_descendant() {
+    let mut before = fixture(1, 0);
+    let size = json!({"width":10,"height":10});
+    before.nodes.push(node(
+        "outer_box",
+        NodeKind::Frame,
+        Some("outer"),
+        size.clone(),
+    ));
+    before
+        .nodes
+        .push(node("outer_deep", NodeKind::Frame, Some("outer_box"), size));
+    validate(&before, &[]).unwrap();
+    let ops = [update(
+        "instance0",
+        json!({"overrides":{"outer_deeep":{"visible":false}}}),
+    )];
+    let error = validate(&before, &ops).unwrap_err();
+    assert_eq!(error.field.as_deref(), Some("props.overrides.outer_deeep"));
+    let suggestion = error.node.as_ref().and_then(|n| n.suggestion.as_deref());
+    assert_eq!(suggestion, Some("outer_deep"), "{error:?}");
+}

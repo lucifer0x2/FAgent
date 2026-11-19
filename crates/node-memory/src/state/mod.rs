@@ -109,6 +109,11 @@ impl ProjectState {
         self.store.bytes()
     }
 
+    /// Whether a reload would compact the ids of many deleted nodes.
+    pub(crate) fn sparse(&self) -> bool {
+        self.store.sparse()
+    }
+
     /// Applies `ops` atomically and keeps them: [`Self::begin`] then commit.
     pub fn apply(&mut self, ops: &[Operation]) -> Result<Delta> {
         Ok(self.begin(ops)?.commit())

@@ -72,7 +72,7 @@ fn commit_fails(storage: &Storage, project: &str, id: &str) {
 fn instance_with_non_object_props_fails_reads_and_commits() {
     let (_temp, storage, project) = corrupt("instance", r#"["not","an","object"]"#);
     reads_fail(&storage, &project, "props.componentId");
-    commit_fails(&storage, &project, "r1");
+    commit_fails(&storage, &project, "instance");
 }
 
 /// Batches are judged on their delta: a stored defect is reported only when the batch
@@ -89,4 +89,35 @@ fn authored_node_with_scalar_props_fails_resolution_and_commits() {
     let (_temp, storage, project) = corrupt("r1", "5");
     reads_fail(&storage, &project, "props");
     commit_fails(&storage, &project, "r1");
+}
+
+/// A corrupt node does not lock its project: an unrelated write commits, and so does
+/// a strict delete of the corrupt node itself (the repair path).
+#[test]
+fn scalar_props_leave_unrelated_writes_and_the_repair_delete_open() {
+    let (_temp, storage, project) = corrupt("r1", "5");
+    let p = storage.open_project(&project).unwrap();
+    for (key, strict, operations) in [
+        (
+            "unrelated",
+            false,
+            vec![update("r2", json!({"name":"touched"}))],
+        ),
+        (
+            "repair",
+            true,
+            vec![Operation::DeleteSubtree { id: "r1".into() }],
+        ),
+    ] {
+        let request = BatchRequest {
+            project_id: project.clone(),
+            expected_revision: Some(p.snapshot().unwrap().revision),
+            strict,
+            idempotency_key: key.into(),
+            operations,
+        };
+        p.apply_batch(request)
+            .unwrap_or_else(|e| panic!("{key}: {e:?}"));
+    }
+    assert!(p.snapshot().unwrap().nodes.iter().all(|n| n.id != "r1"));
 }

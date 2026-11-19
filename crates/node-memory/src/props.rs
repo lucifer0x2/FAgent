@@ -21,17 +21,6 @@ pub(crate) fn link_targets(props: &Value) -> impl Iterator<Item = &str> {
     fagent_scene_input::NodeProps::new(props).link_targets()
 }
 
-/// Props must be a JSON object.
-pub(crate) fn check_object(props: &Value) -> Result<()> {
-    match props.is_object() {
-        true => Ok(()),
-        false => Err(StorageError::validation(
-            "props",
-            "Properties must be an object",
-        )),
-    }
-}
-
 /// `update_node` props: each top-level key of `patch` replaces the stored value, or
 /// with `merge` the patch is applied as an RFC 7386 merge patch (`merge_props`).
 pub(crate) fn updated(stored: &Value, patch: &Map<String, Value>, merge: bool) -> Result<Value> {

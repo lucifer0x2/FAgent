@@ -138,8 +138,9 @@ fn check_target<'a>(
             None,
         ));
     }
+    // A bounded walk: stored rows on a parent cycle never reach a page.
     let mut root = target;
-    while let Some(parent) = root.parent_id.as_ref().and_then(|p| resolver.find(p)) {
+    for parent in resolver.ancestors(&target.id) {
         if parent.kind == NodeKind::Page {
             break;
         }

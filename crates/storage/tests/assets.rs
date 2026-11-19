@@ -74,3 +74,23 @@ fn bounded_asset_input_and_font_metadata() {
     // Binary signatures are checked at import; full decode/font readiness belongs
     // to the renderer. A malformed but signed font cannot yield strict render success.
 }
+
+/// A stored asset key the identity probe cannot read (a BLOB written by raw SQL)
+/// skips memory instead of failing the full read: the database path still serves it.
+#[test]
+fn an_unreadable_identity_probe_falls_back_to_the_database() {
+    let (temp, store, p) = setup();
+    let imported = p.import_asset(asset_request(&p, 0, "asset")).unwrap();
+    let id = p.id().to_string();
+    drop(p);
+    drop(store);
+    let db = rusqlite::Connection::open(temp.path().join("fixture/db.sql")).unwrap();
+    let rows = db
+        .execute("UPDATE assets SET relative_key = X'00'", [])
+        .unwrap();
+    assert_eq!(rows, 1);
+    drop(db);
+    let storage: Storage = Store::open(temp.path()).unwrap().into();
+    let snapshot = storage.snapshot(&id).unwrap();
+    assert_eq!(snapshot.assets[0].id, imported.asset.id);
+}

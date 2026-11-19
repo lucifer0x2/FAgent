@@ -35,9 +35,14 @@ fn by_id<T>(items: Vec<T>, id: impl Fn(&T) -> &String) -> Arc<BTreeMap<String, T
 impl Resources {
     /// Moves the resources out of `snapshot`, leaving its vectors empty.
     pub(crate) fn take(snapshot: &mut Snapshot) -> Self {
-        let notes = std::mem::take(&mut snapshot.notes);
+        // The note map keeps one note per id; the anchor index is built from that map,
+        // so every indexed id resolves to a note on that anchor.
+        let notes: BTreeMap<String, Arc<Note>> = std::mem::take(&mut snapshot.notes)
+            .into_iter()
+            .map(|n| (n.id.clone(), Arc::new(n)))
+            .collect();
         let mut anchors: HashMap<String, BTreeSet<String>> = HashMap::new();
-        for note in &notes {
+        for note in notes.values() {
             let set = anchors.entry(note.node_id.clone()).or_default();
             set.insert(note.id.clone());
         }
@@ -48,12 +53,7 @@ impl Resources {
             styles: by_id(std::mem::take(&mut snapshot.styles), |s| &s.id),
             assets: by_id(std::mem::take(&mut snapshot.assets), |a| &a.id),
             fonts: by_id(std::mem::take(&mut snapshot.fonts), |f| &f.id),
-            notes: Arc::new(
-                notes
-                    .into_iter()
-                    .map(|n| (n.id.clone(), Arc::new(n)))
-                    .collect(),
-            ),
+            notes: Arc::new(notes),
             anchors: Arc::new(anchors),
         }
     }

@@ -93,14 +93,19 @@ fn expand_selected(nodes: &[&Node], selected: &[&Node]) -> Result<Vec<Node>> {
             children.entry(parent).or_default().push(node);
         }
     }
-    expand_with(&Closure { by_id, children }, selected)
+    expand_with(&Closure { by_id, children }, selected, MAX_NODES)
 }
 
-/// Expand `selected` in order. Any lookup that resolves every reachable master
-/// and its complete subtree produces the same output as the full expansion.
-pub(crate) fn expand_with(lookup: &impl Lookup, selected: &[&Node]) -> Result<Vec<Node>> {
+/// Expand `selected` in order, failing past `limit` nodes. Any lookup that resolves
+/// every reachable master and its complete subtree produces the same output as the
+/// full expansion.
+pub(crate) fn expand_with(
+    lookup: &impl Lookup,
+    selected: &[&Node],
+    limit: usize,
+) -> Result<Vec<Node>> {
     let mut out = Vec::new();
-    let expander = Expander { lookup };
+    let expander = Expander { lookup, limit };
     for &node in selected {
         expander.node(node.clone(), 0, &mut out)?;
     }
@@ -109,13 +114,14 @@ pub(crate) fn expand_with(lookup: &impl Lookup, selected: &[&Node]) -> Result<Ve
 
 struct Expander<'l, L> {
     lookup: &'l L,
+    limit: usize,
 }
 impl<L: Lookup> Expander<'_, L> {
     fn node(&self, node: Node, depth: usize, out: &mut Vec<Node>) -> Result<()> {
-        if out.len() >= MAX_NODES {
+        if out.len() >= self.limit {
             return Err(StorageError::new(
                 "INSTANCE_LIMIT",
-                &format!("Expanded project exceeds {MAX_NODES} nodes"),
+                &format!("Expanded project exceeds {} nodes", self.limit),
             ));
         }
         if node.kind != NodeKind::Instance {

@@ -105,6 +105,9 @@ fn closure(
 ) -> BTreeSet<String> {
     // Id -> whether it was processed as descending.
     let mut seen: BTreeMap<String, bool> = BTreeMap::new();
+    // Masters whose users (both revisions) are already queued: every descendant of a
+    // master reaches it, and its users need queuing once.
+    let mut expanded: BTreeSet<String> = BTreeSet::new();
     let mut pending = seeds;
     while let Some((id, descend)) = pending.pop() {
         if seen.get(&id).is_some_and(|&done| done || !descend) {
@@ -116,6 +119,10 @@ fn closure(
                 pending.extend(children.into_iter().map(|c| (c.id.clone(), true)));
             }
             for master in component_ancestors(view, &id) {
+                if expanded.contains(master) {
+                    continue;
+                }
+                expanded.insert(master.to_owned());
                 for users in [before, after] {
                     let ids = users.component_users(master);
                     pending.extend(ids.into_iter().map(|u| (u.to_owned(), false)));
