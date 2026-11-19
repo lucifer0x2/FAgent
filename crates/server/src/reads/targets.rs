@@ -162,7 +162,7 @@ mod tests {
             serde_json::json!({"op":"create_node","id":node.id,"parentId":node.parent_id,"kind":node.kind,"props":node.props})
         }).collect();
         project.apply_batch(serde_json::from_value(serde_json::json!({"projectId":project.id(),"expectedRevision":0,"idempotencyKey":"seed","operations":ops})).unwrap()).unwrap();
-        let shared = store.shared_snapshot(project.id()).unwrap();
+        let shared = store.shared_database(project.id()).unwrap();
         for changed in [
             vec!["inner-t"],
             vec!["f6", "f2-g"],

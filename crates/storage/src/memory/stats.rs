@@ -17,6 +17,11 @@ pub struct NodeMemoryStats {
     /// Scoped reads served from the database (cold, behind, unknown target, probe
     /// or memory errors, reader errors on a view).
     pub read_fallbacks: u64,
+    /// Latest-revision full snapshots copied from a memory view.
+    pub full_hits: u64,
+    /// Latest-revision full snapshots read from the database (cold, behind, no
+    /// identity, memory errors).
+    pub full_fallbacks: u64,
     /// Projects loaded from a read's snapshot because they were cold.
     pub read_loads: u64,
     /// Loads from a read's snapshot because memory was behind the database or of
@@ -38,6 +43,8 @@ pub struct NodeMemoryStats {
 pub(super) struct Counters {
     pub read_hits: AtomicU64,
     pub read_fallbacks: AtomicU64,
+    pub full_hits: AtomicU64,
+    pub full_fallbacks: AtomicU64,
     pub read_loads: AtomicU64,
     pub read_reloads: AtomicU64,
     pub read_errors: AtomicU64,
@@ -54,6 +61,8 @@ impl Counters {
             resident_bytes: resident_bytes as u64,
             read_hits: get(&self.read_hits),
             read_fallbacks: get(&self.read_fallbacks),
+            full_hits: get(&self.full_hits),
+            full_fallbacks: get(&self.full_fallbacks),
             read_loads: get(&self.read_loads),
             read_reloads: get(&self.read_reloads),
             read_errors: get(&self.read_errors),

@@ -152,7 +152,7 @@ fn untrusted_invalid_snapshots_keep_legacy_expand_only_behavior() {
     let root = tempfile::tempdir().unwrap();
     let backend = SqliteBackend::new(Store::open(root.path()).unwrap());
     let project = backend.create_project("untrusted", "Untrusted").unwrap();
-    let shared = backend.shared_snapshot(&project.project_id).unwrap();
+    let shared = backend.shared_database(&project.project_id).unwrap();
     let mut snapshot = support::fixture(2);
     snapshot
         .nodes

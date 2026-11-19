@@ -39,7 +39,7 @@ mod state;
 mod store;
 
 pub use batch::{Begin, Prepared, Rows};
-pub use engine::{HotProject, MemoryConfig, MemoryStats, NodeMemory};
+pub use engine::{full_snapshot, HotProject, MemoryConfig, MemoryStats, NodeMemory};
 pub use fagent_scene_input::Operation;
 pub use limits::Limits;
 pub use ops::{Delta, RowChanges};

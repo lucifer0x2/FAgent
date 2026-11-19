@@ -61,8 +61,9 @@ impl Storage {
     pub fn snapshot(&self, key: &str) -> Result<Snapshot> {
         self.backend.snapshot(key)
     }
-    pub fn shared_snapshot(&self, key: &str) -> Result<crate::SharedSnapshot> {
-        self.backend.shared_snapshot(key)
+    /// See [`StorageBackend::shared_database`].
+    pub fn shared_database(&self, key: &str) -> Result<crate::SharedSnapshot> {
+        self.backend.shared_database(key)
     }
     pub fn reader_snapshot(&self, key: &str) -> Result<crate::ScopedRead> {
         self.backend.reader_snapshot(key)

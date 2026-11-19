@@ -84,7 +84,7 @@ fn i5_sqlite_stale_strict_dispatch_rollback_and_retained_reader() {
         "Allowed stale"
     );
     // Explicit snapshot APIs must still materialize the complete authored model.
-    let shared = pair.warm.shared_snapshot(&pair.project).unwrap();
+    let shared = pair.warm.shared_database(&pair.project).unwrap();
     assert_eq!(
         serde_json::to_value(shared.snapshot.as_ref()).unwrap(),
         serde_json::to_value(&after).unwrap()
