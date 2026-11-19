@@ -5,7 +5,7 @@ on the existing local OrbStack cluster. It is separate from the native server,
 Docker Compose and `~/.fagent`; it does not migrate existing projects.
 
 Use one application replica with `Recreate`. MCP sessions, render jobs, SSE
-wakeups, node memory and the HTTP snapshot response cache are process-local. Restarting loses sessions/jobs and
+wakeups and Moka snapshots are process-local. Restarting loses sessions/jobs and
 causes downtime; PostgreSQL retains authored projects, revisions and resources.
 This is a local deployment, without HA, backup automation, TLS or public ingress.
 

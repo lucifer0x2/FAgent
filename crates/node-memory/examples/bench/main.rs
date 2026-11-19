@@ -7,7 +7,6 @@ mod args;
 mod load;
 mod memory;
 mod reads;
-mod spike;
 mod support;
 mod txn;
 mod writes;
@@ -17,10 +16,6 @@ use memory::{mib, sample};
 fn main() {
     let args = args::Args::parse();
     let path = support::fixture(args.nodes, args.seed);
-    if let Some(option) = &args.spike {
-        spike::run(option, &args, &path);
-        return;
-    }
     // Memory first, before repeated runs leave freed pages in the allocator.
     let (mut state, parse, load) = load::first_load(&path, args.reader);
 

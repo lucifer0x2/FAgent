@@ -6,9 +6,8 @@ themes, resources, dry runs, history and exact idempotency replay.
 
 Set `DATABASE_PROVIDER=postgresql` and supply a nonempty `DATABASE_URL` in the
 environment before launching the server. The database role needs permission to
-initialize and use the runtime schema. The server connects during startup
-and exits on initialization failure. Hot projects live in node memory, as on
-SQLite.
+initialize and use the runtime schema. The server connects during startup,
+enables an in-process snapshot cache and exits on initialization failure.
 PostgreSQL mode stores nothing in the data root; it only reads `import_asset` /
 `import_assets` `path` files and `apply_batch_file` files from
 `<data-root>/<slug>/inbox` (default `~/.fagent`) and creates no directory there.
@@ -16,17 +15,19 @@ PostgreSQL mode stores nothing in the data root; it only reads `import_asset` /
 For an embedded server, inject the adapter at the composition root:
 
 ```rust,ignore
-use fagent_storage::{PostgresBackend, Storage};
+use fagent_storage::{PostgresBackend, SnapshotCache, Storage};
 
 let backend = PostgresBackend::connect(&database_url)?;
-let storage = Storage::new(backend);
+// Optional. The durable SQL namespace prevents cache mixing across databases.
+let cache = SnapshotCache::new(backend.cache_namespace());
+let storage = Storage::new(backend.with_cache(cache)?);
 let state = fagent_server::AppState::new(storage, server_config);
 let app = fagent_server::router(state);
 ```
 
-The backend owns its node memory; there is no cache to construct or inject.
-`backend.database_namespace()` returns the durable SQL namespace that every
-identity carries.
+An embedded server can omit cache construction and `with_cache` for PostgreSQL
+alone. A cache configured for another database namespace returns
+`INVALID_CACHE_CONFIG`.
 
 ## Connections and timeouts
 
@@ -62,7 +63,7 @@ deployment concern, not an implicit downgrade of a required TLS connection.
 ## Schema and persistence
 
 Construction transactionally initializes version 1 of the runtime schema and its
-durable random database namespace. The schema is `fagent_runtime_v1` unless
+durable random cache namespace. The schema is `fagent_runtime_v1` unless
 `PostgresConfig::schema` (the server: `FAGENT_DATABASE_SCHEMA`) selects another, for
 example `public`. `DatabaseSchema::parse` accepts 1–63 lowercase ASCII letters, digits or
 `_`, starting with a letter or `_`, and rejects `pg_*` and `information_schema`, so the
@@ -90,16 +91,13 @@ by explicit project creation. `apply_batch_file` and `import_asset` paths use th
 local inbox above (`Storage::with_inbox_root`); an embedded `Storage` without an
 inbox root returns `STAGING_UNSUPPORTED` for both.
 
-A batch is staged in node memory under the `FOR UPDATE` project row lock and
-validated on its delta (the whole project is validated once per load). Every
-latest-revision read from memory requires a successful PostgreSQL identity
-probe that matches the resident copy; a stale copy is evicted and reloaded.
-Rotating the SQL namespace changes every identity, so resident copies are
-reloaded. Identities carry no asset readiness: a binary deleted directly in the
-database stays "ready" for a resident project until it is reloaded. See
-[snapshot caches](MOKA-SNAPSHOT-CACHE.md).
+Validation loads the full authored candidate and uses the existing product
+validators. Moka is optional for snapshot reads. Every hit requires a
+successful PostgreSQL identity probe, and writes bypass the cache. Rotating
+the SQL namespace makes an already connected backend bypass its old cache until
+it reconnects with the new namespace. See [snapshot cache behavior](MOKA-SNAPSHOT-CACHE.md).
 
 SQLite migration, production cutover/rollback, backup/restore administration,
 retention pruning and Kubernetes are separate work. A
-database restore must rotate its database namespace if it reuses prior project
+database restore must rotate its cache namespace if it reuses prior project
 generation/revision values while preserving different authored content.
