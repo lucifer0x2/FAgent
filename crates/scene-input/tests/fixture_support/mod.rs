@@ -1,9 +1,7 @@
-use fagent_scene_input::{
-    validate::{Candidate, ValidationWork},
-    *,
-};
+//! A full-valid synthetic project: a component library with nested instances,
+//! shared token, style, font and image resources, and `copies` themed pages.
+use fagent_scene_input::{validate::Candidate, *};
 use serde_json::{json, Value};
-use std::collections::BTreeSet;
 
 pub fn node(id: &str, kind: NodeKind, parent: Option<&str>, props: Value) -> Node {
     Node {
@@ -116,29 +114,4 @@ pub fn update(id: &str, props: Value) -> Operation {
         id: id.into(),
         props,
     }
-}
-
-/// Both modes start from an explicitly full-valid before and apply independently.
-/// Compare the entire serialized error, including opIndex and node details.
-pub fn parity(before: &Snapshot, ops: &[Operation]) -> Result<ValidationWork> {
-    fn apply(before: &Snapshot, ops: &[Operation]) -> Result<(Candidate, BTreeSet<String>)> {
-        let mut candidate = Candidate::from_snapshot(before);
-        let mut changed = BTreeSet::new();
-        for (index, op) in ops.iter().enumerate() {
-            candidate.apply(op, &mut changed).map_err(|e| e.at(index))?;
-        }
-        candidate.prune_links(&mut changed);
-        Ok((candidate, changed))
-    }
-    let reference = apply(before, ops).and_then(|(c, _)| c.validate());
-    let incremental =
-        apply(before, ops).and_then(|(c, changed)| c.validate_after(before, ops, &changed));
-    assert_eq!(
-        incremental
-            .as_ref()
-            .map(|_| ())
-            .map_err(|e| serde_json::to_value(e).unwrap()),
-        reference.map_err(|e| serde_json::to_value(e).unwrap())
-    );
-    incremental
 }
