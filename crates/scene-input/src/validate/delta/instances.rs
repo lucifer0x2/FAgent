@@ -7,7 +7,7 @@
 //! makes each instance's copy of a master node resolve on its own, and accepting a batch
 //! must equal `Candidate::validate`, which checks every copy. It covers the closure's
 //! instances, never the whole project.
-use super::{affected::Affected, expand::expand, graph, Facts};
+use super::{affected::Affected, expand::expand, facts, graph, Facts};
 use crate::bench_phase::{count, time};
 use crate::validate::instance_checks::{check_expanded, check_instance_node};
 use crate::validate::Lookup;
@@ -27,8 +27,15 @@ pub(super) fn check(
         .filter_map(|id| after.node(id))
         .filter(|n| n.kind == NodeKind::Instance)
         .collect();
+    // The affected instances expand to at most the new total. A batch that shrinks a
+    // stored excess stays within the old total, so it gets that much room; the budget
+    // decision itself is `Facts::update`'s, and an overflow here reports `max_nodes`.
+    let room = max_nodes.max(facts.total());
     let expanded = time("delta.instances.expand", || {
-        expand(after, &instances, max_nodes)
+        expand(after, &instances, room).map_err(|e| match e.code.as_str() {
+            "INSTANCE_LIMIT" => facts::over_limit(max_nodes),
+            _ => e,
+        })
     })?;
     count("delta.instances.expanded", expanded.len());
     let next = time("delta.instances.budget", || {

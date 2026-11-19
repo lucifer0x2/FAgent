@@ -4,6 +4,7 @@
 mod support;
 
 use fagent_node_memory::{Limits, ProjectState};
+use fagent_scene_input::read_scope::ReadScope;
 use fagent_scene_input::{NodeKind, Snapshot, MAX_NODES};
 use serde_json::json;
 use support::*;
@@ -142,4 +143,11 @@ fn higher_limit_expands_instances_beyond_max_nodes() {
     };
     let mut state = ProjectState::from_snapshot_with(snapshot(nodes), limits).expect("loads");
     state.apply(&ops).expect("fits the custom cap");
+    // Reads expand under the same cap as writes.
+    let view = state.view();
+    let (expanded, _) = view
+        .scoped()
+        .expand_nodes(ReadScope::Target("p"))
+        .expect("the page reads under the custom cap");
+    assert_eq!(expanded.len(), 2 + 2 * (half + 1));
 }
