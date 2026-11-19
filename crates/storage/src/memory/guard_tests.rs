@@ -22,20 +22,20 @@ const HISTORIES: [&str; 6] = [
     "base ahead",
 ];
 
-pub(super) type Public<T> = std::result::Result<T, Value>;
+type Public<T> = std::result::Result<T, Value>;
 
-pub(super) fn public<T>(result: Result<T>) -> Public<T> {
+fn public<T>(result: Result<T>) -> Public<T> {
     result.map_err(|e| serde_json::to_value(e).unwrap())
 }
 
-pub(super) fn ops(value: Value) -> Vec<Operation> {
+fn ops(value: Value) -> Vec<Operation> {
     serde_json::from_value(value).unwrap()
 }
 
 /// What one case produced: a validation rejection, or the staged batch's changed
 /// ids and footprint, its guard outcome per page set and history, and its result
 /// per history.
-pub(super) enum Outcome {
+enum Outcome {
     Rejected(Value),
     Staged {
         changed: Vec<String>,
@@ -58,7 +58,7 @@ fn ready(begin: Result<Begin<'_>>) -> Prepared<'_> {
 
 /// The seeded project after one unrelated commit (revision 2), and the history
 /// envelopes of two commits on revision 1: that unrelated one and one on `r1`.
-pub(super) fn fixture() -> (Snapshot, Value, Value) {
+fn fixture() -> (Snapshot, Value, Value) {
     let initial = parity::seed();
     let engine = engine();
     let project = engine.load(initial.clone()).unwrap();
@@ -82,7 +82,7 @@ pub(super) fn fixture() -> (Snapshot, Value, Value) {
 }
 
 /// (expected revision, history after it), in `HISTORIES` order.
-pub(super) fn histories(unrelated: Value, overlapping: Value) -> Vec<(u64, Vec<(u64, Value)>)> {
+fn histories(unrelated: Value, overlapping: Value) -> Vec<(u64, Vec<(u64, Value)>)> {
     let legacy = json!([{"op":"update_node","id":"f2","props":{"name":"Legacy"}}]);
     vec![
         (2, vec![]),
@@ -94,7 +94,7 @@ pub(super) fn histories(unrelated: Value, overlapping: Value) -> Vec<(u64, Vec<(
     ]
 }
 
-pub(super) fn request(before: &Snapshot, expected: u64, operations: &[Operation]) -> BatchRequest {
+fn request(before: &Snapshot, expected: u64, operations: &[Operation]) -> BatchRequest {
     BatchRequest {
         project_id: before.project_id.clone(),
         expected_revision: Some(expected),
@@ -104,7 +104,7 @@ pub(super) fn request(before: &Snapshot, expected: u64, operations: &[Operation]
     }
 }
 
-pub(super) fn cases() -> Vec<Value> {
+fn cases() -> Vec<Value> {
     vec![
         json!([{"op":"update_node","id":"r1","props":{"name":"Allowed"}}]),
         json!([{"op":"update_node","id":"r1","props":{"name":"Same"}},{"op":"update_node","id":"r1","props":{"name":"Same"}}]),
@@ -152,7 +152,7 @@ pub(super) fn cases() -> Vec<Value> {
     ]
 }
 
-pub(super) fn page_sets() -> Vec<Vec<String>> {
+fn page_sets() -> Vec<Vec<String>> {
     let sets: [&[&str]; 9] = [
         &[],
         &["missing"],
@@ -220,7 +220,7 @@ fn memory_outcomes(before: &Snapshot, unrelated: Value, overlapping: Value) -> V
 
 /// The golden document: distinct errors sorted once and referenced by index;
 /// results keep only the fields that differ from a plain commit of the case.
-pub(super) fn golden(before: &Snapshot, outcomes: &[Outcome]) -> Value {
+fn golden(before: &Snapshot, outcomes: &[Outcome]) -> Value {
     let mut errors = BTreeMap::new();
     let mut collect = |error: &Value| {
         errors.insert(serde_json::to_string(error).unwrap(), error.clone());
@@ -280,7 +280,7 @@ pub(super) fn golden(before: &Snapshot, outcomes: &[Outcome]) -> Value {
 }
 
 /// One line per error and per case field, so a regenerated fixture diffs well.
-pub(super) fn format(golden: &Value) -> String {
+fn format(golden: &Value) -> String {
     let line = |value: &Value| serde_json::to_string(value).unwrap();
     let items = |values: &Value, render: &dyn Fn(&Value) -> String| {
         values

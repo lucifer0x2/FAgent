@@ -65,26 +65,6 @@ impl RevisionIndexes {
         }
     }
 
-    /// Test oracle only (phase 4 removes it): commits stage in `NodeMemory`.
-    #[cfg(test)]
-    pub(crate) fn candidate(
-        before: &Arc<Self>,
-        candidate: &Candidate,
-        operations: &[Operation],
-        changed: &BTreeSet<String>,
-    ) -> Arc<Self> {
-        if validate::NodeTopology::preserves(operations, changed) {
-            bench_phase::count("indexes.topology_reused", 1);
-            Arc::new(Self::with_tree(
-                candidate.nodes.values(),
-                before.topology.clone(),
-                before.pages.clone(),
-            ))
-        } else {
-            Arc::new(Self::new(candidate.nodes.values()))
-        }
-    }
-
     pub fn page(&self, node: &str) -> Option<&str> {
         if let Some(view) = &self.memory {
             return view.page(node);
@@ -221,16 +201,6 @@ impl IndexCache {
             .lock()
             .unwrap_or_else(std::sync::PoisonError::into_inner);
         self.entries.get_with(identity, || indexes)
-    }
-    /// Test oracle only (phase 4 removes it): commits stage in `NodeMemory`.
-    #[cfg(test)]
-    pub(crate) fn publish(&self, identity: SnapshotCacheIdentity, indexes: Arc<RevisionIndexes>) {
-        let _gate = self
-            .gate
-            .lock()
-            .unwrap_or_else(std::sync::PoisonError::into_inner);
-        // Exact immutable keys: late old fills cannot replace any newer revision.
-        self.entries.get_with(identity, || indexes);
     }
 }
 
