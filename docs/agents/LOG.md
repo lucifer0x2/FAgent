@@ -64,4 +64,16 @@ Append-only. Rules for entries:
 - Decisions: struct name `NodeMemory`; invalid stored data is admitted, served, counted and logged with ids/codes only; spike 1b result (c) adopted, one persistent `ProjectState` over a hand-written radix trie (`imbl` allowed for the spike only); pure diff-only validation, a stored defect rejects a batch only when the batch's closure reaches it; the expanded-node limit follows `Limits.max_nodes`; phase 4 runs on `feat/node-memory-optimization`, which carries the whole task; `memory_snapshot`/`evict_memory` removed (2026-11-19).
 - Phases 1–4 done 2026-11-18/19 (boundary, validator trait and admission, delta rules, cleanup of Moka, test-only oracles and shadow code). Results, measurements and behavior changes: [TASK41-REPORT.md](../TASK41-REPORT.md).
 - Review fixes 2026-11-19: links into a frame whose recreated parent changed kind, the note limit on stored excess, flow names through a `flow:` index, per-master expanded-size counters, shared component-graph walk and commit staging; see the report's "Review fixes".
-- Open: phase 5 (lazy expansion cache, optional); ~900-instance edits validate in 15–22 ms at 200k; admission ~0.8–1.0 s per 200k load; server-side `get_design_context` shaping not benchmarked. Branch awaits the user's review/merge.
+- Open: phase 5 (lazy expansion cache, optional); ~900-instance edits validate in 15–22 ms at 200k; admission ~0.8–1.0 s per 200k load. Branch awaits the user's review/merge.
+
+### CodeRabbit pull request review — 2026-11-18
+
+- Added `.coderabbit.yaml` (schema v2, checked offline against `schema.v2.json`): English-language reviews, AGENTS.md as a code guideline, Betterleaks/TruffleHog/Presidio scanners on, and three `error` pre-merge checks (English only, no secrets or passwords, no local absolute paths). Feature review: per-area path instructions (storage, node-memory, scene-input, server, layout/text/paint, viewer) and four `warning` checks (task acceptance criteria from `tasks/`, tests for behavior changes, contract and docs in sync, no rejected approach). `auto_approvals` requests changes while a blocking check is open; authors cannot self-approve through `@coderabbitai approve`.
+- CodeRabbit is advisory review on top of the deterministic gate; `public-content.yml` (check script plus gitleaks history scan) stays the blocking check.
+- Open: the maintainer installs the CodeRabbit GitHub App on the repository and, if wanted, marks `public-content` and `CodeRabbit` as required checks on `main`. Public repositories under 10 stars get reviews only on `@coderabbitai review`.
+
+### Schema rejections name the failing field — 2026-11-18
+
+- Reported: `apply_batch_file` returned the generic schema `INVALID_REQUEST` for every call; the three required arguments were valid, but a bad operation in the JSON file (re-validated as `apply_batch`) or an `idempotencyKey` outside `[A-Za-z0-9_-]` produced the same message with no field.
+- Fixed on `fix/schema-error-fields`: rejections carry the field path in the message and `error.field`, `opIndex` for operations; `oneOf` blames the variant accepting the most sent fields. Accepted inputs unchanged. Details in `docs/SERVER.md` (MCP section).
+- Review follow-up: quoted key paths escape C1 controls (U+0085) too; on an unknown-field tie a key no tied form accepts is reported as unknown instead of "send only one of".

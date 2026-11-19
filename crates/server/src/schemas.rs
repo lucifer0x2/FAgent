@@ -36,10 +36,12 @@ pub fn validate(name: &str, args: &Value) -> crate::error::Result<()> {
         .ok_or_else(|| crate::ApiError::new("UNKNOWN_TOOL", "Tool is not available"))?;
     validation::validate(schema, args)
 }
-/// Checks one `import_assets` item against the strict single-source form of `import_asset`.
-pub fn validate_import_item(item: &Value) -> crate::error::Result<()> {
+/// Checks `import_assets` item `index` against the strict single-source form of
+/// `import_asset`; a rejection names the full path (`items[1].mediaType`).
+pub fn validate_import_item(item: &Value, index: usize) -> crate::error::Result<()> {
     static ITEM: OnceLock<Value> = OnceLock::new();
-    validation::validate(ITEM.get_or_init(import::item_validation), item)
+    let schema = ITEM.get_or_init(import::item_validation);
+    validation::validate_element(schema, item, "items", index)
 }
 /// Index of the first `apply_batch` operation that fails the published operation schema.
 pub fn invalid_operation(operations: &[Value]) -> Option<usize> {
