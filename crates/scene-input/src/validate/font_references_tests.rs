@@ -27,7 +27,7 @@ fn reference(snapshot: &Snapshot, nodes: &[&Node]) -> BTreeSet<String> {
 }
 
 #[test]
-fn borrowed_font_context_matches_legacy_themes_family_selection_and_placed_overrides() {
+fn resource_font_context_matches_legacy_themes_family_selection_and_placed_overrides() {
     let snapshot: Snapshot = serde_json::from_value(json!({
         "schemaVersion":4,"projectId":"project","slug":"fonts","name":"Fonts","revision":1,
         "retention":{"oldestCommitRevision":0,"idempotencyPolicy":"lifetime"},
@@ -54,7 +54,6 @@ fn borrowed_font_context_matches_legacy_themes_family_selection_and_placed_overr
         .into_iter()
         .map(|n| (n.id.clone(), n))
         .collect();
-    let borrowed = FontReferences::from_candidate(&candidate, &expanded).unwrap();
     let resources_only = FontReferences::from_snapshot(&snapshot, &expanded).unwrap();
     for ids in [
         vec!["label"],
@@ -64,15 +63,16 @@ fn borrowed_font_context_matches_legacy_themes_family_selection_and_placed_overr
     ] {
         let nodes: Vec<_> = ids.iter().map(|id| &expanded[*id]).collect();
         let expected = reference(&snapshot, &nodes);
-        assert_eq!(borrowed.for_nodes(&nodes).unwrap(), expected);
         assert_eq!(resources_only.for_nodes(&nodes).unwrap(), expected);
     }
     assert_eq!(
-        borrowed.for_nodes(&[&expanded["label"]]).unwrap(),
+        resources_only.for_nodes(&[&expanded["label"]]).unwrap(),
         BTreeSet::from(["regular".into(), "bold".into()])
     );
     assert_eq!(
-        borrowed.for_nodes(&[&expanded["instance/label"]]).unwrap(),
+        resources_only
+            .for_nodes(&[&expanded["instance/label"]])
+            .unwrap(),
         BTreeSet::from(["bold".into()])
     );
 }
