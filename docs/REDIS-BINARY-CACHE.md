@@ -1,8 +1,9 @@
 # Historical Task19 Redis/bitcode snapshot cache
 
 This records the original implementation measured in the
-[Task19b baseline](RUNTIME-STORAGE-BENCHMARK.md). For the current runtime API,
-limits and test commands, see [Moka snapshot cache](MOKA-SNAPSHOT-CACHE.md).
+[Task19b baseline](RUNTIME-STORAGE-BENCHMARK.md). Its Moka successor was removed in
+Task 41 as well; for what remains (the HTTP response cache) see
+[snapshot caches](MOKA-SNAPSHOT-CACHE.md).
 
 Task19 adds `SnapshotCache` to runtime storage, with **bitcode `=0.6.9`** chosen
 by the user. It is disabled unless a `PostgresBackend` is explicitly given a

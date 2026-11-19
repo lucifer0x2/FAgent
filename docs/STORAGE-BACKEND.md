@@ -104,14 +104,16 @@ not the completeness or durability of a second production engine.
 
 Task19 implements `PostgresBackend` through this trait in runtime storage. It
 reuses the full product candidate validators and commits entity deltas, revision,
-history, replay and project-scoped resource bytes atomically. Optional Moka
-keeps one typed snapshot per project in process with a one-hour TTL. Each hit
-requires an authoritative PostgreSQL check of namespace, canonical project ID,
-generation and revision. See the [adapter guide](POSTGRES-BACKEND.md) and
-[Moka cache guide](MOKA-SNAPSHOT-CACHE.md).
+history, replay and project-scoped resource bytes atomically. Since Task 41 both
+backends keep hot projects in node memory (`NodeMemory`): batches stage there and
+latest-revision reads are served from the resident copy when an authoritative
+check (on PostgreSQL: namespace, canonical project ID, generation and revision)
+matches it; `database_snapshot` reads the database only. The former Moka
+snapshot cache was removed in Task 41 phase 4. See the
+[adapter guide](POSTGRES-BACKEND.md) and [snapshot caches](MOKA-SNAPSHOT-CACHE.md).
 
 The server defaults to SQLite. Set `DATABASE_PROVIDER=postgresql` with
-`DATABASE_URL` to select PostgreSQL and enable its snapshot cache.
+`DATABASE_URL` to select PostgreSQL.
 SQLite migration, production cutover/rollback and deployment remain separate
 work. Task19 uses full candidate validation. Existing render/export and
 end-to-end regression results were tracked separately in the Task16 report.
