@@ -137,6 +137,7 @@ impl NodeMemory {
             let counter = match eviction {
                 Eviction::Expired(_) => &self.stats.expired,
                 Eviction::OverBudget(_) => &self.stats.over_budget,
+                Eviction::Sparse(_) => &self.stats.sparse,
             };
             Stats::bump(counter);
         }

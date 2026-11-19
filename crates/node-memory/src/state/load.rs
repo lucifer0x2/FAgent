@@ -1,9 +1,8 @@
 //! Bulk load of a snapshot: one pass to allocate, one to link, one sort per sibling
 //! list and one top-down walk for derived indexes. Structural checks only: property
-//! validation (instance targets included) is the engine's admission, which never
-//! fails a load.
+//! validation (props shape and instance targets included) is the engine's admission,
+//! which never fails a load, so a batch that deletes or avoids a corrupt node commits.
 use crate::checks;
-use crate::props::check_object;
 use crate::store::{Key, Store};
 use fagent_scene_input::{Node, Result, StorageError};
 
@@ -21,7 +20,6 @@ pub(crate) fn build(nodes: Vec<Node>, max_nodes: usize) -> Result<Store> {
         if store.contains(&node.id) {
             return Err(on_node(StorageError::validation("id", "Duplicate node ID")));
         }
-        check_object(&node.props).map_err(on_node)?;
         store.load_node(node);
     }
     let keys: Vec<Key> = store.iter().map(|(key, _)| key).collect();

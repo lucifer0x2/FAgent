@@ -60,15 +60,15 @@ impl Memory {
 
     /// The latest revision as a full snapshot, with the identity of the same read: a
     /// copy of the published view when memory holds the revision `probe` reports,
-    /// else `load` (the database), which then (re)loads memory. Probe errors are the
-    /// read's errors, as for a database read.
+    /// else `load` (the database), which then (re)loads memory. A failed probe only
+    /// skips memory, as in [`Self::scoped_read`]: `load`'s errors are the read's.
     pub fn full_read(
         &self,
         probe: impl FnOnce() -> Result<Option<SnapshotCacheIdentity>>,
         load: impl FnOnce() -> Result<Full>,
     ) -> Result<Full> {
         let counters = &self.inner.counters;
-        let identity = probe()?;
+        let identity = probe().ok().flatten();
         let hits = (&counters.full_hits, &counters.full_fallbacks);
         let (latest, identity) = self.latest("", identity, load, |s| s.as_ref(), hits)?;
         Ok(match latest {

@@ -27,7 +27,9 @@ pub(super) fn check(
         .filter_map(|id| after.node(id))
         .filter(|n| n.kind == NodeKind::Instance)
         .collect();
-    let expanded = time("delta.instances.expand", || expand(after, &instances))?;
+    let expanded = time("delta.instances.expand", || {
+        expand(after, &instances, max_nodes)
+    })?;
     count("delta.instances.expanded", expanded.len());
     let next = time("delta.instances.budget", || {
         facts.update((before, after), ids(), max_nodes)

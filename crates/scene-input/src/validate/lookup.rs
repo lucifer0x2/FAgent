@@ -4,7 +4,7 @@ use super::Candidate;
 use crate::model::*;
 use crate::read_scope::references_of;
 use serde_json::Value;
-use std::collections::BTreeSet;
+use std::collections::{BTreeSet, HashMap};
 
 #[cfg(test)]
 #[path = "lookup_tests.rs"]
@@ -38,6 +38,19 @@ pub trait Lookup {
     fn pages(&self) -> Vec<&Node>;
     /// Direct children sorted by `(sort_key, id)`.
     fn children(&self, id: &str) -> Vec<&Node>;
+    /// Ids of every descendant of `id`, unordered (each visited once).
+    fn descendants(&self, id: &str) -> Vec<&str> {
+        let mut out = Vec::new();
+        let mut seen = BTreeSet::new();
+        let mut pending = self.children(id);
+        while let Some(node) = pending.pop() {
+            if seen.insert(node.id.as_str()) {
+                out.push(node.id.as_str());
+                pending.extend(self.children(&node.id));
+            }
+        }
+        out
+    }
     /// Ids of the nodes whose props name `key` (see [`reference_keys`]), sorted.
     fn referencing(&self, key: &str) -> Vec<&str>;
     fn token(&self, id: &str) -> Option<&Token>;
@@ -109,6 +122,25 @@ impl Lookup for Candidate {
             .collect();
         sibling_order(&mut children);
         children
+    }
+    /// One pass over the nodes for the whole walk: `children` scans them per call.
+    fn descendants(&self, id: &str) -> Vec<&str> {
+        let mut by_parent: HashMap<&str, Vec<&str>> = HashMap::new();
+        for node in self.nodes.values() {
+            if let Some(parent) = node.parent_id.as_deref() {
+                by_parent.entry(parent).or_default().push(node.id.as_str());
+            }
+        }
+        let mut out = Vec::new();
+        let mut seen = BTreeSet::new();
+        let mut pending: Vec<&str> = by_parent.get(id).cloned().unwrap_or_default();
+        while let Some(child) = pending.pop() {
+            if seen.insert(child) {
+                out.push(child);
+                pending.extend(by_parent.get(child).into_iter().flatten().copied());
+            }
+        }
+        out
     }
     fn referencing(&self, key: &str) -> Vec<&str> {
         self.nodes

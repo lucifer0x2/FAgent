@@ -23,6 +23,8 @@ pub struct MemoryStats {
     pub expired: u64,
     /// Projects dropped by the byte budget.
     pub over_budget: u64,
+    /// Projects dropped to compact the ids of deleted nodes.
+    pub sparse: u64,
     /// Batches kept.
     pub commits: u64,
     /// Prepared batches dropped without commit.
@@ -42,6 +44,7 @@ pub(crate) struct Stats {
     pub(crate) evictions: AtomicU64,
     pub(crate) expired: AtomicU64,
     pub(crate) over_budget: AtomicU64,
+    pub(crate) sparse: AtomicU64,
     pub(crate) commits: AtomicU64,
     pub(crate) rollbacks: AtomicU64,
     pub(crate) rejected: AtomicU64,
@@ -64,6 +67,7 @@ impl Stats {
             evictions: get(&self.evictions),
             expired: get(&self.expired),
             over_budget: get(&self.over_budget),
+            sparse: get(&self.sparse),
             commits: get(&self.commits),
             rollbacks: get(&self.rollbacks),
             rejected: get(&self.rejected),

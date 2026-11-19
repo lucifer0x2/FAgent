@@ -150,14 +150,7 @@ pub(super) fn check_expanded<'a>(
 
 /// A non-descendant override target, most likely a mistyped descendant ID or instance key.
 fn not_descendant(lookup: &dyn Lookup, node: &str, target: &str, master: &str) -> StorageError {
-    let mut descendants = Vec::new();
-    let mut pending = vec![master];
-    while let Some(id) = pending.pop() {
-        for child in lookup.children(id) {
-            descendants.push(child.id.as_str());
-            pending.push(&child.id);
-        }
-    }
+    let mut descendants = lookup.descendants(master);
     descendants.sort_unstable();
     let mut error = StorageError::validation(
         &format!("props.overrides.{target}"),

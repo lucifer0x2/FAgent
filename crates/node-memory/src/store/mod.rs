@@ -84,6 +84,13 @@ impl Store {
         self.slots.len()
     }
 
+    /// Whether the interned node ids greatly outnumber the live nodes. Ids are never
+    /// reused, so create and delete churn with fresh ids grows the interner and the
+    /// trie leaves; a reload from live rows compacts both.
+    pub(crate) fn sparse(&self) -> bool {
+        self.ids.len() > 2 * self.len() + SPARSE_SLACK
+    }
+
     /// Estimated bytes of this version, counting shared parts in full.
     pub(crate) fn bytes(&self) -> usize {
         self.bytes
@@ -215,4 +222,8 @@ pub(crate) fn string_bytes(s: &str) -> usize {
 }
 
 /// Bytes of one trie slot.
+/// Interned ids beyond twice the live nodes a project may carry before it counts as
+/// sparse (see [`Store::sparse`]).
+pub(crate) const SPARSE_SLACK: usize = 4096;
+
 pub(crate) const SLOT_SIZE: usize = std::mem::size_of::<Option<Slot>>();

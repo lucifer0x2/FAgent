@@ -78,7 +78,7 @@ impl<'a> ScopedSnapshot<'a> {
     /// Expansion reads masters through the revision-bound index, so no per-call
     /// dependency maps are built; output equals the closure-restricted expansion.
     pub(super) fn expand_authored(&self, id: &str, authored: &[&'a Node]) -> Result<Vec<Node>> {
-        let expanded = crate::instances::expand_with(self, authored)?;
+        let expanded = crate::instances::expand_with(self, authored, crate::MAX_NODES)?;
         if !expanded.iter().any(|n| n.id == id) {
             return Err(StorageError::new(
                 "INVALID_REQUEST",

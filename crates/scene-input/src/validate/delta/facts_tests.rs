@@ -48,6 +48,17 @@ fn of(c: &Candidate) -> Facts {
 
 /// Applies `ops` to `before` and runs the delta rules; returns the new state and facts.
 fn step(before: &Candidate, facts: &Facts, ops: &[Value]) -> (Candidate, Facts) {
+    let (after, next) = judged(before, facts, ops, MAX_NODES);
+    (after, next.unwrap())
+}
+
+/// Applies `ops` to `before` and runs the delta rules under `max_nodes`.
+fn judged(
+    before: &Candidate,
+    facts: &Facts,
+    ops: &[Value],
+    max_nodes: usize,
+) -> (Candidate, crate::Result<Facts>) {
     let mut after = before.clone();
     let mut changed = BTreeSet::new();
     for op in ops {
@@ -70,9 +81,9 @@ fn step(before: &Candidate, facts: &Facts, ops: &[Value]) -> (Candidate, Facts) 
         notes: &[],
         tokens: &[],
         styles: &[],
-        max_nodes: MAX_NODES,
+        max_nodes,
     };
-    let next = validate_batch(before, &after, &batch, facts).unwrap();
+    let next = validate_batch(before, &after, &batch, facts);
     (after, next)
 }
 
@@ -103,4 +114,51 @@ fn per_master_counters_match_a_full_expansion() {
         assert_eq!(after.total(), of(&next).total(), "{ops:?}");
         (state, facts) = (next, after);
     }
+}
+
+/// A stored project already over the expanded limit accepts a batch that leaves the
+/// excess alone and rejects one that grows it.
+#[test]
+fn a_stored_excess_blocks_only_batches_that_grow_it() {
+    let c = candidate();
+    let facts = of(&c);
+    let limit = facts.total() - 1;
+    let rename = [json!({"op":"update_node","id":"f","props":{"name":"F"},"merge":true})];
+    let (_, next) = judged(&c, &facts, &rename, limit);
+    assert_eq!(next.expect("neutral edit").total(), facts.total());
+    let grow = [
+        json!({"op":"create_node","id":"ia2","kind":"instance","parentId":"f","props":{"componentId":"a"}}),
+    ];
+    let (_, next) = judged(&c, &facts, &grow, limit);
+    assert_eq!(next.err().expect("excess grows").code, "INSTANCE_LIMIT");
+}
+
+/// Stored masters nested far past the component depth limit, each holding two
+/// instances of the next: counting stays bounded instead of overflowing.
+#[test]
+fn an_invalid_deep_master_chain_counts_without_overflow() {
+    let node = |id: String, kind: &str, parent: &str, props: Value| json!({"id":id,"kind":kind,"parentId":parent,"sortKey":0,"props":props});
+    let mut nodes = vec![json!({"id":"lib","kind":"page","parentId":null,"sortKey":0,"props":{}})];
+    for i in 0..70 {
+        let props = json!({"width":10,"height":10,"component":{"name":format!("M{i}")}});
+        nodes.push(node(format!("m{i}"), "frame", "lib", props));
+        for copy in 0..2 {
+            let props = json!({"componentId":format!("m{}", i + 1)});
+            nodes.push(node(
+                format!("m{i}i{copy}"),
+                "instance",
+                &format!("m{i}"),
+                props,
+            ));
+        }
+    }
+    let snapshot: Snapshot = serde_json::from_value(json!({
+        "schemaVersion":4,"projectId":"p","slug":"p","name":"p","revision":1,
+        "retention":{"oldestCommitRevision":0,"idempotencyPolicy":"bounded"},
+        "tokens":[],"styles":[],"assets":[],"fonts":[],"notes":[],"nodes":nodes
+    }))
+    .unwrap();
+    let c = Candidate::from_snapshot(&snapshot);
+    let total = of(&c).total();
+    assert!(total > c.nodes.len() && total < 1 << 20, "{total}");
 }

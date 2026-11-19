@@ -164,3 +164,21 @@ fn store_indexes_match_candidate_across_writes() {
         .expect("batch applies");
     assert_same_indexes(&state);
 }
+
+/// Two stored notes sharing an id collapse to one: the anchor index follows the note
+/// kept, so no node lists an id whose note is anchored elsewhere.
+#[test]
+fn duplicate_note_ids_index_only_the_note_kept() {
+    let mut snapshot = snapshot();
+    snapshot.notes = serde_json::from_value(json!([
+        {"id":"n","nodeId":"a","text":"x"},
+        {"id":"n","nodeId":"b","text":"y"}
+    ]))
+    .unwrap();
+    let state = ProjectState::from_snapshot(snapshot).unwrap();
+    for node in ["a", "b"] {
+        assert!(state.notes_on(node).all(|n| n.node_id == node), "{node}");
+    }
+    let listed = state.notes_on("a").count() + state.notes_on("b").count();
+    assert_eq!(listed, 1);
+}

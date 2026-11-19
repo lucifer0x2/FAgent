@@ -113,3 +113,33 @@ fn cap_is_checked_on_the_final_state_of_the_batch() {
     assert_unchanged(&state, &held);
     assert_ne!(held.revision, before.revision);
 }
+
+/// The expanded-node limit follows the custom cap too: two instances of a master with
+/// `MAX_NODES / 2` descendants expand past `MAX_NODES` but fit twice that cap.
+#[test]
+fn higher_limit_expands_instances_beyond_max_nodes() {
+    let half = MAX_NODES / 2;
+    let mut nodes = vec![
+        json!({"id":"p","kind":"page","parentId":null,"sortKey":0,"props":{}}),
+        json!({"id":"f","kind":"frame","parentId":"p","sortKey":0,"props":{"width":10,"height":10}}),
+        json!({"id":"lib","kind":"page","parentId":null,"sortKey":1,"props":{}}),
+        json!({"id":"m","kind":"frame","parentId":"lib","sortKey":0,"props":{"width":10,"height":10,"component":{"name":"M"}}}),
+    ];
+    for i in 0..half {
+        nodes.push(
+            json!({"id":format!("r{i}"),"kind":"rectangle","parentId":"m","sortKey":i,"props":{}}),
+        );
+    }
+    let ops = [
+        create("i1", NodeKind::Instance, "f", json!({"componentId":"m"})),
+        create("i2", NodeKind::Instance, "f", json!({"componentId":"m"})),
+    ];
+    let mut state = ProjectState::from_snapshot(snapshot(nodes.clone())).expect("loads");
+    let error = state.apply(&ops).expect_err("over the default cap");
+    assert_eq!(error.code, "INSTANCE_LIMIT", "{error:?}");
+    let limits = Limits {
+        max_nodes: 2 * MAX_NODES,
+    };
+    let mut state = ProjectState::from_snapshot_with(snapshot(nodes), limits).expect("loads");
+    state.apply(&ops).expect("fits the custom cap");
+}

@@ -227,3 +227,38 @@ fn custom_limits_apply_to_loads() {
     let error = memory.load(project("a")).expect_err("over the cap");
     assert_eq!(error.field.as_deref(), Some("nodes"));
 }
+
+/// Create and delete churn with fresh ids leaves the interner full of dead ids: the
+/// sweep drops the project so the next access reloads the live rows compactly.
+#[test]
+fn churn_with_fresh_ids_evicts_a_sparse_project() {
+    use fagent_node_memory::Begin;
+    use fagent_scene_input::NodeKind;
+    use serde_json::json;
+    let (memory, clock) = memory(3600, usize::MAX);
+    let snapshot = project("a");
+    let hot = memory.load(snapshot.clone()).unwrap();
+    for (round, revision) in (0..20).zip(snapshot.revision..) {
+        let ids: Vec<String> = (0..250).map(|i| format!("churn{round}_{i}")).collect();
+        let creates = ids
+            .iter()
+            .map(|id| create(id, NodeKind::Rectangle, "p1", json!({})));
+        let deletes = ids.iter().map(|id| delete(id));
+        let ops: Vec<_> = creates.chain(deletes).collect();
+        match hot.begin(revision, &ops).unwrap() {
+            Begin::Ready(prepared) => drop(prepared.commit()),
+            Begin::Stale => panic!("stale"),
+        }
+        if round == 0 {
+            clock.advance(Duration::from_secs(60));
+            assert!(memory.maybe_expire().is_empty(), "not sparse yet");
+        }
+    }
+    clock.advance(Duration::from_secs(60));
+    assert_eq!(memory.maybe_expire(), [Eviction::Sparse("a".into())]);
+    assert_eq!(memory.stats().sparse, 1);
+    drop(hot);
+    memory.load(snapshot).unwrap();
+    clock.advance(Duration::from_secs(60));
+    assert!(memory.maybe_expire().is_empty(), "a reload is compact");
+}

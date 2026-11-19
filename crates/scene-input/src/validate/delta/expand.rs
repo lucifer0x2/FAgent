@@ -20,7 +20,12 @@ impl Expansion for Authored<'_> {
 }
 
 /// The expansion of `instances` (authored instances, in the order given): each root
-/// followed by its virtual descendants, as `instances::expand` places them.
-pub(super) fn expand(lookup: &dyn Lookup, instances: &[&Node]) -> Result<Vec<Node>> {
-    expand_with(&Authored(lookup), instances)
+/// followed by its virtual descendants, as `instances::expand` places them. Fails past
+/// `max_nodes`, the batch's expanded-node limit.
+pub(super) fn expand(
+    lookup: &dyn Lookup,
+    instances: &[&Node],
+    max_nodes: usize,
+) -> Result<Vec<Node>> {
+    expand_with(&Authored(lookup), instances, max_nodes)
 }
