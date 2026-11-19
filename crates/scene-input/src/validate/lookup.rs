@@ -12,11 +12,15 @@ mod tests;
 
 /// The keys [`Lookup::referencing`] finds a node under: every key of
 /// [`references_of`] (`token:`, `style:`, `font:`, `asset:`, `component:`, `link:`)
-/// plus `theme:<name>` for the node's own string `props.theme`.
+/// plus `theme:<name>` for the node's own string `props.theme` and `flow:<name>` for its
+/// string `props.flowStart`.
 pub fn reference_keys(props: &Value) -> BTreeSet<String> {
     let mut keys = references_of(props);
     if let Some(theme) = props.get("theme").and_then(Value::as_str) {
         keys.insert(format!("theme:{theme}"));
+    }
+    if let Some(flow) = crate::links::flow_start(props) {
+        keys.insert(format!("flow:{flow}"));
     }
     keys
 }

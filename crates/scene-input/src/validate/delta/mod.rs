@@ -54,7 +54,7 @@ pub fn validate_batch(
 ) -> Result<Facts> {
     let affected = time("delta.closure", || affected::collect(before, after, batch));
     count("delta.closure.nodes", affected.nodes.len());
-    time("delta.notes", || navigation::notes(after, batch))?;
+    time("delta.notes", || navigation::notes(before, after, batch))?;
     time("delta.navigation", || {
         navigation::links(before, after, batch)
     })?;

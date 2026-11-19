@@ -149,3 +149,20 @@ fn too_many_notes() {
     judge(&mut state, std::slice::from_ref(&note), fails("notes"));
     judge(&mut state, &[note, delete("a")], ACCEPT);
 }
+
+#[test]
+fn a_link_target_whose_page_is_recreated_as_a_group() {
+    let mut state = base(&[update("a", json!({"links": [{"to": "f2"}]}), true)]);
+    // f2 keeps its id, kind and parent id, but its parent is now a group under f1.
+    let ops = [
+        delete("p2"),
+        create("p2", NodeKind::Group, "f1", json!({})),
+        create(
+            "f2",
+            NodeKind::Frame,
+            "p2",
+            json!({"width": 100, "height": 100}),
+        ),
+    ];
+    judge(&mut state, &ops, fails("links[0].to"));
+}
