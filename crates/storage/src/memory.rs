@@ -10,6 +10,8 @@
 //! persist) call [`Memory::evict`]; the next access reloads the project.
 pub(crate) mod guard;
 #[cfg(test)]
+mod guard_oracle_tests;
+#[cfg(test)]
 mod guard_tests;
 mod identity;
 mod reads;
