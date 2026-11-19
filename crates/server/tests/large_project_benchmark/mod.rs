@@ -11,12 +11,10 @@ pub mod stats;
 use fagent_storage::{PostgresBackend, PostgresConfig, Storage, Store};
 use std::{path::Path, sync::Arc, time::Duration};
 
-/// `primary` is the production-shaped storage; `uncached` is a second storage over the
-/// same database (PostgreSQL) or the same storage (SQLite).
+/// The production-shaped storage: node memory on; `database_snapshot` reads bypass it.
 #[derive(Clone)]
 pub struct Backends {
     pub primary: Storage,
-    pub uncached: Storage,
     _root: Option<Arc<tempfile::TempDir>>,
 }
 
@@ -24,8 +22,7 @@ impl Backends {
     pub fn sqlite(root: Arc<tempfile::TempDir>) -> Self {
         let storage = Storage::from(Store::open(root.path()).unwrap());
         Self {
-            primary: storage.clone(),
-            uncached: storage,
+            primary: storage,
             _root: Some(root),
         }
     }
@@ -41,7 +38,6 @@ impl Backends {
         };
         Self {
             primary: Storage::new(PostgresBackend::with_config(config()).unwrap()),
-            uncached: Storage::new(PostgresBackend::with_config(config()).unwrap()),
             _root: None,
         }
     }
