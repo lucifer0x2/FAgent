@@ -79,3 +79,7 @@ Append-only. Rules for entries:
 - Decision (coordinator): pure diff-only validation; on stored invalid data a defect rejects a batch only when its closure reaches it. The expanded-node limit follows the engine's `Limits.max_nodes`.
 - Result: differential 0 differences (state and `begin` runs incl. the new cases mix, 19,200 `begin` batches). PG 200k: small props edit validates in ~0.01 ms (target < 5 ms met), commit ~3 ms; edits reaching ~900 instances ~21 ms; cold load + admission ~1.1 s. `node_memory_writes_bench` now covers every AC case on 200k and ~7k fixtures. Report: [TASK41-REPORT.md](../TASK41-REPORT.md) "Phase 3".
 - Open: phase 4 (Moka, `RevisionIndexes`/`scoped/` cleanup, test-only `validate_after_indexed`) waits for the user's go-ahead; server-side `get_design_context` shaping not benchmarked; masters with many instances validate in 15–17 ms per edit.
+
+### Task 41 phase 4 — 2026-11-19
+
+- User go-ahead 2026-11-19: phase 4 (cleanup) on `feat/node-memory-optimization`, branched from `feat/task-41-phase-2` (`307b318`); this branch carries the whole task as the final phase. Slices: (A) remove test-only oracles (`scoped::check`, `BatchScope`, `batch/validation.rs`, `concurrent::fill`, `RevisionIndexes::{candidate, publish}`, `validate::incremental`), guard parity kept as fixed expectations; (B) remove the storage Moka snapshot cache; (C) remove the `RevisionIndexes` Moka cache; (D) latest-revision full-snapshot reads from the engine; (E) docs and `REJECTED-APPROACHES.md`. The server HTTP response cache (encoded bytes) stays.
