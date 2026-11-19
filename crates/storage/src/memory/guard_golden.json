@@ -1,0 +1,304 @@
+{
+  "histories": ["current","old unrelated","old overlapping","legacy without scope","gap","base ahead"],
+  "pageSets": [[],["missing"],["p1","p1"],["p1"],["p2"],["library"],["empty"],["p1","p2"],["p1","p2","library","empty","tail-page"]],
+  "errors": [
+    {"code":"REVISION_CONFLICT","currentRevision":2,"message":"Read the current snapshot and retry with its revision","retryable":false},
+    {"code":"SCOPED_OPERATION_UNSUPPORTED","message":"Append root frames without an explicit index in scoped mode","retryable":false},
+    {"code":"SCOPED_OPERATION_UNSUPPORTED","message":"Changing the default page or first root frame, page order, page deletion or page properties requires strict mode","retryable":false},
+    {"code":"SCOPED_OPERATION_UNSUPPORTED","message":"Global flowStart changes require strict mode","retryable":false},
+    {"code":"SCOPED_OPERATION_UNSUPPORTED","message":"Note anchors (current and new) must lie on guarded pages","retryable":false},
+    {"code":"SCOPED_OPERATION_UNSUPPORTED","message":"Operation source and destination pages must be guarded","retryable":false},
+    {"code":"SCOPED_OPERATION_UNSUPPORTED","message":"Root-frame deletion, reparent or reorder requires strict mode","retryable":false},
+    {"code":"SCOPED_OPERATION_UNSUPPORTED","message":"Token and style writes require strict mode (omit pageIds)","retryable":false},
+    {"code":"VALIDATION_FAILED","field":"id","message":"Node `missing` does not exist (deleted or never created)","nodeId":"missing","opIndex":0,"retryable":false},
+    {"code":"VALIDATION_FAILED","field":"links[0].to","message":"Link target 'r2' is a rectangle, not a root frame","nodeId":"r1","nodeKind":"rectangle","retryable":false},
+    {"code":"VALIDATION_FAILED","field":"pageIds","message":"Guarded page does not exist","retryable":false},
+    {"code":"VALIDATION_FAILED","field":"pageIds","message":"Supply 1–100 distinct existing page IDs","retryable":false},
+    {"code":"VALIDATION_FAILED","field":"tokenId","message":"Referenced token does not exist; forward references are not supported","nodeId":"r1","nodeKind":"rectangle","opIndex":0,"retryable":false},
+    {"code":"VALIDATION_FAILED","field":"width","message":"Expected a finite number within the supported range","nodeId":"r1","nodeKind":"rectangle","opIndex":0,"retryable":false}
+  ],
+  "cases": [
+    {
+      "changedIds": ["r1"],
+      "footprint": ["node:r1","page:p1"],
+      "guards": [[11,11,11,11,11,0],[10,10,10,10,10,0],[11,11,11,11,11,0],[null,null,0,0,0,0],[5,5,5,5,5,0],[5,5,5,5,5,0],[5,5,5,5,5,0],[null,null,0,0,0,0],[10,10,10,10,10,0]],
+      "operations": [{"id":"r1","op":"update_node","props":{"name":"Allowed"}}],
+      "results": [{},{"concurrent":[],"concurrentTotal":0},{"concurrent":[{"key":"name","nodeId":"r1","revision":2}],"concurrentTotal":1},{"concurrent":[],"concurrentTotal":0},{"concurrentUnknown":true},{}]
+    },
+    {
+      "changedIds": ["r1"],
+      "footprint": ["node:r1","page:p1"],
+      "guards": [[11,11,11,11,11,0],[10,10,10,10,10,0],[11,11,11,11,11,0],[null,null,0,0,0,0],[5,5,5,5,5,0],[5,5,5,5,5,0],[5,5,5,5,5,0],[null,null,0,0,0,0],[10,10,10,10,10,0]],
+      "operations": [{"id":"r1","op":"update_node","props":{"name":"Same"}},{"id":"r1","op":"update_node","props":{"name":"Same"}}],
+      "results": [{},{"concurrent":[],"concurrentTotal":0},{"concurrent":[{"key":"name","nodeId":"r1","revision":2}],"concurrentTotal":1},{"concurrent":[],"concurrentTotal":0},{"concurrentUnknown":true},{}]
+    },
+    {
+      "changedIds": ["r1"],
+      "footprint": ["node:r1","page:p1"],
+      "guards": [[11,11,11,11,11,0],[10,10,10,10,10,0],[11,11,11,11,11,0],[null,null,0,0,0,0],[5,5,5,5,5,0],[5,5,5,5,5,0],[5,5,5,5,5,0],[null,null,0,0,0,0],[10,10,10,10,10,0]],
+      "operations": [{"id":"r1","op":"update_node","props":{"fill":"#00ff00"}}],
+      "results": [{},{"concurrent":[],"concurrentTotal":0},{"concurrent":[],"concurrentTotal":0},{"concurrent":[],"concurrentTotal":0},{"concurrentUnknown":true},{}]
+    },
+    {
+      "changedIds": ["r1"],
+      "footprint": ["node:r1","page:p1"],
+      "guards": [[11,11,11,11,11,0],[10,10,10,10,10,0],[11,11,11,11,11,0],[null,null,0,0,0,0],[5,5,5,5,5,0],[5,5,5,5,5,0],[5,5,5,5,5,0],[null,null,0,0,0,0],[10,10,10,10,10,0]],
+      "operations": [{"id":"r1","op":"update_node","props":{"x":-0.0}}],
+      "results": [{},{"concurrent":[],"concurrentTotal":0},{"concurrent":[],"concurrentTotal":0},{"concurrent":[],"concurrentTotal":0},{"concurrentUnknown":true},{}]
+    },
+    {
+      "changedIds": ["r2"],
+      "footprint": ["node:r2","page:p2"],
+      "guards": [[11,11,11,11,11,0],[10,10,10,10,10,0],[11,11,11,11,11,0],[5,5,5,5,5,0],[null,null,null,0,0,0],[5,5,5,5,5,0],[5,5,5,5,5,0],[null,null,0,0,0,0],[10,10,10,10,10,0]],
+      "operations": [{"id":"r2","op":"update_node","props":{"width":30}}],
+      "results": [{},{"concurrent":[],"concurrentTotal":0},{"concurrent":[],"concurrentTotal":0},{"concurrent":[],"concurrentTotal":0},{"concurrentUnknown":true},{}]
+    },
+    {
+      "changedIds": ["new"],
+      "footprint": ["node:new","page:p1"],
+      "guards": [[11,11,11,11,11,0],[10,10,10,10,10,0],[11,11,11,11,11,0],[null,null,0,0,0,0],[5,5,5,5,5,0],[5,5,5,5,5,0],[5,5,5,5,5,0],[null,null,0,0,0,0],[10,10,10,10,10,0]],
+      "operations": [{"id":"new","kind":"rectangle","op":"create_node","parentId":"f1","props":{"height":5,"width":5}}],
+      "results": [{},{"concurrent":[],"concurrentTotal":0},{"concurrent":[],"concurrentTotal":0},{"concurrent":[],"concurrentTotal":0},{"concurrentUnknown":true},{}]
+    },
+    {
+      "changedIds": ["instance","new","r1"],
+      "footprint": ["node:instance","node:new","node:r1","page:p1"],
+      "guards": [[11,11,11,11,11,0],[10,10,10,10,10,0],[11,11,11,11,11,0],[null,null,0,0,0,0],[5,5,5,5,5,0],[5,5,5,5,5,0],[5,5,5,5,5,0],[null,null,0,0,0,0],[10,10,10,10,10,0]],
+      "operations": [{"id":"new","index":0,"kind":"rectangle","op":"create_node","parentId":"f1","props":{"height":5,"width":5}}],
+      "results": [{},{"concurrent":[],"concurrentTotal":0},{"concurrent":[],"concurrentTotal":0},{"concurrent":[],"concurrentTotal":0},{"concurrentUnknown":true},{}]
+    },
+    {
+      "changedIds": ["append"],
+      "footprint": ["node:append","page:p1"],
+      "guards": [[11,11,11,11,11,0],[10,10,10,10,10,0],[11,11,11,11,11,0],[null,null,0,0,0,0],[5,5,5,5,5,0],[5,5,5,5,5,0],[5,5,5,5,5,0],[null,null,0,0,0,0],[10,10,10,10,10,0]],
+      "operations": [{"id":"append","kind":"frame","op":"create_node","parentId":"p1","props":{"height":10,"width":10}}],
+      "results": [{},{"concurrent":[],"concurrentTotal":0},{"concurrent":[],"concurrentTotal":0},{"concurrent":[],"concurrentTotal":0},{"concurrentUnknown":true},{}]
+    },
+    {
+      "changedIds": ["append","tail"],
+      "footprint": ["*","node:append","node:tail","page:p1"],
+      "guards": [[11,11,11,11,11,0],[10,10,10,10,10,0],[11,11,11,11,11,0],[1,1,1,1,1,0],[5,5,5,5,5,0],[5,5,5,5,5,0],[5,5,5,5,5,0],[1,1,1,1,1,0],[10,10,10,10,10,0]],
+      "operations": [{"id":"append","index":1,"kind":"frame","op":"create_node","parentId":"p1","props":{"height":10,"width":10}}],
+      "results": [{},{"concurrent":[],"concurrentTotal":0},{"concurrent":[],"concurrentTotal":0},{"concurrent":[],"concurrentTotal":0},{"concurrentUnknown":true},{}]
+    },
+    {
+      "changedIds": ["first"],
+      "footprint": ["node:first","page:empty"],
+      "guards": [[11,11,11,11,11,0],[10,10,10,10,10,0],[11,11,11,11,11,0],[5,5,5,5,5,0],[5,5,5,5,5,0],[5,5,5,5,5,0],[null,null,null,0,0,0],[5,5,5,5,5,0],[10,10,10,10,10,0]],
+      "operations": [{"id":"first","kind":"frame","op":"create_node","parentId":"empty","props":{"height":10,"width":10}}],
+      "results": [{},{"concurrent":[],"concurrentTotal":0},{"concurrent":[],"concurrentTotal":0},{"concurrent":[],"concurrentTotal":0},{"concurrentUnknown":true},{}]
+    },
+    {
+      "changedIds": ["nf","tail-page"],
+      "footprint": ["node:nf","node:tail-page","page:tail-page"],
+      "guards": [[11,11,11,11,11,0],[10,10,10,10,10,0],[11,11,11,11,11,0],[5,5,5,5,5,0],[5,5,5,5,5,0],[5,5,5,5,5,0],[5,5,5,5,5,0],[5,5,5,5,5,0],[null,null,0,0,0,0]],
+      "operations": [{"id":"tail-page","kind":"page","op":"create_node","parentId":null,"props":{"name":"Tail"}},{"id":"nf","kind":"frame","op":"create_node","parentId":"tail-page","props":{"height":10,"width":10}}],
+      "results": [{},{"concurrent":[],"concurrentTotal":0},{"concurrent":[],"concurrentTotal":0},{"concurrent":[],"concurrentTotal":0},{"concurrentUnknown":true},{}]
+    },
+    {
+      "changedIds": ["empty","front","library","p1","p2"],
+      "footprint": ["*","node:empty","node:front","node:library","node:p1","node:p2","page:empty","page:front","page:library","page:p1","page:p2"],
+      "guards": [[11,11,11,11,11,0],[10,10,10,10,10,0],[11,11,11,11,11,0],[5,5,5,5,5,0],[5,5,5,5,5,0],[5,5,5,5,5,0],[5,5,5,5,5,0],[5,5,5,5,5,0],[10,10,10,10,10,0]],
+      "operations": [{"id":"front","index":0,"kind":"page","op":"create_node","parentId":null,"props":{"name":"Front"}}],
+      "results": [{},{"concurrent":[],"concurrentTotal":0},{"concurrent":[],"concurrentTotal":0},{"concurrent":[],"concurrentTotal":0},{"concurrentUnknown":true},{}]
+    },
+    {
+      "changedIds": ["r1"],
+      "footprint": ["node:r1","page:p1","page:p2"],
+      "guards": [[11,11,11,11,11,0],[10,10,10,10,10,0],[11,11,11,11,11,0],[5,5,5,5,5,0],[5,5,5,5,5,0],[5,5,5,5,5,0],[5,5,5,5,5,0],[null,null,0,0,0,0],[10,10,10,10,10,0]],
+      "operations": [{"id":"r1","op":"reparent_node","parentId":"f2"}],
+      "results": [{},{"concurrent":[],"concurrentTotal":0},{"concurrent":[],"concurrentTotal":0},{"concurrent":[],"concurrentTotal":0},{"concurrentUnknown":true},{}]
+    },
+    {
+      "changedIds": ["r1"],
+      "footprint": ["node:r1","page:p1"],
+      "guards": [[11,11,11,11,11,0],[10,10,10,10,10,0],[11,11,11,11,11,0],[null,null,0,0,0,0],[5,5,5,5,5,0],[5,5,5,5,5,0],[5,5,5,5,5,0],[null,null,0,0,0,0],[10,10,10,10,10,0]],
+      "operations": [{"id":"r1","op":"reparent_node","parentId":"tail"}],
+      "results": [{},{"concurrent":[],"concurrentTotal":0},{"concurrent":[],"concurrentTotal":0},{"concurrent":[],"concurrentTotal":0},{"concurrentUnknown":true},{}]
+    },
+    {
+      "changedIds": ["tail"],
+      "footprint": ["*","node:tail","page:p1"],
+      "guards": [[11,11,11,11,11,0],[10,10,10,10,10,0],[11,11,11,11,11,0],[6,6,6,6,6,0],[5,5,5,5,5,0],[5,5,5,5,5,0],[5,5,5,5,5,0],[6,6,6,6,6,0],[10,10,10,10,10,0]],
+      "operations": [{"id":"tail","op":"reparent_node","parentId":"f1"}],
+      "results": [{},{"concurrent":[],"concurrentTotal":0},{"concurrent":[],"concurrentTotal":0},{"concurrent":[],"concurrentTotal":0},{"concurrentUnknown":true},{}]
+    },
+    {
+      "changedIds": ["f1","tail"],
+      "footprint": ["*","node:f1","node:tail","page:p1"],
+      "guards": [[11,11,11,11,11,0],[10,10,10,10,10,0],[11,11,11,11,11,0],[6,6,6,6,6,0],[5,5,5,5,5,0],[5,5,5,5,5,0],[5,5,5,5,5,0],[6,6,6,6,6,0],[10,10,10,10,10,0]],
+      "operations": [{"id":"tail","index":0,"op":"reorder_node"}],
+      "results": [{},{"concurrent":[],"concurrentTotal":0},{"concurrent":[],"concurrentTotal":0},{"concurrent":[],"concurrentTotal":0},{"concurrentUnknown":true},{}]
+    },
+    {
+      "changedIds": ["f1"],
+      "footprint": [],
+      "guards": [[11,11,11,11,11,0],[10,10,10,10,10,0],[11,11,11,11,11,0],[6,6,6,6,6,0],[5,5,5,5,5,0],[5,5,5,5,5,0],[5,5,5,5,5,0],[6,6,6,6,6,0],[10,10,10,10,10,0]],
+      "operations": [{"id":"f1","index":0,"op":"reorder_node"}],
+      "results": [{},{"concurrent":[],"concurrentTotal":0},{"concurrent":[],"concurrentTotal":0},{"concurrent":[],"concurrentTotal":0},{"concurrentUnknown":true},{}]
+    },
+    {
+      "changedIds": ["p1","p2"],
+      "footprint": ["*","node:p1","node:p2","page:p1","page:p2"],
+      "guards": [[11,11,11,11,11,0],[10,10,10,10,10,0],[11,11,11,11,11,0],[5,5,5,5,5,0],[2,2,2,2,2,0],[5,5,5,5,5,0],[5,5,5,5,5,0],[2,2,2,2,2,0],[10,10,10,10,10,0]],
+      "operations": [{"id":"p2","index":0,"op":"reorder_node"}],
+      "results": [{},{"concurrent":[],"concurrentTotal":0},{"concurrent":[],"concurrentTotal":0},{"concurrent":[],"concurrentTotal":0},{"concurrentUnknown":true},{}]
+    },
+    {
+      "changedIds": ["r1"],
+      "footprint": ["node:r1","page:p1"],
+      "guards": [[11,11,11,11,11,0],[10,10,10,10,10,0],[11,11,11,11,11,0],[null,null,0,0,0,0],[5,5,5,5,5,0],[5,5,5,5,5,0],[5,5,5,5,5,0],[null,null,0,0,0,0],[10,10,10,10,10,0]],
+      "operations": [{"id":"r1","op":"delete_subtree"}],
+      "results": [{},{"concurrent":[],"concurrentTotal":0},{"concurrent":[{"key":"name","nodeId":"r1","revision":2}],"concurrentTotal":1},{"concurrent":[],"concurrentTotal":0},{"concurrentUnknown":true},{}]
+    },
+    {
+      "changedIds": ["note","r2"],
+      "footprint": ["node:r2","note:note","page:p2"],
+      "guards": [[11,11,11,11,11,0],[10,10,10,10,10,0],[11,11,11,11,11,0],[5,5,5,5,5,0],[null,null,null,0,0,0],[5,5,5,5,5,0],[5,5,5,5,5,0],[null,null,0,0,0,0],[10,10,10,10,10,0]],
+      "operations": [{"id":"r2","op":"delete_subtree"}],
+      "results": [{},{"concurrent":[],"concurrentTotal":0},{"concurrent":[],"concurrentTotal":0},{"concurrent":[],"concurrentTotal":0},{"concurrentUnknown":true},{}]
+    },
+    {
+      "changedIds": ["f2","note","r1","r2"],
+      "footprint": ["*","node:f2","node:r1","node:r2","note:note","page:p1","page:p2"],
+      "guards": [[11,11,11,11,11,0],[10,10,10,10,10,0],[11,11,11,11,11,0],[5,5,5,5,5,0],[6,6,6,6,6,0],[5,5,5,5,5,0],[5,5,5,5,5,0],[6,6,6,6,6,0],[10,10,10,10,10,0]],
+      "operations": [{"id":"f2","op":"delete_subtree"}],
+      "results": [{},{"concurrent":[],"concurrentTotal":0},{"concurrent":[],"concurrentTotal":0},{"concurrent":[{"key":"name","nodeId":"f2","revision":2}],"concurrentTotal":1},{"concurrentUnknown":true},{}]
+    },
+    {
+      "changedIds": ["tail"],
+      "footprint": ["*","node:tail","page:p1"],
+      "guards": [[11,11,11,11,11,0],[10,10,10,10,10,0],[11,11,11,11,11,0],[6,6,6,6,6,0],[5,5,5,5,5,0],[5,5,5,5,5,0],[5,5,5,5,5,0],[6,6,6,6,6,0],[10,10,10,10,10,0]],
+      "operations": [{"id":"tail","op":"delete_subtree"}],
+      "results": [{},{"concurrent":[],"concurrentTotal":0},{"concurrent":[],"concurrentTotal":0},{"concurrent":[],"concurrentTotal":0},{"concurrentUnknown":true},{}]
+    },
+    {
+      "changedIds": ["f2","note","p2","r1","r2"],
+      "footprint": ["*","node:f2","node:p2","node:r1","node:r2","note:note","page:p1","page:p2"],
+      "guards": [[11,11,11,11,11,0],[10,10,10,10,10,0],[11,11,11,11,11,0],[5,5,5,5,5,0],[2,2,2,2,2,0],[5,5,5,5,5,0],[5,5,5,5,5,0],[2,2,2,2,2,0],[10,10,10,10,10,0]],
+      "operations": [{"id":"p2","op":"delete_subtree"}],
+      "results": [{},{"concurrent":[],"concurrentTotal":0},{"concurrent":[],"concurrentTotal":0},{"concurrent":[{"key":"name","nodeId":"f2","revision":2}],"concurrentTotal":1},{"concurrentUnknown":true},{}]
+    },
+    {
+      "changedIds": ["p1"],
+      "footprint": ["*","node:p1","page:p1"],
+      "guards": [[11,11,11,11,11,0],[10,10,10,10,10,0],[11,11,11,11,11,0],[2,2,2,2,2,0],[5,5,5,5,5,0],[5,5,5,5,5,0],[5,5,5,5,5,0],[2,2,2,2,2,0],[10,10,10,10,10,0]],
+      "operations": [{"id":"p1","op":"update_node","props":{"name":"Page"}}],
+      "results": [{},{"concurrent":[],"concurrentTotal":0},{"concurrent":[],"concurrentTotal":0},{"concurrent":[],"concurrentTotal":0},{"concurrentUnknown":true},{}]
+    },
+    {
+      "changedIds": ["f1"],
+      "footprint": ["*","node:f1","page:p1"],
+      "guards": [[11,11,11,11,11,0],[10,10,10,10,10,0],[11,11,11,11,11,0],[3,3,3,3,3,0],[3,3,3,3,3,0],[3,3,3,3,3,0],[3,3,3,3,3,0],[3,3,3,3,3,0],[10,10,10,10,10,0]],
+      "operations": [{"id":"f1","op":"update_node","props":{"flowStart":"global"}}],
+      "results": [{},{"concurrent":[],"concurrentTotal":0},{"concurrent":[],"concurrentTotal":0},{"concurrent":[],"concurrentTotal":0},{"concurrentUnknown":true},{}]
+    },
+    {
+      "changedIds": ["r1"],
+      "footprint": ["node:r1","page:p1"],
+      "guards": [[11,11,11,11,11,0],[10,10,10,10,10,0],[11,11,11,11,11,0],[null,null,0,0,0,0],[5,5,5,5,5,0],[5,5,5,5,5,0],[5,5,5,5,5,0],[null,null,0,0,0,0],[10,10,10,10,10,0]],
+      "operations": [{"id":"r1","op":"update_node","props":{"links":[{"to":"tail"}]}}],
+      "results": [{},{"concurrent":[],"concurrentTotal":0},{"concurrent":[],"concurrentTotal":0},{"concurrent":[],"concurrentTotal":0},{"concurrentUnknown":true},{}]
+    },
+    {
+      "changedIds": ["instance"],
+      "footprint": ["node:instance","page:p1"],
+      "guards": [[11,11,11,11,11,0],[10,10,10,10,10,0],[11,11,11,11,11,0],[null,null,0,0,0,0],[5,5,5,5,5,0],[5,5,5,5,5,0],[5,5,5,5,5,0],[null,null,0,0,0,0],[10,10,10,10,10,0]],
+      "operations": [{"id":"instance","op":"update_node","props":{"theme":"night"}}],
+      "results": [{},{"concurrent":[],"concurrentTotal":0},{"concurrent":[],"concurrentTotal":0},{"concurrent":[],"concurrentTotal":0},{"concurrentUnknown":true},{}]
+    },
+    {
+      "changedIds": ["label"],
+      "footprint": ["node:label","page:library"],
+      "guards": [[11,11,11,11,11,0],[10,10,10,10,10,0],[11,11,11,11,11,0],[5,5,5,5,5,0],[5,5,5,5,5,0],[null,null,null,0,0,0],[5,5,5,5,5,0],[5,5,5,5,5,0],[10,10,10,10,10,0]],
+      "operations": [{"id":"label","op":"update_node","props":{"text":"Master changed"}}],
+      "results": [{},{"concurrent":[],"concurrentTotal":0},{"concurrent":[],"concurrentTotal":0},{"concurrent":[],"concurrentTotal":0},{"concurrentUnknown":true},{}]
+    },
+    {
+      "changedIds": ["label2"],
+      "footprint": ["node:label2","page:library"],
+      "guards": [[11,11,11,11,11,0],[10,10,10,10,10,0],[11,11,11,11,11,0],[5,5,5,5,5,0],[5,5,5,5,5,0],[null,null,null,0,0,0],[5,5,5,5,5,0],[5,5,5,5,5,0],[10,10,10,10,10,0]],
+      "operations": [{"id":"label2","op":"update_node","props":{"text":"Direct changed"}}],
+      "results": [{},{"concurrent":[],"concurrentTotal":0},{"concurrent":[],"concurrentTotal":0},{"concurrent":[],"concurrentTotal":0},{"concurrentUnknown":true},{}]
+    },
+    {
+      "changedIds": ["base"],
+      "footprint": ["token:base"],
+      "guards": [[11,11,11,11,11,0],[10,10,10,10,10,0],[11,11,11,11,11,0],[7,7,7,7,7,0],[7,7,7,7,7,0],[7,7,7,7,7,0],[7,7,7,7,7,0],[7,7,7,7,7,0],[10,10,10,10,10,0]],
+      "operations": [{"op":"upsert_token","token":{"id":"base","name":"Base","type":"color","value":"#ffffff"}}],
+      "results": [{},{"concurrent":[],"concurrentTotal":0},{"concurrent":[],"concurrentTotal":0},{"concurrent":[],"concurrentTotal":0},{"concurrentUnknown":true},{}]
+    },
+    {
+      "changedIds": ["fill"],
+      "footprint": ["style:fill"],
+      "guards": [[11,11,11,11,11,0],[10,10,10,10,10,0],[11,11,11,11,11,0],[7,7,7,7,7,0],[7,7,7,7,7,0],[7,7,7,7,7,0],[7,7,7,7,7,0],[7,7,7,7,7,0],[10,10,10,10,10,0]],
+      "operations": [{"op":"upsert_style","style":{"id":"fill","kind":"fill","name":"Fill","value":"#123456"}}],
+      "results": [{},{"concurrent":[],"concurrentTotal":0},{"concurrent":[],"concurrentTotal":0},{"concurrent":[],"concurrentTotal":0},{"concurrentUnknown":true},{}]
+    },
+    {
+      "changedIds": ["n2"],
+      "footprint": ["note:n2","page:p1"],
+      "guards": [[11,11,11,11,11,0],[10,10,10,10,10,0],[11,11,11,11,11,0],[null,null,0,0,0,0],[4,4,4,4,4,0],[4,4,4,4,4,0],[4,4,4,4,4,0],[null,null,0,0,0,0],[10,10,10,10,10,0]],
+      "operations": [{"id":"n2","nodeId":"r1","op":"create_note","text":"x"}],
+      "results": [{},{"concurrent":[],"concurrentTotal":0},{"concurrent":[],"concurrentTotal":0},{"concurrent":[],"concurrentTotal":0},{"concurrentUnknown":true},{}]
+    },
+    {
+      "changedIds": ["n2"],
+      "footprint": ["note:n2","page:p2"],
+      "guards": [[11,11,11,11,11,0],[10,10,10,10,10,0],[11,11,11,11,11,0],[4,4,4,4,4,0],[null,null,null,0,0,0],[4,4,4,4,4,0],[4,4,4,4,4,0],[null,null,0,0,0,0],[10,10,10,10,10,0]],
+      "operations": [{"id":"n2","nodeId":"r2","op":"create_note","text":"x"}],
+      "results": [{},{"concurrent":[],"concurrentTotal":0},{"concurrent":[],"concurrentTotal":0},{"concurrent":[],"concurrentTotal":0},{"concurrentUnknown":true},{}]
+    },
+    {
+      "changedIds": ["note"],
+      "footprint": ["note:note","page:p2"],
+      "guards": [[11,11,11,11,11,0],[10,10,10,10,10,0],[11,11,11,11,11,0],[4,4,4,4,4,0],[null,null,null,0,0,0],[4,4,4,4,4,0],[4,4,4,4,4,0],[null,null,0,0,0,0],[10,10,10,10,10,0]],
+      "operations": [{"id":"note","op":"reply_note","text":"reply"}],
+      "results": [{},{"concurrent":[],"concurrentTotal":0},{"concurrent":[],"concurrentTotal":0},{"concurrent":[],"concurrentTotal":0},{"concurrentUnknown":true},{}]
+    },
+    {
+      "changedIds": ["note"],
+      "footprint": ["note:note","page:p2"],
+      "guards": [[11,11,11,11,11,0],[10,10,10,10,10,0],[11,11,11,11,11,0],[4,4,4,4,4,0],[null,null,null,0,0,0],[4,4,4,4,4,0],[4,4,4,4,4,0],[null,null,0,0,0,0],[10,10,10,10,10,0]],
+      "operations": [{"id":"note","op":"update_note","text":"Edited"}],
+      "results": [{},{"concurrent":[],"concurrentTotal":0},{"concurrent":[],"concurrentTotal":0},{"concurrent":[],"concurrentTotal":0},{"concurrentUnknown":true},{}]
+    },
+    {
+      "changedIds": ["note"],
+      "footprint": ["note:note","page:p1","page:p2"],
+      "guards": [[11,11,11,11,11,0],[10,10,10,10,10,0],[11,11,11,11,11,0],[4,4,4,4,4,0],[4,4,4,4,4,0],[4,4,4,4,4,0],[4,4,4,4,4,0],[null,null,0,0,0,0],[10,10,10,10,10,0]],
+      "operations": [{"id":"note","nodeId":"r1","op":"update_note"}],
+      "results": [{},{"concurrent":[],"concurrentTotal":0},{"concurrent":[],"concurrentTotal":0},{"concurrent":[],"concurrentTotal":0},{"concurrentUnknown":true},{}]
+    },
+    {
+      "changedIds": ["note"],
+      "footprint": ["note:note","page:p2"],
+      "guards": [[11,11,11,11,11,0],[10,10,10,10,10,0],[11,11,11,11,11,0],[4,4,4,4,4,0],[null,null,null,0,0,0],[4,4,4,4,4,0],[4,4,4,4,4,0],[null,null,0,0,0,0],[10,10,10,10,10,0]],
+      "operations": [{"id":"note","op":"delete_note"}],
+      "results": [{},{"concurrent":[],"concurrentTotal":0},{"concurrent":[],"concurrentTotal":0},{"concurrent":[],"concurrentTotal":0},{"concurrentUnknown":true},{}]
+    },
+    {
+      "changedIds": ["n2","r1"],
+      "footprint": ["node:r1","page:p1"],
+      "guards": [[11,11,11,11,11,0],[10,10,10,10,10,0],[11,11,11,11,11,0],[null,null,0,0,0,0],[4,4,4,4,4,0],[4,4,4,4,4,0],[4,4,4,4,4,0],[null,null,0,0,0,0],[10,10,10,10,10,0]],
+      "operations": [{"id":"n2","nodeId":"r1","op":"create_note","text":"x"},{"id":"r1","op":"delete_subtree"}],
+      "results": [{},{"concurrent":[],"concurrentTotal":0},{"concurrent":[{"key":"name","nodeId":"r1","revision":2}],"concurrentTotal":1},{"concurrent":[],"concurrentTotal":0},{"concurrentUnknown":true},{}]
+    },
+    {
+      "error": 8,
+      "operations": [{"id":"missing","op":"update_node","props":{"name":"No"}}]
+    },
+    {
+      "error": 13,
+      "operations": [{"id":"r1","op":"update_node","props":{"width":-1}}]
+    },
+    {
+      "error": 12,
+      "operations": [{"id":"r1","op":"update_node","props":{"fill":{"tokenId":"missing"}}}]
+    },
+    {
+      "error": 9,
+      "operations": [{"id":"r1","op":"update_node","props":{"links":[{"to":"r2"}]}}]
+    }
+  ]
+}

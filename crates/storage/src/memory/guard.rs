@@ -1,10 +1,9 @@
 //! Strict page guards and last-writer-wins results over a prepared batch's views.
 //!
-//! [`check`] is `scoped::check` on the engine's `before`/`after` views instead of a
-//! database snapshot, a `Candidate` and `BatchScope` page indexes: the same checks
-//! in the same order, the same errors. The footprint is the engine's
-//! (`Prepared::footprint`), the dependency closures are the views' own. `guard_tests`
-//! compares both for every operation class.
+//! [`check`] runs on the engine's `before`/`after` views: the footprint is the
+//! engine's (`Prepared::footprint`), the dependency closures are the views' own.
+//! `guard_tests` pins its outcomes and results for every operation class, guarded
+//! page set and history shape in `guard_golden.json`.
 use crate::scoped::{coverage, index::PageIndex};
 use crate::{concurrent, BatchRequest, BatchResult, NodeKind, Operation, Result, StorageError};
 use fagent_node_memory::Prepared;

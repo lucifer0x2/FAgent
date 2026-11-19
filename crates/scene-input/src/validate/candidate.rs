@@ -75,9 +75,7 @@ impl Candidate {
         time("validate.animation_triggers", || {
             self.validate_animation_triggers()
         })?;
-        time("validate.instances", || {
-            self.validate_instances(None, &themes)
-        })?;
+        time("validate.instances", || self.validate_instances(&themes))?;
         Ok(())
     }
     fn place(

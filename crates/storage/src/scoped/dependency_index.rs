@@ -48,41 +48,6 @@ impl DependencyIndex {
         )
     }
 
-    #[cfg(test)]
-    pub fn from_candidate(
-        candidate: &Candidate,
-        expanded: Option<BTreeMap<String, Node>>,
-        tree: Arc<PageIndex>,
-        references: Option<&BTreeMap<String, BTreeSet<String>>>,
-    ) -> Result<Self> {
-        // Full-validation fallback and instance-free incremental validation may
-        // supply no expansion. Absence never means an empty scene.
-        bench_phase::count("scoped.expansion_reused", usize::from(expanded.is_some()));
-        let expanded = match expanded {
-            Some(nodes) => nodes,
-            None => bench_phase::time("scoped.expand.fallback", || {
-                crate::instances::expand(&candidate.nodes.values().cloned().collect::<Vec<_>>())
-            })?
-            .into_iter()
-            .map(|n| (n.id.clone(), n))
-            .collect(),
-        };
-        let fonts = FontReferences::from_candidate(candidate, &expanded)?;
-        Self::build(
-            Authored {
-                nodes: candidate.nodes.values().collect(),
-                notes: candidate.notes.values().collect(),
-                references,
-            },
-            tree,
-            &expanded,
-            candidate.tokens.values(),
-            candidate.styles.values(),
-            candidate.fonts.values(),
-            &fonts,
-        )
-    }
-
     fn build<'a>(
         authored: Authored<'_>,
         tree: Arc<PageIndex>,
