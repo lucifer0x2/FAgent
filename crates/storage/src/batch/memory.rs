@@ -3,10 +3,10 @@
 //! batch, page guard and history, then the rows it changed are persisted and the
 //! batch is published.
 use super::{history, DryRunResult, Outcome};
-use crate::memory::guard;
+use crate::memory::{guard, stage};
 use crate::*;
 use backend::sqlite::identity;
-use fagent_node_memory::{Begin, HotProject};
+use fagent_node_memory::HotProject;
 
 /// One request after its request-level checks.
 pub(super) struct Checked<'r> {
@@ -35,20 +35,13 @@ impl Project {
         let first = self.for_write(conn, current.as_ref(), revision)?;
         metrics.read_us = us(time);
         let time = Instant::now();
-        let ops = &c.request.operations;
-        let retry: HotProject;
-        let (project, prepared) = match begin(&first, revision, ops)? {
-            Begin::Ready(prepared) => (&first, prepared),
-            // The writer lock makes this a lost race with a reader's reload.
-            Begin::Stale => {
-                memory.evict(&self.project_id);
-                retry = self.for_write(conn, current.as_ref(), revision)?;
-                match begin(&retry, revision, ops)? {
-                    Begin::Ready(prepared) => (&retry, prepared),
-                    Begin::Stale => return Err(StorageError::conflict(revision)),
-                }
-            }
-        };
+        let mut retry = None;
+        let (project, prepared) = memory.begin(
+            &self.project_id,
+            (&first, &mut retry),
+            (revision, &c.request.operations),
+            || self.for_write(conn, current.as_ref(), revision),
+        )?;
         let history = match c.base.history_after(revision, c.pages.is_some()) {
             Some(after) => history::after(conn, after)?,
             None => vec![],
@@ -67,15 +60,7 @@ impl Project {
                 diagnostics: vec![],
             }));
         }
-        let operations = &c.value["operations"];
-        let result = guard::result(&prepared, c.request, &history, operations);
-        let envelope = bench_phase::time("history.envelope", || {
-            scoped::envelope_with_scopes(
-                prepared.footprint().clone(),
-                c.value.clone(),
-                operations.clone(),
-            )
-        })?;
+        let (result, envelope) = stage::outcome(&prepared, c.request, &history, c.value)?;
         let rows = bench_phase::time("persist.rows", || prepared.rows());
         let persisted = {
             let _phase = bench_phase::Span::new("persist");
@@ -119,8 +104,4 @@ impl Project {
         let memory = &self.root.memory;
         memory.for_write(&self.project_id, current, revision, load)
     }
-}
-
-fn begin<'p>(project: &'p HotProject, revision: u64, ops: &[Operation]) -> Result<Begin<'p>> {
-    bench_phase::time("memory.begin", || project.begin(revision, ops))
 }

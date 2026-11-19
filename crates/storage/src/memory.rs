@@ -5,7 +5,8 @@
 //! full-snapshot reads of the latest revision from the engine's published views
 //! ([`reads`]) and counts what it did ([`stats`]). Batches and previews stage in the resident
 //! project ([`writes`]) after the backend probed the database identity under its
-//! write lock; strict page guards run on the engine views ([`guard`]). Writes outside
+//! write lock; both backends begin the batch and build its result and history envelope
+//! through [`stage`]; strict page guards run on the engine views ([`guard`]). Writes outside
 //! the engine (asset and font imports, privacy updates, bundle opens, a failed
 //! persist) call [`Memory::evict`]; the next access reloads the project.
 pub(crate) mod guard;
@@ -15,6 +16,7 @@ mod identity;
 mod reads;
 #[cfg(test)]
 mod reads_tests;
+pub(crate) mod stage;
 mod stats;
 mod writes;
 #[cfg(test)]

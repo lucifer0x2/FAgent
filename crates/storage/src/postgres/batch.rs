@@ -4,10 +4,14 @@
 //! history, then the changed rows are persisted, the transaction commits and the
 //! batch is published.
 use super::*;
-use crate::memory::{guard, Memory};
+use crate::memory::{
+    guard,
+    stage::{self, begin},
+    Memory,
+};
 use crate::{BatchRequest, BatchResult, DryRunResult, SnapshotCacheIdentity, StorageError};
 use ::postgres::GenericClient;
-use fagent_node_memory::{Begin, HotProject, Operation};
+use fagent_node_memory::{Begin, HotProject};
 use request::{canonical, history_after};
 
 mod request;
@@ -47,21 +51,14 @@ pub(super) fn apply_mode(
     base.check(revision, pages.is_some())?;
     let identity = identity(&project);
     let id = identity.project_id.clone();
-    let ops = &request.operations;
     let first = for_write(&mut db, &project, &identity, memory)?;
-    let retry: HotProject;
-    let (hot, prepared) = match begin(&first, revision, ops)? {
-        Begin::Ready(prepared) => (&first, prepared),
-        // The row lock makes this a lost race with a reader's reload.
-        Begin::Stale => {
-            memory.evict(&id);
-            retry = for_write(&mut db, &project, &identity, memory)?;
-            match begin(&retry, revision, ops)? {
-                Begin::Ready(prepared) => (&retry, prepared),
-                Begin::Stale => return Err(StorageError::conflict(revision)),
-            }
-        }
-    };
+    let mut retry = None;
+    let (hot, prepared) = memory.begin(
+        &id,
+        (&first, &mut retry),
+        (revision, &request.operations),
+        || for_write(&mut db, &project, &identity, memory),
+    )?;
     let history = match base.history_after(revision, pages.is_some()) {
         Some(after) => history_after(&mut db, &id, after)?,
         None => vec![],
@@ -71,15 +68,7 @@ pub(super) fn apply_mode(
             guard::check(&prepared, &request, pages, &history)
         })?;
     }
-    let operations = &value["operations"];
-    let result = guard::result(&prepared, &request, &history, operations);
-    let envelope = crate::bench_phase::time("history.envelope", || {
-        crate::scoped::envelope_with_scopes(
-            prepared.footprint().clone(),
-            value.clone(),
-            operations.clone(),
-        )
-    })?;
+    let (result, envelope) = stage::outcome(&prepared, &request, &history, &value)?;
     let persisted = {
         let _phase = crate::bench_phase::Span::new("persist");
         let rows = prepared.rows();
@@ -215,8 +204,4 @@ fn for_write<C: GenericClient>(
     let load = || load_rows(&mut *db, project);
     let id = &identity.project_id;
     memory.for_write(id, Some(identity), identity.revision, load)
-}
-
-fn begin<'p>(project: &'p HotProject, revision: u64, ops: &[Operation]) -> Result<Begin<'p>> {
-    crate::bench_phase::time("memory.begin", || project.begin(revision, ops))
 }
