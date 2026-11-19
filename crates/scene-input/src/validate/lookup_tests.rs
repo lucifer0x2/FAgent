@@ -59,10 +59,11 @@ fn candidate_oracle_orders() {
 }
 
 #[test]
-fn reference_keys_add_the_own_theme() {
-    let props = json!({"theme":"dark","fill":{"tokenId":"t1"},"overrides":{"x":{"theme":"dim"}}});
+fn reference_keys_add_the_own_theme_and_flow() {
+    let props = json!({"theme":"dark","flowStart":"main","fill":{"tokenId":"t1"},
+        "overrides":{"x":{"theme":"dim","flowStart":"other"}}});
     let keys: Vec<String> = reference_keys(&props).into_iter().collect();
-    assert_eq!(keys, ["theme:dark", "token:t1"]);
+    assert_eq!(keys, ["flow:main", "theme:dark", "token:t1"]);
 }
 
 #[test]

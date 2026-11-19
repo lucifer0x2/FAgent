@@ -1,8 +1,8 @@
 //! Reference indexes derived from one node's own kind and props: instance usage by
 //! `componentId`, incoming links by `links[].to`, and every key `reference_keys`
 //! names (`token:`, `style:`, `font:`, `asset:`, `component:`, `link:`, nested
-//! overrides included, plus `theme:` for the node's own `theme`). Every mutation that
-//! adds, removes or replaces props calls these.
+//! overrides included, plus `theme:` for the node's own `theme` and `flow:` for its
+//! `flowStart`). Every mutation that adds, removes or replaces props calls these.
 use super::trie::Trie;
 use super::{Key, Set, Store};
 use crate::props::{component_id, link_targets};

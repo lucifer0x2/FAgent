@@ -205,3 +205,46 @@ fn a_note_cascade_on_an_invalid_base_is_judged_on_its_delta() {
     accept(&project, &[delete("g")]);
     assert!(project.view().note("n1").is_none());
 }
+
+fn with_notes(count: usize) -> Snapshot {
+    let mut snapshot = small();
+    for i in 0..count {
+        let note = json!({"id": format!("n{i}"), "nodeId": "a", "text": "hi"});
+        snapshot.notes.push(serde_json::from_value(note).unwrap());
+    }
+    snapshot
+}
+
+#[test]
+fn too_many_stored_notes() {
+    let snapshot = with_notes(fagent_scene_input::MAX_NOTES + 1);
+    let touching = [Operation::CreateNote {
+        id: "extra".into(),
+        node_id: "b".into(),
+        text: "one more".into(),
+        author: None,
+    }];
+    judged_on_delta("too many stored notes", &snapshot, &touching, "notes");
+    // A batch that keeps the count is not reached; under the limit again, notes fit.
+    let (_, project) = setup(snapshot);
+    let remove = |id: &str| Operation::DeleteNote { id: id.into() };
+    accept(&project, &[remove("n0"), touching[0].clone()]);
+    accept(&project, &[remove("n1"), remove("n2")]);
+    accept(
+        &project,
+        &touching.map(|op| match op {
+            Operation::CreateNote {
+                node_id,
+                text,
+                author,
+                ..
+            } => Operation::CreateNote {
+                id: "extra2".into(),
+                node_id,
+                text,
+                author,
+            },
+            op => op,
+        }),
+    );
+}
