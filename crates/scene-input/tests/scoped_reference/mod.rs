@@ -41,7 +41,10 @@ pub fn reference_ids(snapshot: &Snapshot, scope: ReadScope<'_>, definitions: boo
     descendants(snapshot, authored, &mut selected);
     ancestors(snapshot, authored, &mut selected);
     let mut done = BTreeSet::new();
-    while definitions {
+    loop {
+        if !definitions {
+            break;
+        }
         let masters: Vec<_> = snapshot
             .nodes
             .iter()

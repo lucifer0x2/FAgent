@@ -76,9 +76,6 @@ pub fn measure(
             .map(|(name, values)| {
                 let mut result = summary(&values);
                 result["unit"] = json!("nodes");
-                if name == "validation.full_fallback" {
-                    result["unit"] = json!("boolean");
-                }
                 (name, result)
             })
             .collect();

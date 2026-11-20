@@ -1,7 +1,6 @@
 //! Reusable font resolution against one already-expanded immutable revision.
 use super::{scope::Resolver, Candidate};
 use crate::{Node, NodeKind, Result, Snapshot};
-use std::borrow::Cow;
 use std::collections::{BTreeMap, BTreeSet};
 
 #[cfg(test)]
@@ -9,23 +8,13 @@ use std::collections::{BTreeMap, BTreeSet};
 mod tests;
 
 pub struct FontReferences<'a> {
-    candidate: Cow<'a, Candidate>,
+    /// The revision's tokens, styles and fonts; no nodes.
+    resources: Candidate,
     expanded: &'a BTreeMap<String, Node>,
     themes: BTreeSet<String>,
 }
 
 impl<'a> FontReferences<'a> {
-    pub fn from_candidate(
-        candidate: &'a Candidate,
-        expanded: &'a BTreeMap<String, Node>,
-    ) -> Result<Self> {
-        Ok(Self {
-            candidate: Cow::Borrowed(candidate),
-            expanded,
-            themes: candidate.validate_tokens()?,
-        })
-    }
-
     /// Only resource maps are copied; authored and expanded nodes stay borrowed.
     pub fn from_snapshot(
         snapshot: &Snapshot,
@@ -58,7 +47,7 @@ impl<'a> FontReferences<'a> {
         };
         let themes = candidate.validate_tokens()?;
         Ok(Self {
-            candidate: Cow::Owned(candidate),
+            resources: candidate,
             expanded,
             themes,
         })
@@ -69,8 +58,8 @@ impl<'a> FontReferences<'a> {
         let mut ids = BTreeSet::new();
         for theme in &self.themes {
             let resolver = Resolver {
-                candidate: &self.candidate,
-                nodes: self.expanded,
+                lookup: &self.resources,
+                overlay: Some(self.expanded),
                 theme,
             };
             for node in nodes.iter().filter(|n| n.kind == NodeKind::Text) {

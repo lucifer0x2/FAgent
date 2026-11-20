@@ -58,9 +58,9 @@ if (($#)); then
   "$@"
 else
   cargo test --offline -p fagent-storage --test postgres_contract \
-    --test postgres_domain --test postgres_transactions --test postgres_resources --test postgres_cache \
-    --test postgres_cache_failures --test postgres_namespace --test postgres_fidelity \
-    --test postgres_schema_setting \
+    --test postgres_domain --test postgres_transactions --test postgres_resources --test postgres_full_reads \
+    --test postgres_unavailable --test postgres_full_read_writes --test postgres_namespace --test postgres_fidelity \
+    --test postgres_schema_setting --test full_snapshots --test postgres_memory_freshness \
     -- --ignored --test-threads=1
   cargo test --offline -p fagent-server --test postgres_backend -- --ignored --test-threads=1
 fi

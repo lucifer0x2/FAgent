@@ -8,7 +8,7 @@ use serde_json::Value;
 use std::sync::Arc;
 
 impl PostgresBackend {
-    /// One import commit: the transaction, then the write-through cache fill.
+    /// One import commit: the transaction, then the memory eviction.
     fn import(
         &self,
         project: &str,
@@ -16,41 +16,27 @@ impl PostgresBackend {
         fields: crate::asset_import::Fields,
     ) -> Result<ImportAssetsResult> {
         let key = project.to_owned();
-        let (result, committed) = self
+        let result = self
             .pool
             .run(move |session| resources::import(session, &key, request, fields))?;
-        self.fill(committed);
-        self.shadow.evict(&result.result.project_id);
+        self.memory.evict(&result.result.project_id);
         Ok(result)
     }
-    /// One worker checkout: the probe and, on a miss, the repeatable-read load.
-    /// A hit returns the shared snapshot; any owned copy is made by the caller.
+
+    /// One repeatable-read load on a pool worker, with the identity of that read.
     fn read_snapshot(&self, project: &str) -> Result<snapshot::Identified> {
         let key = project.to_owned();
-        let cache = self.cache.clone();
-        let namespace = self.namespace.clone();
-        let read = self.pool.run(move |session| {
-            snapshot::read_through(session, &key, cache.as_ref(), &namespace)
-        })?;
-        let (snapshot, generation, namespace) = match read {
-            snapshot::Read::Hit(read) => return Ok(read),
-            snapshot::Read::Loaded(read) => read,
-        };
-        // Fill off the worker, with the identity of the snapshot's own transaction.
-        if let Some(cache) = &self.cache {
-            if namespace == self.cache_namespace() {
-                cache.put(&snapshot, generation);
-            }
-        }
-        Ok((snapshot, generation, namespace))
+        self.pool.run(move |session| snapshot::read(session, &key))
     }
 
-    /// Write-through runs on the caller after the worker reported a commit, so
-    /// assembling the snapshot never holds a pool worker. Replays carry nothing.
-    pub(super) fn fill(&self, committed: Option<Box<write_through::Committed>>) {
-        if let Some(committed) = committed {
-            crate::bench_phase::time("cache.fill", || committed.fill(self.cache.as_ref()));
-        }
+    /// The database shared snapshot with the identity of the same read.
+    fn shared_with_identity(&self, project: &str) -> Result<crate::memory::Loaded> {
+        let (snapshot, identity) = self.database_snapshot(project)?;
+        let indexes = Arc::new(crate::RevisionIndexes::new(&snapshot.nodes));
+        Ok((
+            crate::SharedSnapshot::committed(snapshot, indexes),
+            identity,
+        ))
     }
 }
 
@@ -68,15 +54,8 @@ impl StorageBackend for PostgresBackend {
         project: &str,
         request: crate::ScopedBatchRequest,
     ) -> Result<DryRunResult> {
-        let key = project.to_owned();
         let (request, pages) = request.split();
-        let indexes = self.indexes.clone();
-        self.pool.run(move |session| {
-            match batch::apply_mode(session, &key, request, true, Some(pages), &indexes, None)? {
-                batch::Outcome::Preview(result) => Ok(result),
-                _ => unreachable!(),
-            }
-        })
+        self.preview(project, request, Some(pages))
     }
     fn viewer_auth(&self) -> Option<&dyn crate::ViewerAuthStore> {
         Some(self)
@@ -117,15 +96,14 @@ impl StorageBackend for PostgresBackend {
             .pool
             .run(move |session| projects::update_privacy(session, &key, privacy));
         if let Ok((meta, _)) = &updated {
-            self.shadow.evict(&meta.project_id);
+            self.memory.evict(&meta.project_id);
         }
         updated
     }
 
     fn snapshot(&self, project: &str) -> Result<Snapshot> {
-        // A hit shares the cached Arc; the owned copy is made here, not on a worker.
-        self.read_snapshot(project)
-            .map(|(snapshot, _, _)| Arc::unwrap_or_clone(snapshot))
+        self.snapshot_with_cache_identity(project)
+            .map(|(snapshot, _)| Arc::unwrap_or_clone(snapshot))
     }
 
     fn snapshot_cache_identity(&self, project: &str) -> Result<Option<SnapshotCacheIdentity>> {
@@ -146,6 +124,16 @@ impl StorageBackend for PostgresBackend {
         &self,
         project: &str,
     ) -> Result<(Arc<Snapshot>, Option<SnapshotCacheIdentity>)> {
+        self.memory.full_read(
+            || self.snapshot_cache_identity(project),
+            || self.database_snapshot(project),
+        )
+    }
+
+    fn database_snapshot(
+        &self,
+        project: &str,
+    ) -> Result<(Arc<Snapshot>, Option<SnapshotCacheIdentity>)> {
         let (snapshot, generation, namespace) = self.read_snapshot(project)?;
         let identity = snapshot::identity(
             snapshot.project_id.clone(),
@@ -157,26 +145,24 @@ impl StorageBackend for PostgresBackend {
         Ok((snapshot, Some(identity)))
     }
 
-    fn shared_snapshot(&self, project: &str) -> Result<crate::SharedSnapshot> {
+    fn shared_database(&self, project: &str) -> Result<crate::SharedSnapshot> {
         self.shared_with_identity(project).map(|(shared, _)| shared)
     }
 
     fn scoped_snapshot(&self, project: &str, target: &str) -> Result<crate::ScopedRead> {
-        let read = self.shadow.scoped_read(
+        self.memory.scoped_read(
             target,
             || self.snapshot_cache_identity(project),
             || self.shared_with_identity(project),
-        )?;
-        if self
-            .shadow
-            .claim_cache_cleanup(&read.shared.snapshot.project_id)
-        {
-            self.indexes.evict(&read.shared.snapshot.project_id);
-            if let Some(cache) = &self.cache {
-                cache.evict(&read.shared.snapshot.project_id);
-            }
-        }
-        Ok(read)
+        )
+    }
+
+    fn memory_stats(&self) -> crate::NodeMemoryStats {
+        self.memory.stats()
+    }
+
+    fn memory_read_failed(&self) {
+        self.memory.read_failed()
     }
 
     fn apply_batch(&self, project: &str, request: BatchRequest) -> Result<BatchResult> {
@@ -184,14 +170,7 @@ impl StorageBackend for PostgresBackend {
     }
 
     fn dry_run_batch(&self, project: &str, request: BatchRequest) -> Result<DryRunResult> {
-        let key = project.to_owned();
-        let indexes = self.indexes.clone();
-        self.pool.run(
-            move |session| match batch::apply(session, &key, request, true, &indexes)? {
-                batch::Outcome::Preview(result) => Ok(result),
-                _ => unreachable!("preview operation"),
-            },
-        )
+        self.preview(project, request, None)
     }
 
     fn commits_after(&self, project: &str, revision: u64, limit: usize) -> Result<Vec<Commit>> {

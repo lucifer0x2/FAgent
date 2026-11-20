@@ -1,5 +1,5 @@
 //! Note operations on a candidate, the `delete_subtree` cascade and whole-document note checks.
-use super::{values::id as check_id, Candidate};
+use super::{values::id as check_id, Candidate, Lookup};
 use crate::{error::*, model::*};
 use std::collections::BTreeSet;
 
@@ -105,23 +105,14 @@ impl Candidate {
     /// Whole-document checks, shared by batches and bundle imports.
     pub(super) fn validate_notes(&self) -> Result<()> {
         if self.notes.len() > MAX_NOTES {
-            return Err(invalid("notes", "Project exceeds 5000 notes"));
+            return Err(too_many_notes());
         }
         for (key, note) in &self.notes {
             check_id(&note.id)?;
-            if key != &note.id || self.nodes.contains_key(key) {
-                return Err(invalid("id", "Note ID must be unique and not a node ID"));
+            if key != &note.id {
+                return Err(not_unique());
             }
-            self.anchor(&note.node_id)?;
-            content(&note.text)?;
-            author_of(&note.author)?;
-            if note.replies.len() > MAX_NOTE_REPLIES {
-                return Err(invalid("replies", "Note exceeds 100 replies"));
-            }
-            for reply in &note.replies {
-                content(&reply.text)?;
-                author_of(&reply.author)?;
-            }
+            check_note(self, note)?;
         }
         Ok(())
     }
@@ -142,6 +133,38 @@ impl Candidate {
             .get_mut(id)
             .ok_or_else(|| invalid("id", "Note does not exist"))
     }
+}
+
+pub(super) fn too_many_notes() -> StorageError {
+    invalid("notes", "Project exceeds 5000 notes")
+}
+
+fn not_unique() -> StorageError {
+    invalid("id", "Note ID must be unique and not a node ID")
+}
+
+/// The whole-document checks of one stored note, in `validate_notes`' order.
+pub(super) fn check_note(lookup: &dyn Lookup, note: &Note) -> Result<()> {
+    check_id(&note.id)?;
+    if lookup.node(&note.id).is_some() {
+        return Err(not_unique());
+    }
+    if lookup.node(&note.node_id).is_none() {
+        return Err(invalid(
+            "nodeId",
+            "Note must be anchored to an existing node",
+        ));
+    }
+    content(&note.text)?;
+    author_of(&note.author)?;
+    if note.replies.len() > MAX_NOTE_REPLIES {
+        return Err(invalid("replies", "Note exceeds 100 replies"));
+    }
+    for reply in &note.replies {
+        content(&reply.text)?;
+        author_of(&reply.author)?;
+    }
+    Ok(())
 }
 
 fn invalid(field: &str, message: &str) -> StorageError {

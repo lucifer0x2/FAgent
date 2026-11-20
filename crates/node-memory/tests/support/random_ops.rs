@@ -1,22 +1,33 @@
 //! Random batches of stored `Operation`s over the current project, mixing valid and
 //! invalid choices: missing/virtual/taken ids, cycles, non-containers, out-of-bounds
 //! indexes, bad component targets, master changes, links to deleted nodes, notes,
-//! tokens and styles. Props stay valid for the node kind, so property validation does
-//! not decide outcomes.
+//! tokens and styles. Props stay valid for the node kind unless `invalid` adds the
+//! property cases of `random_props`; `cases` adds the delta-rule cases of
+//! `random_cases`.
 use super::{text, Rng};
 use fagent_node_memory::Operation;
 use fagent_scene_input::{NodeKind, Snapshot};
 use serde_json::{json, Value};
+use std::collections::BTreeMap;
 
 pub struct Gen<'a> {
     pub rng: &'a mut Rng,
     pub counter: usize,
+    /// Also draw pages, root frames, tokens, styles, themes, flows and links.
+    pub extended: bool,
+    /// Also draw operations whose outcome property validation decides.
+    pub invalid: bool,
+    /// Also draw the delta-rule cases (`random_cases`): overrides, animation triggers,
+    /// deep chains, sized tokens with themes, theme-scoped instances, master edits.
+    pub cases: bool,
 }
 
 /// Ids and kinds the generator picks from, refreshed per batch.
 pub(super) struct Pool {
     pub(super) nodes: Vec<(String, NodeKind)>,
     pub(super) notes: Vec<String>,
+    /// Parent of each non-page node of the current revision.
+    pub(super) parents: BTreeMap<String, String>,
 }
 
 impl Gen<'_> {
@@ -28,7 +39,15 @@ impl Gen<'_> {
                 .map(|n| (n.id.clone(), n.kind.clone()))
                 .collect(),
             notes: current.notes.iter().map(|n| n.id.clone()).collect(),
+            parents: current
+                .nodes
+                .iter()
+                .filter_map(|n| Some((n.id.clone(), n.parent_id.clone()?)))
+                .collect(),
         };
+        if self.cases && self.rng.chance(8) {
+            return self.scripted(&mut pool);
+        }
         let size = 1 + self.rng.below(4);
         (0..size).map(|_| self.op(&mut pool)).collect()
     }
@@ -42,7 +61,7 @@ impl Gen<'_> {
     }
 
     /// An existing node of one of `kinds` when there is one, else a missing id.
-    fn pick_kind(&mut self, pool: &Pool, kinds: &[NodeKind]) -> String {
+    pub(super) fn pick_kind(&mut self, pool: &Pool, kinds: &[NodeKind]) -> String {
         for _ in 0..6 {
             let id = self.pick(pool);
             let kind = pool.nodes.iter().find(|(n, _)| *n == id).map(|(_, k)| k);
@@ -65,7 +84,16 @@ impl Gen<'_> {
         self.rng.chance(50).then(|| self.rng.below(5))
     }
 
-    fn op(&mut self, pool: &mut Pool) -> Operation {
+    pub(super) fn op(&mut self, pool: &mut Pool) -> Operation {
+        if self.cases && self.rng.chance(40) {
+            return self.case(pool);
+        }
+        if self.invalid && self.rng.chance(30) {
+            return self.invalid(pool);
+        }
+        if self.extended && self.rng.chance(35) {
+            return self.extra(pool);
+        }
         match self.rng.below(100) {
             0..=29 => self.create(pool),
             30..=47 => self.update(pool),

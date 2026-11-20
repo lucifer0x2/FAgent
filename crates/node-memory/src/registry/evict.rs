@@ -1,4 +1,5 @@
-//! Eviction policy: TTL first, then least-recently-used until within budget.
+//! Eviction policy: TTL and sparse projects first, then least-recently-used until
+//! within budget.
 use super::Registry;
 
 /// Why a project was dropped from memory.
@@ -6,6 +7,9 @@ use super::Registry;
 pub enum Eviction {
     Expired(String),
     OverBudget(String),
+    /// Most interned ids belong to deleted nodes: the next access reloads the live
+    /// rows, which compacts them.
+    Sparse(String),
 }
 
 impl Registry {
@@ -14,12 +18,18 @@ impl Registry {
         let mut map = self.map_mut();
         let mut evicted = Vec::new();
         map.retain(|id, handle| {
-            let expired = Some(id.as_str()) != keep
-                && now.saturating_sub(handle.last_access()) >= self.config.ttl;
-            if expired {
-                evicted.push(Eviction::Expired(id.clone()));
+            if Some(id.as_str()) == keep {
+                return true;
             }
-            !expired
+            let eviction = if now.saturating_sub(handle.last_access()) >= self.config.ttl {
+                Eviction::Expired(id.clone())
+            } else if handle.sparse() {
+                Eviction::Sparse(id.clone())
+            } else {
+                return true;
+            };
+            evicted.push(eviction);
+            false
         });
         let mut total: usize = map.values().map(|h| h.estimated_bytes()).sum();
         if total <= self.config.budget_bytes {

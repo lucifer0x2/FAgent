@@ -241,3 +241,40 @@ async fn live_asset_loss_and_database_loss_are_visible_after_a_warm_read() {
     assert!(!gone.status().is_success() && !gone.status().is_redirection());
     assert!(!gone.headers().contains_key(header::ETAG));
 }
+
+#[tokio::test]
+async fn a_commit_is_served_from_node_memory_with_a_new_etag() {
+    let server = Server::start().await;
+    let project = server.project().await;
+    let url = format!("{}/api/v1/projects/{project}/snapshot", server.url);
+    let initial = server.client.get(&url).send().await.unwrap();
+    let initial_tag = etag(&initial);
+    assert_eq!(
+        server.batch(&project, 0, "apply", design()).await["committedRevision"],
+        1
+    );
+    let hits = server.state.store.memory_stats().full_hits;
+    let current = conditional(&server, &url, &initial_tag).await;
+    assert_eq!(current.status(), StatusCode::OK);
+    let current_tag = etag(&current);
+    assert_ne!(current_tag, initial_tag);
+    // The commit left the project resident: the snapshot is copied from memory.
+    assert_eq!(server.state.store.memory_stats().full_hits, hits + 1);
+    let mut body = current.json::<Value>().await.unwrap();
+    assert_eq!(body["revision"], 1);
+    let store = server.state.store.clone();
+    let (database, _) = tokio::task::spawn_blocking(move || store.database_snapshot(&project))
+        .await
+        .unwrap()
+        .unwrap();
+    let envelope = body.as_object_mut().unwrap();
+    assert_eq!(envelope.remove("truncated"), Some(json!(false)));
+    envelope.remove("privacy_status").unwrap();
+    assert_eq!(body, serde_json::to_value(&*database).unwrap());
+    not_modified(
+        conditional(&server, &url, &current_tag).await,
+        &current_tag,
+        "private, no-cache",
+    )
+    .await;
+}

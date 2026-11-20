@@ -1,6 +1,7 @@
 //! One cached project: many concurrent readers or one writer, plus access time and
 //! size for the registry's eviction policy.
 use super::Clock;
+use crate::ops::Rejection;
 use crate::{Delta, ProjectState, Staged};
 use fagent_scene_input::read_scope::ReadView;
 use fagent_scene_input::{Operation, Result};
@@ -8,9 +9,22 @@ use std::sync::atomic::{AtomicU64, AtomicUsize, Ordering};
 use std::sync::{Arc, PoisonError, RwLock, RwLockReadGuard};
 use std::time::Duration;
 
+/// Identity of one load of a project into memory. Ids grow monotonically within a
+/// registry, so two handles of the same project id are told apart by their load id
+/// (an evicted and reloaded project gets a new one).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub struct LoadId(pub(super) u64);
+
+impl LoadId {
+    pub fn get(self) -> u64 {
+        self.0
+    }
+}
+
 /// Shared handle to a loaded project. Cloning the `Arc` never copies the project.
 pub struct ProjectHandle {
     id: String,
+    load_id: LoadId,
     state: RwLock<ProjectState>,
     published: RwLock<Arc<ReadView>>,
     clock: Arc<dyn Clock>,
@@ -19,11 +33,12 @@ pub struct ProjectHandle {
 }
 
 impl ProjectHandle {
-    pub(super) fn new(state: ProjectState, clock: Arc<dyn Clock>) -> Self {
-        let view = Arc::new(ReadView::new(state.to_snapshot()));
+    pub(super) fn new(state: ProjectState, clock: Arc<dyn Clock>, load_id: LoadId) -> Self {
+        let view = Arc::new(state.view());
         let handle = Self {
             id: state.project_id().to_owned(),
-            bytes: AtomicUsize::new(state.estimated_bytes() + view.estimated_bytes()),
+            load_id,
+            bytes: AtomicUsize::new(state.estimated_bytes()),
             state: RwLock::new(state),
             published: RwLock::new(view),
             last_access_nanos: AtomicU64::new(0),
@@ -35,6 +50,11 @@ impl ProjectHandle {
 
     pub fn id(&self) -> &str {
         &self.id
+    }
+
+    /// Which load of the project this handle is.
+    pub fn load_id(&self) -> LoadId {
+        self.load_id
     }
 
     /// Shared read access at one consistent revision. Writers wait while it is held.
@@ -64,18 +84,55 @@ impl ProjectHandle {
     /// other writers wait until the result is committed, aborted or dropped.
     pub fn begin(&self, ops: &[Operation]) -> Result<Staged<'_>> {
         self.touch();
-        let mut state = self.state.write().unwrap_or_else(PoisonError::into_inner);
-        let (log, delta) = state.stage(ops)?;
+        let state = self.state.write().unwrap_or_else(PoisonError::into_inner);
+        let (next, delta, names) = state
+            .stage(ops, Some(&self.bytes))
+            .map_err(Rejection::into_error)?;
         Ok(Staged::locked(
             state,
             &self.bytes,
             &self.published,
-            log,
+            next,
             delta,
+            names,
         ))
     }
 
-    /// Estimated bytes as of the last load or successful batch.
+    /// [`Self::begin`] when the project is at `expected` and the write lock is held:
+    /// `None` when it is at another revision. Returns the published view the batch
+    /// starts from together with the staging result, so a caller can inspect a
+    /// rejected batch against the exact base without holding the lock.
+    pub(crate) fn begin_at(
+        &self,
+        expected: u64,
+        ops: &[Operation],
+    ) -> Option<(Arc<ReadView>, std::result::Result<Staged<'_>, Rejection>)> {
+        self.touch();
+        let state = self.state.write().unwrap_or_else(PoisonError::into_inner);
+        if state.revision() != expected {
+            return None;
+        }
+        let before = self
+            .published
+            .read()
+            .unwrap_or_else(PoisonError::into_inner)
+            .clone();
+        let staged = state
+            .stage(ops, Some(&self.bytes))
+            .map(|(next, delta, names)| {
+                Staged::locked(state, &self.bytes, &self.published, next, delta, names)
+            });
+        Some((before, staged))
+    }
+
+    /// Whether a reload would compact many deleted ids. Never waits for a writer and
+    /// never refreshes the access time.
+    pub(super) fn sparse(&self) -> bool {
+        self.state.try_read().is_ok_and(|state| state.sparse())
+    }
+
+    /// Estimated bytes as of the last load or successful batch, plus the names a
+    /// discarded batch left interned (see `Staged`).
     pub fn estimated_bytes(&self) -> usize {
         self.bytes.load(Ordering::Relaxed)
     }

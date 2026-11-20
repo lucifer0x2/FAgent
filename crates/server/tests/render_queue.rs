@@ -1,5 +1,6 @@
 //! B01: commit prerenders must not crowd out requested renders. A run of commits used to fill the
 //! single eight-slot queue, so the next render_frame failed with QUEUE_FULL for seconds.
+#[allow(dead_code)]
 mod support;
 use serde_json::{json, Value};
 use std::time::{Duration, Instant};

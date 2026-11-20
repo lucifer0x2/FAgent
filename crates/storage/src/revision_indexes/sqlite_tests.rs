@@ -1,16 +1,12 @@
 use super::*;
 #[test]
-fn actual_sqlite_commit_reuses_topology_and_lazy_read_dependencies() {
+fn actual_sqlite_commit_leaves_read_dependencies_lazy() {
     let temp = tempfile::tempdir().unwrap();
-    // The legacy revision-index cache serves only projects that are not HOT.
-    let storage: Storage = Store::open_with_node_memory_writes(
-        temp.path(),
-        crate::ShadowMode::Off,
-        crate::ReadsMode::Off,
-        crate::WritesMode::Off,
-    )
-    .unwrap()
-    .into();
+    // Database shared snapshots build their indexes per read and never load memory.
+    // Commits stage in memory, so the test evicts the project after each one.
+    let store = Store::open(temp.path()).unwrap();
+    let memory = store.root.memory.clone();
+    let storage: Storage = store.into();
     let p = storage.create_project("topology", "Topology").unwrap();
     let mut request = BatchRequest { project_id:p.id().into(), expected_revision: Some(0), strict: false, idempotency_key:"seed".into(), operations:serde_json::from_value(json!([
         {"op":"create_node","id":"page","kind":"page","parentId":null,"props":{}},
@@ -18,21 +14,17 @@ fn actual_sqlite_commit_reuses_topology_and_lazy_read_dependencies() {
         {"op":"create_node","id":"rect","kind":"rectangle","parentId":"frame","props":{"width":10,"height":10}}
     ])).unwrap() };
     p.apply_batch(request.clone()).unwrap();
-    let old = storage.shared_snapshot(p.id()).unwrap();
+    assert!(
+        memory.owns_project(p.id()),
+        "a commit leaves the project resident"
+    );
+    memory.evict(p.id());
+    let old = storage.shared_database(p.id()).unwrap();
     assert!(old.indexes.dependencies.lock().unwrap().is_none());
     old.edit_context(vec!["page".into()]).unwrap();
-    let dependency = old
-        .indexes
+    old.indexes
         .dependencies(|| panic!("warm read rebuilt dependencies"))
         .unwrap();
-    let again = storage.shared_snapshot(p.id()).unwrap();
-    assert!(Arc::ptr_eq(
-        &dependency,
-        &again
-            .indexes
-            .dependencies(|| panic!("read index not reused"))
-            .unwrap()
-    ));
     request.expected_revision = Some(1);
     request.idempotency_key = "sparse".into();
     request.operations = vec![Operation::UpdateNode {
@@ -41,13 +33,9 @@ fn actual_sqlite_commit_reuses_topology_and_lazy_read_dependencies() {
         props: json!({"width":11}),
     }];
     p.apply_batch(request).unwrap();
-    let new = storage.shared_snapshot(p.id()).unwrap();
-    assert!(!Arc::ptr_eq(&old.indexes, &new.indexes));
-    assert!(
-        Arc::ptr_eq(&old.indexes.topology, &new.indexes.topology),
-        "commit must reuse the read's cached topology"
-    );
-    assert!(Arc::ptr_eq(&old.indexes.pages, &new.indexes.pages));
+    memory.evict(p.id());
+    let new = storage.shared_database(p.id()).unwrap();
+    assert_eq!(new.snapshot.revision, 2);
     assert!(
         new.indexes.dependencies.lock().unwrap().is_none(),
         "strict commit must not expand dependency work"
@@ -69,13 +57,12 @@ fn sqlite_readiness_identity_never_becomes_raw_write_metadata() {
     })
     .unwrap();
     let storage: Storage = store.into();
-    let ready = storage.shared_snapshot(p.id()).unwrap();
+    let ready = storage.shared_database(p.id()).unwrap();
     let asset = &ready.snapshot.assets[0];
     fs::remove_file(p.asset_path(&asset.relative_key).unwrap()).unwrap();
-    let missing = storage.shared_snapshot(p.id()).unwrap();
+    let missing = storage.shared_database(p.id()).unwrap();
     assert_eq!(ready.snapshot.revision, missing.snapshot.revision);
     assert_eq!(missing.snapshot.assets[0].status, "missing");
-    assert!(!Arc::ptr_eq(&ready.indexes, &missing.indexes));
     p.apply_batch(BatchRequest {
         project_id: p.id().into(),
         expected_revision: Some(1),
@@ -104,7 +91,7 @@ fn replaced_sqlite_file_with_same_id_and_revision_reopens_writer_and_indexes() {
     let store = Store::open(temp.path()).unwrap();
     let p = store.create_project("replaced", "Replaced").unwrap();
     let storage: Storage = store.into();
-    let old = storage.shared_snapshot(p.id()).unwrap();
+    let old = storage.shared_database(p.id()).unwrap();
     p.checkpoint().unwrap();
     let outside = tempfile::tempdir().unwrap();
     let displaced = outside.path().join("displaced");
@@ -118,10 +105,9 @@ fn replaced_sqlite_file_with_same_id_and_revision_reopens_writer_and_indexes() {
         .execute("UPDATE project_meta SET name='New file'", [])
         .unwrap();
     drop(replacement);
-    let new = storage.shared_snapshot(p.id()).unwrap();
+    let new = storage.shared_database(p.id()).unwrap();
     assert_eq!(new.snapshot.revision, old.snapshot.revision);
     assert_eq!(new.snapshot.name, "New file");
-    assert!(!Arc::ptr_eq(&old.indexes, &new.indexes));
     assert!(matches!(p.reader(), Err(error) if error.code=="PROJECT_REPLACED"));
     let handle = storage.open_project(p.id()).unwrap();
     handle
@@ -141,7 +127,7 @@ fn replaced_sqlite_file_with_same_id_and_revision_reopens_writer_and_indexes() {
         .unwrap();
     assert_eq!(
         storage
-            .shared_snapshot(p.id())
+            .shared_database(p.id())
             .unwrap()
             .snapshot
             .nodes

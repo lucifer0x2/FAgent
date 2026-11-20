@@ -67,9 +67,26 @@ impl ProjectState {
             .fold((0, 0), |(n, total), b| (n + 1, total + b))
     }
 
-    /// Bytes of one arena slot (each authored node, and each freed slot, holds one).
+    /// Bytes of one trie slot (each authored node holds one).
     #[doc(hidden)]
     pub fn slot_size() -> usize {
         crate::store::SLOT_SIZE
+    }
+}
+
+impl ProjectState {
+    /// Ids of nodes whose stored row, children or derived values differ from `base`
+    /// (an earlier version of this project), found by pointer comparison: parts shared
+    /// with `base` are skipped without being visited. For tests and diagnostics.
+    #[doc(hidden)]
+    pub fn changed_nodes_since(&self, base: &ProjectState) -> Vec<String> {
+        let keys = self.store.changed_since(&base.store);
+        let id = |k| {
+            let slot = self.store.live(k).or_else(|| base.store.live(k));
+            slot.map(|s| s.node.id.clone())
+        };
+        let mut ids: Vec<String> = keys.into_iter().filter_map(id).collect();
+        ids.sort_unstable();
+        ids
     }
 }

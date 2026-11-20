@@ -1,7 +1,8 @@
 //! Bulk load of a snapshot: one pass to allocate, one to link, one sort per sibling
-//! list and one top-down walk for derived indexes. Structural checks only.
+//! list and one top-down walk for derived indexes. Structural checks only: property
+//! validation (props shape and instance targets included) is the engine's admission,
+//! which never fails a load, so a batch that deletes or avoids a corrupt node commits.
 use crate::checks;
-use crate::props::check_object;
 use crate::store::{Key, Store};
 use fagent_scene_input::{Node, Result, StorageError};
 
@@ -19,7 +20,6 @@ pub(crate) fn build(nodes: Vec<Node>, max_nodes: usize) -> Result<Store> {
         if store.contains(&node.id) {
             return Err(on_node(StorageError::validation("id", "Duplicate node ID")));
         }
-        check_object(&node.props).map_err(on_node)?;
         store.load_node(node);
     }
     let keys: Vec<Key> = store.iter().map(|(key, _)| key).collect();
@@ -34,8 +34,8 @@ pub(crate) fn build(nodes: Vec<Node>, max_nodes: usize) -> Result<Store> {
     Ok(store)
 }
 
-/// Fills derived values top-down from the pages and checks instance targets and the
-/// maximum depth. Nodes not reached from a page sit on a parent cycle.
+/// Fills derived values top-down from the pages and checks the maximum depth. Nodes
+/// not reached from a page sit on a parent cycle.
 fn index(store: &mut Store) -> Result<()> {
     let mut stack: Vec<(Key, usize)> = store.children(None).iter().map(|&k| (k, 1)).collect();
     let mut reached = 0;
@@ -44,7 +44,6 @@ fn index(store: &mut Store) -> Result<()> {
         let node = store.node(key);
         checks::depth(depth).map_err(|e| e.on_node(&node.id, node.kind.as_str()))?;
         let derived = store.derive(key);
-        checks::instance_target(store, store.node(key))?;
         store.init(key, derived);
         let children = store.slot(key).children.iter();
         stack.extend(children.map(|&child| (child, depth + 1)));

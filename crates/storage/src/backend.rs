@@ -79,21 +79,26 @@ pub trait StorageBackend: Send + Sync {
             "This storage backend does not support updating project privacy",
         ))
     }
+    /// The latest revision as a full snapshot. Builtin backends copy it from node
+    /// memory when memory holds the revision and incarnation the database reports,
+    /// and read the database otherwise.
     fn snapshot(&self, project: &str) -> Result<Snapshot>;
-    /// Custom backends without authoritative identity never share derived state.
-    fn shared_snapshot(&self, project: &str) -> Result<crate::SharedSnapshot> {
-        let (snapshot, _) = self.snapshot_with_cache_identity(project)?;
+    /// The database snapshot with read indexes, never served by node memory: the
+    /// fallback when a reader fails on a memory view. Custom backends without
+    /// authoritative identity never share derived state.
+    fn shared_database(&self, project: &str) -> Result<crate::SharedSnapshot> {
+        let (snapshot, _) = self.database_snapshot(project)?;
         let indexes = Arc::new(crate::RevisionIndexes::new(&snapshot.nodes));
         Ok(crate::SharedSnapshot::untrusted(snapshot, indexes))
     }
-    /// Task28 I2: the snapshot for a scoped read of `target` (a node, frame or page
-    /// ID, or a virtual instance ID). Builtin backends with memory reads on may hand
-    /// out an immutable whole-project view; otherwise this is today's snapshot.
+    /// The snapshot for a scoped read of `target` (a node, frame or page ID, or a
+    /// virtual instance ID). Builtin backends hand out an immutable whole-project
+    /// view from node memory when it is fresh; otherwise this is the database snapshot.
     /// Use SharedSnapshot::scoped for payloads; a memory view's Snapshot holds only
     /// header/resources, rather than a serializable full project.
     fn scoped_snapshot(&self, project: &str, target: &str) -> Result<crate::ScopedRead> {
         let _ = target;
-        self.shared_snapshot(project)
+        self.shared_database(project)
             .map(crate::ScopedRead::database)
     }
     /// Latest read capability for project-wide authored reads and resource metadata.
@@ -101,21 +106,37 @@ pub trait StorageBackend: Send + Sync {
     fn reader_snapshot(&self, project: &str) -> Result<crate::ScopedRead> {
         self.scoped_snapshot(project, "")
     }
+    /// Counters of the node-memory adapter; zero for backends without one.
+    fn memory_stats(&self) -> crate::NodeMemoryStats {
+        crate::NodeMemoryStats::default()
+    }
+    /// A reader failed on a memory view and the read was served again from the
+    /// database snapshot.
+    fn memory_read_failed(&self) {}
     /// Authoritative lookup by ID or slug. A source error must propagate.
     /// Backends that cannot provide a cheap, reliable probe return None.
     fn snapshot_cache_identity(&self, _project: &str) -> Result<Option<SnapshotCacheIdentity>> {
         Ok(None)
     }
-    /// A cache fill must use the identity of the same read as the snapshot.
-    /// None makes the snapshot eligible to serve without populating the cache.
-    /// The snapshot is shared so read-only callers, such as response encoding,
-    /// avoid copying a backend-cached value.
+    /// The latest full snapshot (as `snapshot`) with the identity of the same read;
+    /// a cache fill must use this identity. None makes the snapshot eligible to
+    /// serve without populating a cache. The snapshot is shared so read-only
+    /// callers, such as response encoding, avoid another copy.
     fn snapshot_with_cache_identity(
         &self,
         project: &str,
     ) -> Result<(Arc<Snapshot>, Option<SnapshotCacheIdentity>)> {
         self.snapshot(project)
             .map(|snapshot| (Arc::new(snapshot), None))
+    }
+    /// The latest revision read from the database only, with the identity of the
+    /// same read; node memory never serves it. Backends without node memory keep
+    /// this default: their full snapshot already comes from their source.
+    fn database_snapshot(
+        &self,
+        project: &str,
+    ) -> Result<(Arc<Snapshot>, Option<SnapshotCacheIdentity>)> {
+        self.snapshot_with_cache_identity(project)
     }
     fn apply_batch(&self, project: &str, request: BatchRequest) -> Result<BatchResult>;
     fn dry_run_batch(&self, project: &str, request: BatchRequest) -> Result<DryRunResult>;

@@ -130,21 +130,6 @@ fn check_budget(total: usize) -> Result<()> {
     Ok(())
 }
 
-#[cfg(test)]
-mod budget_tests {
-    #[test]
-    fn export_accumulation_allows_exactly_48_mib() {
-        assert!(super::check_budget(48 * 1024 * 1024).is_ok());
-        assert_eq!(
-            super::check_budget(48 * 1024 * 1024 + 1)
-                .unwrap_err()
-                .0
-                .code,
-            "PIXEL_BUDGET"
-        );
-    }
-}
-
 async fn png_file(
     painter: &mut Painter<'_>,
     scene: &Value,
@@ -192,4 +177,19 @@ pub(super) fn finish(entry: &mut Entry, base: &str, computed: &Value, rendered: 
 fn fail(entry: &mut Entry, error: ApiError) {
     entry.value["status"] = json!("failed");
     entry.value["error"] = error.value()["error"].clone();
+}
+
+#[cfg(test)]
+mod budget_tests {
+    #[test]
+    fn export_accumulation_allows_exactly_48_mib() {
+        assert!(super::check_budget(48 * 1024 * 1024).is_ok());
+        assert_eq!(
+            super::check_budget(48 * 1024 * 1024 + 1)
+                .unwrap_err()
+                .0
+                .code,
+            "PIXEL_BUDGET"
+        );
+    }
 }

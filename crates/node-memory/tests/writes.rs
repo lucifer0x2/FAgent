@@ -52,22 +52,29 @@ fn create_appends_or_inserts_at_index() {
 fn update_assigns_or_merges_and_tracks_components() {
     let mut state = load(small());
     state
-        .apply(&[update("a", json!({"name":"A","w":{"x":1}}), false)])
+        .apply(&[update(
+            "a",
+            json!({"name":"A","stroke":{"color":"#000"}}),
+            false,
+        )])
         .unwrap();
     state
-        .apply(&[update("a", json!({"w":{"y":2}}), true)])
+        .apply(&[update("a", json!({"stroke":{"width":2}}), true)])
         .unwrap();
     assert_eq!(
         state.node("a").unwrap().props,
-        json!({"name":"A","w":{"x":1,"y":2}})
+        json!({"name":"A","stroke":{"color":"#000","width":2}})
     );
     state
-        .apply(&[update("a", json!({"w":{"z":3}}), false)])
+        .apply(&[update("a", json!({"stroke":{"color":"#111"}}), false)])
         .unwrap();
     state
         .apply(&[update("a", json!({"name":null}), true)])
         .unwrap();
-    assert_eq!(state.node("a").unwrap().props, json!({"w":{"z":3}}));
+    assert_eq!(
+        state.node("a").unwrap().props,
+        json!({"stroke":{"color":"#111"}})
+    );
     // Making f1 a master marks its subtree; i1 still uses m1.
     let delta = state
         .apply(&[update("f1", json!({"component":{"name":"F"}}), false)])

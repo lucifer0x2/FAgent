@@ -4,7 +4,8 @@ use fagent_scene_input::MAX_NODES;
 /// Limits for one [`crate::ProjectState`]. The default matches the scene-input caps.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct Limits {
-    /// Maximum authored nodes, inclusive. Loads above it fail; creates stop at it.
+    /// Maximum authored nodes, inclusive. Loads above it fail, and so do batches that end
+    /// above it. It also bounds the expanded project (authored plus virtual nodes).
     pub max_nodes: usize,
 }
 

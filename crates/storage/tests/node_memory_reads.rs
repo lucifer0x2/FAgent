@@ -1,6 +1,7 @@
-//! Task28 I2: scoped snapshots come from memory only at the database's current
-//! revision, on both engines; writes outside batches, other writers and unknown
-//! targets fall back to today's snapshot; reads off never use memory.
+//! Scoped snapshots come from node memory only at the database's current revision,
+//! on both engines. Commits stage in memory and leave the project resident at the
+//! new revision; writes outside batches evict it, so the next read loads it; other
+//! writers and unknown targets fall back to the database snapshot.
 mod postgres_support;
 
 use fagent_storage::*;
@@ -32,11 +33,10 @@ fn seed() -> Value {
 /// `(from_memory, revision)` of a scoped read of `target`.
 fn read(storage: &Storage, project: &str, target: &str) -> (bool, u64) {
     let read = storage.scoped_snapshot(project, target).unwrap();
-    assert!(!read.verify);
     (read.from_memory, read.shared.snapshot.revision)
 }
 
-/// `other` writes to the same database without memory (PostgreSQL only).
+/// `other` writes to the same database through its own memory (PostgreSQL only).
 fn check(on: &Storage, other: Option<Storage>, slug: &str) -> (String, u64) {
     for storage in [on].into_iter().chain(other.as_ref()) {
         let error = storage.scoped_snapshot("missing", "frame").err().unwrap();
@@ -44,7 +44,7 @@ fn check(on: &Storage, other: Option<Storage>, slug: &str) -> (String, u64) {
     }
     let id = on.create_project(slug, "Reads").unwrap().id().to_owned();
     let mut rev = commit(on, &id, 0, "seed", seed());
-    // The mirror tagged the incarnation it loaded (Task28 I3): the first read hits.
+    // The commit left the project resident at its revision.
     assert_eq!(read(on, &id, "frame"), (true, rev));
     assert_eq!(read(on, slug, "a"), (true, rev), "slugs resolve too");
     assert!(!read(on, &id, "missing").0);
@@ -55,6 +55,7 @@ fn check(on: &Storage, other: Option<Storage>, slug: &str) -> (String, u64) {
         "edit",
         json!([{"op":"update_node","id":"a","props":{"name":"A"}}]),
     );
+    assert_eq!(read(on, &id, "frame"), (true, rev), "committed in memory");
     let hit = on.scoped_snapshot(&id, "frame").unwrap();
     assert!(hit.from_memory);
     let scoped = hit.shared.scoped().unwrap();
@@ -85,38 +86,40 @@ fn check(on: &Storage, other: Option<Storage>, slug: &str) -> (String, u64) {
 #[test]
 fn sqlite_scoped_reads_come_from_memory_when_current() {
     let temp = tempfile::tempdir().unwrap();
-    let on = Store::open_with_node_memory(temp.path(), ShadowMode::Strict, ReadsMode::On);
-    let on: Storage = on.unwrap().into();
-    let start = node_memory_shadow_stats();
+    let on: Storage = Store::open(temp.path()).unwrap().into();
     check(&on, None, "sqlite-on");
-    let end = node_memory_shadow_stats();
-    assert!(end.read_hits - start.read_hits >= 4);
-    let off = Store::open_with_node_memory_writes(
-        temp.path().join("off"),
-        ShadowMode::Off,
-        ReadsMode::Off,
-        WritesMode::Off,
-    );
-    let off: Storage = off.unwrap().into();
-    let p = off.create_project("off", "Off").unwrap();
-    commit(&off, p.id(), 0, "seed", seed());
-    assert_eq!(read(&off, p.id(), "frame"), (false, 1));
+    let stats = on.memory_stats();
+    assert!(stats.read_hits >= 4, "{stats:?}");
+    assert!(stats.read_loads >= 1, "{stats:?}");
+    assert!(stats.write_loads >= 1 && stats.write_hits >= 1, "{stats:?}");
+    // Every load is admitted (fully validated once); the counters are serialized.
+    assert_eq!(stats.memory.admissions, stats.memory.loads, "{stats:?}");
+    assert_eq!(stats.memory.admission_failures, 0, "{stats:?}");
+    let json = serde_json::to_value(stats).unwrap();
+    for key in [
+        "admissions",
+        "admission_failures",
+        "admission_micros",
+        "rejected",
+    ] {
+        assert!(json["memory"].get(key).is_some(), "{key} in {json}");
+    }
 }
 
 #[test]
 #[ignore = "requires fresh PostgreSQL via scripts/task19-check.sh"]
 fn postgres_scoped_reads_follow_other_writers() {
-    let storage = |reads: ReadsMode| {
-        let mut config = postgres_support::config();
-        config.node_memory_shadow = ShadowMode::Strict;
-        config.node_memory_reads = reads;
-        config.node_memory_writes = match reads {
-            ReadsMode::Off => WritesMode::Off,
-            _ => WritesMode::from_env(),
-        };
+    let storage = || {
+        let config = postgres_support::config();
         Storage::from_shared(Arc::new(PostgresBackend::with_config(config).unwrap()))
     };
-    let on = storage(ReadsMode::On);
-    let (id, rev) = check(&on, Some(storage(ReadsMode::Off)), "postgres-reads");
-    assert_eq!(read(&storage(ReadsMode::Off), &id, "frame"), (false, rev));
+    let on = storage();
+    let (id, rev) = check(&on, Some(storage()), "postgres-reads");
+    let fresh = storage();
+    assert_eq!(
+        read(&fresh, &id, "frame"),
+        (false, rev),
+        "a new process starts cold"
+    );
+    assert_eq!(read(&fresh, &id, "frame"), (true, rev));
 }

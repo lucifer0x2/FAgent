@@ -43,23 +43,21 @@ impl Project {
     /// Files can disappear independently of SQLite: readiness is surfaced separately
     /// from stored rows, as every read sees it.
     pub(crate) fn apply_readiness(&self, s: &mut Snapshot) {
-        for asset in &mut s.assets {
-            asset.status = if self.asset_path(&asset.relative_key).is_ok() {
-                "ready"
-            } else {
-                "missing"
-            }
-            .into();
-        }
-        for font in &mut s.fonts {
-            if let Some(asset) = &font.asset_id {
-                font.status = s
-                    .assets
-                    .iter()
-                    .find(|a| &a.id == asset)
-                    .map_or("missing", |a| a.status.as_str())
-                    .into();
-            }
+        let ready: Vec<bool> = s
+            .assets
+            .iter()
+            .map(|asset| self.asset_path(&asset.relative_key).is_ok())
+            .collect();
+        apply_observed_readiness(s, &ready);
+    }
+
+    /// [`Self::apply_readiness`] from an earlier observation of the same rows (one flag
+    /// per asset in id order), so a snapshot and the identity that tags it agree.
+    /// Observes the files again when the observation does not cover these rows.
+    pub(crate) fn apply_readiness_from(&self, s: &mut Snapshot, ready: &[bool]) {
+        match ready.len() == s.assets.len() {
+            true => apply_observed_readiness(s, ready),
+            false => self.apply_readiness(s),
         }
     }
     pub(crate) fn update_privacy(&self, privacy: PrivacyStatus) -> Result<(ProjectMeta, bool)> {
@@ -76,7 +74,7 @@ impl Project {
             meta.privacy_status = privacy;
         }
         tx.commit()?;
-        self.root.shadow.evict(&self.project_id);
+        self.root.memory.evict(&self.project_id);
         Ok((meta, changed))
     }
     pub(crate) fn request_ids(&self, project: &str, key: &str) -> Result<()> {
@@ -162,4 +160,22 @@ pub(crate) fn request_ids(project: &str, request_project: &str, key: &str) -> Re
         ));
     }
     Ok(())
+}
+
+/// Asset statuses from `ready` (one flag per asset, in snapshot order), then each
+/// asset-backed font's status from its asset.
+fn apply_observed_readiness(s: &mut Snapshot, ready: &[bool]) {
+    for (asset, &ready) in s.assets.iter_mut().zip(ready) {
+        asset.status = if ready { "ready" } else { "missing" }.into();
+    }
+    for font in &mut s.fonts {
+        if let Some(asset) = &font.asset_id {
+            font.status = s
+                .assets
+                .iter()
+                .find(|a| &a.id == asset)
+                .map_or("missing", |a| a.status.as_str())
+                .into();
+        }
+    }
 }

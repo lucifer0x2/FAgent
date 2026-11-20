@@ -10,7 +10,6 @@ fn smoke(pair: &Pair) {
         }
         pair.both(&request, false)
     };
-    let start = node_memory_shadow_stats();
     let result = send(
         "prefix",
         json!([
@@ -76,10 +75,6 @@ fn smoke(pair: &Pair) {
     );
     assert_eq!(replay["replayed"], true);
     pair.assert_rows(0);
-    assert!(
-        node_memory_shadow_stats().write_incremental > start.write_incremental,
-        "must exercise exact-delta adapter"
-    );
 }
 
 #[test]
@@ -88,20 +83,26 @@ fn sqlite_i4_delta_smoke_and_db_failure_rollback() {
     let pair = sqlite_pair(temp.path());
     // Install before admission, so the DB identity remains current when the
     // staged write fails. Both engines return the same public storage error.
-    for name in ["off", "on"] {
+    for name in ["warm", "cold"] {
         let db = rusqlite::Connection::open(temp.path().join(name).join("diff/db.sql")).unwrap();
         db.execute_batch("CREATE TRIGGER i4_fail BEFORE UPDATE ON nodes WHEN json_extract(NEW.props_json,'$.name')='fail' BEGIN SELECT RAISE(ABORT,'i4 forced failure'); END;").unwrap();
     }
     smoke(&pair);
-    let old = pair.on.snapshot(&pair.project).unwrap();
-    let before = node_memory_shadow_stats();
+    let old = pair.warm.snapshot(&pair.project).unwrap();
+    let before = pair.warm.memory_stats();
     let result = pair.both(&json!({"projectId":pair.project,"idempotencyKey":"db-fail","operations":[{"op":"update_node","id":"r0","props":{"name":"fail"}}]}), false);
     assert!(result.get("error").is_some());
-    assert!(node_memory_shadow_stats().write_aborts > before.write_aborts);
+    let failed = pair.warm.memory_stats();
+    assert_eq!(failed.write_aborts, 1);
+    assert_eq!(failed.memory.evictions, before.memory.evictions + 1);
     assert_eq!(
-        pair.on.snapshot(&pair.project).unwrap().revision,
+        pair.warm.snapshot(&pair.project).unwrap().revision,
         old.revision
     );
+    // Evicted: the next full read came from the database and loaded the project.
+    let reread = pair.warm.memory_stats();
+    assert_eq!(reread.full_fallbacks, failed.full_fallbacks + 1, "evicted");
+    assert_eq!(reread.read_loads, failed.read_loads + 1);
     pair.assert_rows(1);
     let result = pair.both(&json!({"projectId":pair.project,"idempotencyKey":"after-fail","operations":[{"op":"update_node","id":"r0","props":{"width":22}}]}), false);
     assert_eq!(result["committedRevision"], old.revision + 1);

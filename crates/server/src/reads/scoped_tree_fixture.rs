@@ -2,11 +2,11 @@
 use fagent_storage::{BatchRequest, Snapshot, Storage, Store};
 use serde_json::{json, Value};
 
-pub(super) fn node(id: &str, kind: &str, parent: Option<&str>, props: Value) -> Value {
+pub(crate) fn node(id: &str, kind: &str, parent: Option<&str>, props: Value) -> Value {
     json!({"op":"create_node","id":id,"kind":kind,"parentId":parent,"props":props})
 }
 
-pub(super) fn fixture() -> (tempfile::TempDir, Storage, String) {
+pub(crate) fn fixture() -> (tempfile::TempDir, Storage, String) {
     let dir = tempfile::tempdir().unwrap();
     let storage: Storage = Store::open(dir.path()).unwrap().into();
     let project = storage
@@ -104,7 +104,7 @@ pub(super) fn fixture() -> (tempfile::TempDir, Storage, String) {
     (dir, storage, project.id().to_owned())
 }
 
-pub(super) fn reordered(snapshot: &Snapshot) -> Snapshot {
+pub(crate) fn reordered(snapshot: &Snapshot) -> Snapshot {
     let mut snapshot = snapshot.clone();
     snapshot.nodes.reverse();
     for node in &mut snapshot.nodes {
@@ -115,12 +115,12 @@ pub(super) fn reordered(snapshot: &Snapshot) -> Snapshot {
 
 /// The committed fixture with one node row rewritten behind the validator, then
 /// reopened cold. Temporary root only; mirrors rows from older releases/raw SQL.
-pub(super) fn corrupt(id: &str, props: &str) -> (tempfile::TempDir, Storage, String) {
+pub(crate) fn corrupt(id: &str, props: &str) -> (tempfile::TempDir, Storage, String) {
     rewrite("UPDATE nodes SET props_json=?1 WHERE id=?2", props, id)
 }
 
 /// As `corrupt`, but re-parents `id` under `parent`, e.g. into a parent cycle.
-pub(super) fn corrupt_parent(id: &str, parent: &str) -> (tempfile::TempDir, Storage, String) {
+pub(crate) fn corrupt_parent(id: &str, parent: &str) -> (tempfile::TempDir, Storage, String) {
     rewrite("UPDATE nodes SET parent_id=?1 WHERE id=?2", parent, id)
 }
 

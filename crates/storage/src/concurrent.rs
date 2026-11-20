@@ -119,27 +119,5 @@ fn history_writes(
     Some(out)
 }
 
-/// Reports what a commit based on `base` overwrote; nothing when it is current.
-pub(crate) fn fill(
-    result: &mut BatchResult,
-    base: Base,
-    current: u64,
-    history: &[(u64, Value)],
-    operations: &Value,
-    after: &crate::validate::Candidate,
-) {
-    let Some(expected) = base.expected.filter(|b| *b < current) else {
-        return;
-    };
-    let exists = |id: &str| {
-        after.nodes.contains_key(id)
-            || after.notes.contains_key(id)
-            || after.tokens.contains_key(id)
-            || after.styles.contains_key(id)
-    };
-    let ours = batch_writes(operations, &result.changed_ids, exists);
-    report(result, expected, current, history, &ours);
-}
-
 #[cfg(test)]
 mod tests;

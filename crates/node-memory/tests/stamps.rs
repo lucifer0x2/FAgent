@@ -16,13 +16,17 @@ fn writes_stamp_keys_placement_and_creation() {
     let base = state.estimated_bytes();
 
     state
-        .apply(&[update("a", json!({"name":"A","w":1}), false)])
+        .apply(&[update(
+            "a",
+            json!({"name":"A","stroke":{"color":"#000"}}),
+            false,
+        )])
         .unwrap();
     state
-        .apply(&[update("a", json!({"w":{"x":1}}), true)])
+        .apply(&[update("a", json!({"stroke":{"width":2}}), true)])
         .unwrap();
     assert_eq!(state.prop_revision("a", "name"), Some(2));
-    assert_eq!(state.prop_revision("a", "w"), Some(3));
+    assert_eq!(state.prop_revision("a", "stroke"), Some(3));
     assert_eq!(state.prop_revision("a", "fill"), None);
     assert_eq!(state.placement_revision("a"), None);
 
@@ -48,7 +52,7 @@ fn writes_stamp_keys_placement_and_creation() {
     writes.sort_by_key(|(_, rev)| *rev);
     assert_eq!(
         writes,
-        [(Written::Prop("name"), 2), (Written::Prop("w"), 3)]
+        [(Written::Prop("name"), 2), (Written::Prop("stroke"), 3)]
     );
 
     let (stamped, bytes) = state.stamp_stats();
@@ -61,9 +65,9 @@ fn writes_stamp_keys_placement_and_creation() {
 fn link_pruning_stamps_links_and_failures_restore_stamps() {
     let mut state = load(small());
     state
-        .apply(&[update("a", json!({"links":[{"to":"t2"}]}), false)])
+        .apply(&[update("a", json!({"links":[{"to":"f2"}]}), false)])
         .unwrap();
-    state.apply(&[delete("t2")]).unwrap();
+    state.apply(&[delete("f2")]).unwrap();
     assert_eq!(state.prop_revision("a", "links"), Some(3));
     let before = observe(&state);
     let failing = [
@@ -76,4 +80,45 @@ fn link_pruning_stamps_links_and_failures_restore_stamps() {
     assert_unchanged(&state, &before);
     assert_eq!(state.prop_revision("a", "name"), None);
     assert_eq!(state.placement_revision("b"), None);
+}
+
+#[test]
+fn update_that_changes_nothing_stamps_nothing_but_is_a_changed_id() {
+    let mut state = load(small());
+    state
+        .apply(&[update(
+            "a",
+            json!({"name":"A","stroke":{"color":"#000","width":2}}),
+            false,
+        )])
+        .unwrap();
+    let before = observe(&state);
+    // Same values by assignment, by merge, a merge removing an absent key, and an
+    // empty patch.
+    let delta = state
+        .apply(&[
+            update("a", json!({"name":"A"}), false),
+            update("a", json!({"stroke":{"color":"#000"}}), true),
+            update("a", json!({"absent":null}), true),
+            update("a", json!({}), false),
+        ])
+        .unwrap();
+    assert_eq!(delta.nodes.upserted, ["a"]);
+    assert_eq!(delta.changed_ids(), ["a"]);
+    assert_eq!(state.prop_revision("a", "name"), Some(2));
+    assert_eq!(state.prop_revision("a", "stroke"), Some(2));
+    assert_eq!(state.prop_revision("a", "absent"), None);
+    assert_eq!(state.to_snapshot().nodes, before.snapshot.nodes);
+    assert_eq!(state.index_dump().stamp_bytes, before.dump.stamp_bytes);
+    // A changed value is stamped.
+    state
+        .apply(&[update(
+            "a",
+            json!({"name":"B","stroke":{"color":"#000"}}),
+            true,
+        )])
+        .unwrap();
+    assert_eq!(state.prop_revision("a", "name"), Some(4));
+    assert_eq!(state.prop_revision("a", "stroke"), Some(2));
+    assert_rebuild_matches(&state);
 }

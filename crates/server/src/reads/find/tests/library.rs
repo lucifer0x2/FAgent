@@ -95,7 +95,7 @@ fn shared_library_work_grows_with_authored_nodes_not_pages_times_library() {
 #[test]
 fn committed_sqlite_shared_snapshot_takes_the_scoped_find_path() {
     let (_root, storage, snapshot) = library_fixture(3, 5);
-    let shared = storage.shared_snapshot(&snapshot.project_id).unwrap();
+    let shared = storage.shared_database(&snapshot.project_id).unwrap();
     for args in [
         json!({"nameContains":"needle","limit":2}),
         json!({"frameId":"frame1","kinds":["rectangle"]}),
