@@ -142,7 +142,7 @@ database remains the source of truth. On a 200k-node project (PostgreSQL, releas
 
 | Measurement | Database-only path (former) | Node-memory (always on) |
 | --- | --- | --- |
-| `get_design_context`, one frame | 156 ms cached; 207 ms right after a write | **1.5 ms** warm; **2.0 ms** right after a write |
+| `get_design_context`, whole MCP call on one frame, median / p95 (SQLite) | 156 ms cached; 207 ms right after a write (storage read, PostgreSQL) | **2.8 / 3.0 ms** warm; **3.6 / 4.1 ms** right after a write |
 | Commit of a props edit on a master child (929 instances), median of 30 | 988 ms | **21 ms** |
 | Commit of a props edit on a plain node, median of 30 | – | **2.1–2.5 ms** (validation 0.01 ms) |
 | Full snapshot of the latest revision, median of 30 | 178–243 ms (database read) | **42–53 ms** (memory copy) |
@@ -152,7 +152,8 @@ database remains the source of truth. On a 200k-node project (PostgreSQL, releas
 Since [Task41](tasks/41-node-memory-engine.md) a commit validates only the batch's delta and the nodes that depend on
 it, the whole project is validated once when it is loaded, and every latest-revision read (scoped or full) is served
 from memory; there is no separate snapshot cache. Medians on a generated fixture under moderate machine load, recorded
-in the repository; read them as orders of magnitude. Method and the backend and viewer benchmarks:
+in the repository; read them as orders of magnitude. Measured on `bf4beaf`, before the CodeRabbit review fixes of
+PR #5 (not rerun since). Method and the backend and viewer benchmarks:
 [Performance](docs/PERFORMANCE.md).
 
 ## Documentation

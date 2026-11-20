@@ -67,6 +67,10 @@ edit"), and 988 ms on the former database-only path. The cold rows ran under mor
 then; admission itself measured the same 825 ms in one run). RAM is about 1.25 KB per authored node (engine estimate;
 1.6 KB of process footprint). Phase breakdown and engine-level numbers: [TASK41-REPORT.md](TASK41-REPORT.md) "Phase 3"
 and "Phase 4".
+The whole `get_design_context` MCP call on one frame (HTTP, read, scoped expansion and resolution, viewports,
+diagnostics, JSON shaping; `crates/server/tests/design_context_bench.rs`, SQLite, release, on `bf4beaf`, load average
+13–20): 2.77 / 2.98 ms at 200k and 3.32 / 3.64 ms at ~7k; right after a one-node commit, 3.62 / 4.14 ms and 4.29 /
+4.86 ms. None of the Task41 numbers were rerun after the CodeRabbit review fixes of PR #5.
 The Task28 stages that preceded the engine are described in the
 [I3b](TASK28-I3B-REPORT.md), [I4](TASK28-I4-REPORT.md) and
 [I5](TASK28-I5-REPORT.md) reports and the
