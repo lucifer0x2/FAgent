@@ -77,12 +77,16 @@ fn random_batches_on_generated_fixture_match_candidate() {
     let mut gen = Gen {
         rng: &mut rng,
         counter: 0,
+        extended: false,
+        invalid: false,
+        cases: false,
     };
     let mut tally = Tally::default();
-    for n in 0..60 {
+    for n in 0..120 {
         let ops = gen.batch(&state.to_snapshot());
         round(&mut state, &ops, &mut tally, &format!("round {n}"));
     }
+    eprintln!("accepted {}, rejected {:?}", tally.accepted, tally.rejected);
     assert!(tally.accepted > 10 && tally.rejected() > 10);
 }
 

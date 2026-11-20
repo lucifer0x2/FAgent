@@ -1,6 +1,6 @@
 //! The project event stream learns the canonical ID and current revision from project metadata.
-//! It never loads a full snapshot: on PostgreSQL every commit invalidates the snapshot cache, so a
-//! snapshot read per connected client per commit would be a full entity read each.
+//! It never loads a full snapshot: a snapshot read per connected client per commit would be a full
+//! read (a memory copy or a database read) each.
 #[allow(dead_code)] // Shared fixture; this file uses only part of it.
 mod storage_backend_support;
 use futures_util::{stream::BoxStream, StreamExt};

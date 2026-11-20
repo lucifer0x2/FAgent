@@ -75,7 +75,7 @@ pub async fn run(cell: Cell) -> Value {
     let blocking = backends.clone();
     let id = project.clone();
     let storage = tokio::task::spawn_blocking(move || {
-        let snapshot = blocking.uncached.snapshot(&id).unwrap();
+        let (snapshot, _) = blocking.primary.database_snapshot(&id).unwrap();
         let stored: BTreeSet<String> = snapshot.nodes.iter().map(|n| n.id.clone()).collect();
         assert_eq!(stored, ids, "seeded rows match the scaled fixture");
         drop(snapshot);

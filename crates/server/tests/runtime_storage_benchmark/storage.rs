@@ -62,7 +62,7 @@ pub fn measure(project: Project) -> Measured {
     let snapshot = project.handle.snapshot().unwrap();
     let first_post_write_read_us = elapsed_us(start);
     verify(&project, &snapshot);
-    let before = hot_proof::counters(project.moka);
+    let before = hot_proof::counters(project.postgres);
     let mut reads = Vec::new();
     for index in 0..WARMUP + SAMPLES {
         let start = Instant::now();

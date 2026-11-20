@@ -1,15 +1,6 @@
-use super::{scope::Resolver, values::*, Candidate};
+use super::{scope::Resolver, values::*};
 use crate::{error::*, model::*};
 use std::collections::BTreeSet;
-impl Candidate {
-    pub(super) fn ancestors(&self, id: &str) -> impl Iterator<Item = &Node> {
-        let parent = |node: &Node| node.parent_id.as_ref().and_then(|id| self.nodes.get(id));
-        std::iter::successors(self.nodes.get(id).and_then(parent), move |node| {
-            parent(node)
-        })
-        .take(128)
-    }
-}
 impl Resolver<'_> {
     pub(super) fn style(&self, style: &Style) -> Result<()> {
         id(&style.id)?;
@@ -33,7 +24,7 @@ impl Resolver<'_> {
                 for (k, v) in o {
                     match k.as_str() {
                         "fontId" => {
-                            if !self.fonts.contains_key(v.as_str().unwrap_or("")) {
+                            if self.lookup.font(v.as_str().unwrap_or("")).is_none() {
                                 return Err(StorageError::validation(
                                     "fontId",
                                     "Referenced font does not exist",
@@ -105,8 +96,7 @@ impl Resolver<'_> {
             }
             (_, Some(p)) => {
                 let parent = self
-                    .nodes
-                    .get(p)
+                    .find(p)
                     .ok_or_else(|| super::structural::missing_parent(&n.id, p))?;
                 if !parent.kind.container() {
                     let kind = parent.kind.as_str();
@@ -124,7 +114,7 @@ impl Resolver<'_> {
                             "Tree exceeds maximum depth 128",
                         ));
                     }
-                    cursor = self.nodes.get(k).and_then(|n| n.parent_id.as_deref());
+                    cursor = self.find(k).and_then(|n| n.parent_id.as_deref());
                 }
             }
         }

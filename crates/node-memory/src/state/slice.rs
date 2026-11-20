@@ -140,19 +140,18 @@ impl ProjectState {
         builder.subtree(target);
         builder.masters();
         builder.navigation(target);
-        let mut snapshot = self.meta.clone();
+        let mut snapshot = self.meta.as_ref().clone();
         snapshot.nodes = builder.nodes();
         let res = &self.store.res;
-        snapshot.tokens = res.tokens.values().cloned().collect();
-        snapshot.styles = res.styles.values().cloned().collect();
-        snapshot.assets = res.assets.values().cloned().collect();
-        snapshot.fonts = res.fonts.values().cloned().collect();
         let notes: BTreeSet<&str> = builder
             .selected
             .iter()
             .flat_map(|&k| res.notes_on(&self.store.node(k).id))
             .collect();
-        snapshot.notes = notes.into_iter().map(|n| res.notes[n].clone()).collect();
+        snapshot.notes = notes
+            .into_iter()
+            .map(|n| res.notes[n].as_ref().clone())
+            .collect();
         Some(snapshot)
     }
 }

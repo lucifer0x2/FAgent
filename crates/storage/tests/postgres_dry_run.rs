@@ -5,6 +5,11 @@ use serde_json::json;
 
 const LOCK: &str = "SELECT revision FROM fagent_runtime_v1.projects WHERE project_id=$1 FOR UPDATE";
 
+fn strict(mut request: BatchRequest) -> BatchRequest {
+    request.strict = true;
+    request
+}
+
 fn rects(count: usize) -> Vec<Operation> {
     (0..count)
         .map(|index| Operation::CreateNode {
@@ -41,7 +46,8 @@ fn dry_run_completes_while_a_writer_holds_the_project_row() {
     assert_eq!(preview.base_revision, 1);
     assert!(preview.changed_ids.iter().any(|id| id == "rect-399"));
     assert!(preview.diagnostics.is_empty());
-    let stale = p.dry_run_batch(request(p.id(), 0, "stale", rename("Stale")));
+    // Only strict requests conflict on a stale base; others commit last-writer-wins.
+    let stale = p.dry_run_batch(strict(request(p.id(), 0, "stale", rename("Stale"))));
     let stale = stale.unwrap_err();
     assert_eq!(stale.code, "REVISION_CONFLICT");
     assert_eq!(stale.current_revision, Some(1));
@@ -60,10 +66,10 @@ fn dry_run_completes_while_a_writer_holds_the_project_row() {
 fn dry_run_keeps_request_and_idempotency_checks() {
     let (_, storage) = setup();
     let p = project(&storage, "preview-checks");
-    let seed = request(p.id(), 0, "seed", page("Seed"));
+    let seed = strict(request(p.id(), 0, "seed", page("Seed")));
     p.apply_batch(seed.clone()).unwrap();
 
-    // A matching key never short-circuits a preview: the stale base conflicts.
+    // A matching key never short-circuits a preview: the stale strict base conflicts.
     let replayed = p.dry_run_batch(seed).unwrap_err();
     assert_eq!(replayed.code, "REVISION_CONFLICT");
     assert_eq!(replayed.current_revision, Some(1));

@@ -23,15 +23,16 @@ pub(super) fn probe(project: &Project) -> Result<(ProjectMeta, Option<SnapshotCa
     Ok((meta, identity))
 }
 
-/// The identity of the project as `conn` sees it, without loading entities. A
-/// writer calls this under the project writer lock, bracketed by `stamp`.
+/// The revision and identity of the project as `conn` sees it, without loading
+/// entities. A writer calls this under the project writer lock, bracketed by `stamp`.
 pub(crate) fn probe_on(
     project: &Project,
     conn: &Connection,
     stamp: Option<String>,
-) -> Result<Option<SnapshotCacheIdentity>> {
+) -> Result<(u64, Option<SnapshotCacheIdentity>)> {
     let (meta, readiness) = meta_and_readiness(project, conn)?;
-    unchanged_identity(project, &meta, stamp, readiness)
+    let identity = unchanged_identity(project, &meta, stamp, readiness)?;
+    Ok((meta.revision, identity))
 }
 
 fn meta_and_readiness(project: &Project, conn: &Connection) -> Result<(ProjectMeta, Vec<bool>)> {

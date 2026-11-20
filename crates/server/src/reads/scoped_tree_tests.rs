@@ -140,7 +140,7 @@ fn shared_read(shared: &SharedSnapshot, tool: &str, args: Value) -> Value {
 #[test]
 fn shared_tree_cold_warm_and_committed_revisions_stay_isolated() {
     let (_dir, storage, id) = fixture();
-    let old = storage.shared_snapshot(&id).unwrap();
+    let old = storage.shared_database(&id).unwrap();
     let args = json!({"projectId":id,"frameId":"frame","compact":true});
     let expected = one(&old.snapshot, "get_design_context", &args, false);
     for _ in 0..2 {
@@ -151,7 +151,7 @@ fn shared_tree_cold_warm_and_committed_revisions_stay_isolated() {
     }
     let project = storage.open_project(&id).unwrap();
     project.apply_batch(serde_json::from_value(json!({"projectId":id,"expectedRevision":1,"idempotencyKey":"edit","operations":[{"op":"update_node","id":"copy","props":{"text":"Changed"}}]})).unwrap()).unwrap();
-    let new = storage.shared_snapshot(&id).unwrap();
+    let new = storage.shared_database(&id).unwrap();
     assert_eq!(
         shared_read(&old, "get_design_context", args.clone()),
         expected
@@ -177,10 +177,10 @@ fn untrusted_backend_keeps_legacy_validation_and_missing_target_behavior() {
         .unwrap()
         .props["fontId"] = json!("missing-font");
     let snapshot = std::sync::Arc::new(snapshot);
-    let trusted = storage.shared_snapshot(&id).unwrap();
+    let trusted = storage.shared_database(&id).unwrap();
     let untrusted = SharedSnapshot::untrusted(snapshot, trusted.indexes.clone());
     assert!(untrusted.trusted_scoped().unwrap().is_none());
-    let mut swapped = storage.shared_snapshot(&id).unwrap();
+    let mut swapped = storage.shared_database(&id).unwrap();
     swapped.snapshot = untrusted.snapshot.clone();
     assert!(swapped.trusted_scoped().unwrap().is_none());
     for (tool, args) in [

@@ -68,7 +68,7 @@ impl SharedSnapshot {
             return Ok(None);
         };
         // Built on the first authoritative *snapshot vector*, not Candidate's
-        // BTreeMap order. Commits publish indexes with this lazy slot empty.
+        // BTreeMap order.
         let index = match cached.as_ref() {
             Some(index) if index.indexes(&self.snapshot) => index.clone(),
             Some(_) => {

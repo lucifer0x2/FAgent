@@ -1,4 +1,5 @@
 mod compact_support;
+#[allow(dead_code)]
 mod support;
 use compact_support::{all, bytes, fixture, ids, pages, FILLER_TOKENS};
 use fagent_storage::{resolved_nodes_for_theme, Snapshot};

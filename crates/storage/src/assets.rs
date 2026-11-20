@@ -120,9 +120,8 @@ impl Project {
             &history,
             &result,
             &mut BatchMetrics::default(),
-            None,
         )?;
-        self.root.shadow.evict(&self.project_id);
+        self.root.memory.evict(&self.project_id);
         Ok(ImportAssetsResult { assets, result })
     }
     /// Writes one content-addressed binary, or checks the one already there.

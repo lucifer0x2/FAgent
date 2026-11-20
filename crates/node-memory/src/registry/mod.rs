@@ -4,15 +4,16 @@ mod clock;
 mod evict;
 mod handle;
 
-use crate::ProjectState;
+use crate::{Limits, ProjectState};
 use fagent_scene_input::{Result, Snapshot, StorageError};
 use std::collections::HashMap;
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, PoisonError, RwLock};
 use std::time::Duration;
 
 pub use clock::{Clock, ManualClock, SystemClock};
 pub use evict::Eviction;
-pub use handle::ProjectHandle;
+pub use handle::{LoadId, ProjectHandle};
 
 /// HOT/COLD policy: a project idle for `ttl` or beyond the memory budget (least
 /// recently used first) becomes COLD, i.e. is dropped from the registry.
@@ -35,14 +36,23 @@ pub struct Registry {
     projects: RwLock<HashMap<String, Arc<ProjectHandle>>>,
     config: RegistryConfig,
     clock: Arc<dyn Clock>,
+    limits: Limits,
+    next_load: AtomicU64,
 }
 
 impl Registry {
     pub fn new(config: RegistryConfig, clock: Arc<dyn Clock>) -> Self {
+        Self::with_limits(config, clock, Limits::default())
+    }
+
+    /// [`Self::new`] with limits applied to every project it loads.
+    pub fn with_limits(config: RegistryConfig, clock: Arc<dyn Clock>, limits: Limits) -> Self {
         Self {
             projects: RwLock::default(),
             config,
             clock,
+            limits,
+            next_load: AtomicU64::new(1),
         }
     }
 
@@ -54,8 +64,9 @@ impl Registry {
         if self.map().contains_key(&id) {
             return Err(exists());
         }
-        let state = ProjectState::from_snapshot(snapshot)?;
-        let handle = Arc::new(ProjectHandle::new(state, self.clock.clone()));
+        let state = ProjectState::from_snapshot_with(snapshot, self.limits)?;
+        let load_id = LoadId(self.next_load.fetch_add(1, Ordering::Relaxed));
+        let handle = Arc::new(ProjectHandle::new(state, self.clock.clone(), load_id));
         {
             let mut map = self.map_mut();
             if map.contains_key(&id) {
@@ -72,6 +83,11 @@ impl Registry {
         let handle = self.map().get(project_id).cloned()?;
         handle.touch();
         Some(handle)
+    }
+
+    /// The HOT project without refreshing its access time.
+    pub fn peek(&self, project_id: &str) -> Option<Arc<ProjectHandle>> {
+        self.map().get(project_id).cloned()
     }
 
     /// HOT projects ordered by id.

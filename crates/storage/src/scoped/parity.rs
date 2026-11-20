@@ -1,12 +1,13 @@
-//! Exact old/new closure, sparse footprint and sealed envelope comparisons.
-use super::{dependency_index::DependencyIndex, history, index::BatchScope, reference_history};
+//! Closures and footprints against the frozen reference algorithms: the snapshot
+//! dependency index and the engine's views (`edit_context`, page guards), the
+//! engine's commit footprint and the full-scan footprint of resource imports.
+use super::{dependency_index::DependencyIndex, history, reference_history};
 use crate::*;
-#[path = "parity_guard.rs"]
-mod guard;
+use fagent_node_memory::{Begin, MemoryConfig, NodeMemory, SystemClock};
 #[path = "parity_notes_pages.rs"]
 mod notes_pages;
 
-fn seed() -> Snapshot {
+pub(crate) fn seed() -> Snapshot {
     let temp = tempfile::tempdir().unwrap();
     let store = Store::open(temp.path()).unwrap();
     let p = store.create_project("parity", "Parity").unwrap();
@@ -59,7 +60,7 @@ fn i5_persistent_dependency_adapter_matches_legacy() {
     }
 }
 
-fn snapshot(before: &Snapshot, candidate: &Candidate) -> Snapshot {
+pub(crate) fn snapshot(before: &Snapshot, candidate: &Candidate) -> Snapshot {
     let mut after = before.clone();
     after.nodes = candidate.nodes.values().cloned().collect();
     after.tokens = candidate.tokens.values().cloned().collect();
@@ -70,7 +71,7 @@ fn snapshot(before: &Snapshot, candidate: &Candidate) -> Snapshot {
     after
 }
 
-fn closures(snapshot: &Snapshot, index: &DependencyIndex) {
+fn closures(snapshot: &Snapshot, closure: impl Fn(&[String]) -> Result<BTreeSet<String>>) {
     for pages in [
         vec![],
         vec!["missing".into()],
@@ -80,46 +81,54 @@ fn closures(snapshot: &Snapshot, index: &DependencyIndex) {
         vec!["library".into()],
         vec!["p1".into(), "p2".into()],
     ] {
-        let result = index
-            .closure(&pages)
-            .map_err(|e| serde_json::to_value(e).unwrap());
+        let result = closure(&pages).map_err(|e| serde_json::to_value(e).unwrap());
         let reference = super::dependencies::closure(snapshot, &pages)
             .map_err(|e| serde_json::to_value(e).unwrap());
         assert_eq!(result, reference, "pages={pages:?}");
     }
 }
 
+/// Index closures of `snapshot` match the reference.
+fn snapshot_closures(snapshot: &Snapshot) {
+    let index = DependencyIndex::from_snapshot(snapshot).unwrap();
+    closures(snapshot, |pages| index.closure(pages));
+}
+
+/// Stages `operations` in `NodeMemory` as a commit does and checks its footprint,
+/// the full-scan footprint and the closures of the result against the reference.
 fn step(before: &Snapshot, operations: Vec<Operation>) -> (Snapshot, BTreeSet<String>) {
-    let (candidate, changed, mut validation) =
-        crate::batch::validated_candidate(before, &operations).unwrap();
-    let scope = BatchScope::new(before, &candidate, &changed).unwrap();
-    let old = reference_history::footprint(before, &candidate).unwrap();
-    assert_eq!(scope.footprint, old, "operations={operations:?}");
-    let request = json!({"projectId":before.project_id,"expectedRevision":before.revision,"idempotencyKey":"parity","operations":operations});
-    let expected =
-        history::envelope_with_scopes(old, request.clone(), request["operations"].clone()).unwrap();
-    let actual = history::envelope_with_scopes(
-        scope.footprint.clone(),
-        request.clone(),
-        request["operations"].clone(),
-    )
-    .unwrap();
+    let mut candidate = Candidate::from_snapshot(before);
+    let mut changed = BTreeSet::new();
+    for op in &operations {
+        candidate.apply(op, &mut changed).unwrap();
+    }
+    candidate.prune_links(&mut changed);
+    let expected = reference_history::footprint(before, &candidate).unwrap();
     assert_eq!(
-        serde_json::to_vec(&actual).unwrap(),
-        serde_json::to_vec(&expected).unwrap()
+        history::footprint(before, &candidate).unwrap(),
+        expected,
+        "full scan, operations={operations:?}"
+    );
+    let engine = NodeMemory::new(MemoryConfig::default(), Arc::new(SystemClock::new()));
+    let project = engine.load(before.clone()).unwrap();
+    let Begin::Ready(prepared) = project.begin(before.revision, &operations).unwrap() else {
+        panic!("stale base");
+    };
+    assert_eq!(
+        prepared.footprint(),
+        &expected,
+        "engine, operations={operations:?}"
     );
     let after = snapshot(before, &candidate);
-    let index =
-        DependencyIndex::from_candidate(&candidate, validation.expanded.take(), scope.after, None)
-            .unwrap();
-    closures(&after, &index);
-    (after, scope.footprint)
+    closures(&after, |pages| prepared.after().dependency_closure(pages));
+    snapshot_closures(&after);
+    (after, expected)
 }
 
 #[test]
-fn indexed_closure_and_sparse_history_match_frozen_reference() {
+fn closures_and_footprints_match_frozen_reference() {
     let before = seed();
-    closures(&before, &DependencyIndex::from_snapshot(&before).unwrap());
+    snapshot_closures(&before);
     let cases = [
         json!([{"op":"update_node","id":"r1","props":{"name":"Changed"}}]),
         json!([{"op":"update_node","id":"r1","props":{"x":-0.0}}]),
@@ -188,7 +197,7 @@ fn resource_import_full_fallback_preserves_old_and_new_font_families_and_assets(
             .family
     )));
     let after = snapshot(&before, &candidate);
-    closures(&after, &DependencyIndex::from_snapshot(&after).unwrap());
+    snapshot_closures(&after);
     let index = DependencyIndex::from_snapshot(&after).unwrap();
     assert!(index
         .closure(&["p1".into()])
@@ -197,7 +206,7 @@ fn resource_import_full_fallback_preserves_old_and_new_font_families_and_assets(
 }
 
 #[test]
-fn absent_validation_expansion_rebuilds_instance_free_and_full_fallback_safely() {
+fn instance_free_project_closures_and_footprints_match_frozen_reference() {
     let mut before = seed();
     before.nodes.retain(|n| {
         !matches!(

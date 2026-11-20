@@ -1,3 +1,4 @@
+#[allow(dead_code)]
 mod support;
 mod tool_names;
 use futures_util::StreamExt;

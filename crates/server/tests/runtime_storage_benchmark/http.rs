@@ -69,7 +69,7 @@ pub async fn measure(measured: &Measured, postgres: bool) -> Value {
         let project = super::fixture::Project {
             storage,
             handle: project,
-            moka: false,
+            postgres: false,
             count,
             seed_revision,
             _root: None,

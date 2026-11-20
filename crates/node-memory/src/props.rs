@@ -21,17 +21,6 @@ pub(crate) fn link_targets(props: &Value) -> impl Iterator<Item = &str> {
     fagent_scene_input::NodeProps::new(props).link_targets()
 }
 
-/// Props must be a JSON object.
-pub(crate) fn check_object(props: &Value) -> Result<()> {
-    match props.is_object() {
-        true => Ok(()),
-        false => Err(StorageError::validation(
-            "props",
-            "Properties must be an object",
-        )),
-    }
-}
-
 /// `update_node` props: each top-level key of `patch` replaces the stored value, or
 /// with `merge` the patch is applied as an RFC 7386 merge patch (`merge_props`).
 pub(crate) fn updated(stored: &Value, patch: &Map<String, Value>, merge: bool) -> Result<Value> {
@@ -95,6 +84,13 @@ pub(crate) fn heap_bytes(value: &Value) -> usize {
         }
         _ => 0,
     }
+}
+
+/// Equality as stored text sees it: equal values that serialize differently
+/// (`0.0` and `-0.0`) differ, as the database's text comparison and history treat
+/// them. Value equality is checked first, so only equal values are serialized.
+pub(crate) fn same<T: PartialEq + serde::Serialize>(a: Option<&T>, b: Option<&T>) -> bool {
+    a == b && serde_json::to_vec(&a).ok() == serde_json::to_vec(&b).ok()
 }
 
 #[cfg(test)]

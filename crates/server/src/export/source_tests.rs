@@ -1,14 +1,12 @@
 use super::*;
 use serde_json::json;
 
-#[allow(dead_code)]
-#[path = "../reads/scoped_tree_fixture.rs"]
-mod fixture;
+use crate::reads::scoped_tree_fixture as fixture;
 
 #[test]
 fn scoped_export_targets_match_full_root_frames_settings_names_and_errors() {
     let (_root, store, id) = fixture::fixture();
-    let shared = store.shared_snapshot(&id).unwrap();
+    let shared = store.shared_database(&id).unwrap();
     for theme in ["default", "night", "day", "missing"] {
         let old = fagent_storage::resolved_expanded_nodes(&shared.snapshot, theme);
         let new = Source::new(&shared, theme);
@@ -56,7 +54,7 @@ fn scoped_export_targets_match_full_root_frames_settings_names_and_errors() {
 #[test]
 fn export_untrusted_snapshot_retains_unrelated_global_validation_failure() {
     let (_root, store, id) = fixture::fixture();
-    let mut shared = store.shared_snapshot(&id).unwrap();
+    let mut shared = store.shared_database(&id).unwrap();
     let mut snapshot = shared.snapshot.as_ref().clone();
     snapshot
         .nodes
@@ -76,7 +74,7 @@ fn export_untrusted_snapshot_retains_unrelated_global_validation_failure() {
 #[test]
 fn one_scoped_source_checks_the_theme_and_builds_resources_once() {
     let (_root, store, id) = fixture::fixture();
-    let shared = store.shared_snapshot(&id).unwrap();
+    let shared = store.shared_database(&id).unwrap();
     let builds = fagent_storage::read_scope::resource_builds;
     let before = builds();
     let source = Source::new(&shared, "night").unwrap();

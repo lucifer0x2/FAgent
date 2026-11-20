@@ -3,9 +3,7 @@ use super::ScenesQuery;
 use fagent_storage::BatchRequest;
 use serde_json::json;
 
-#[allow(dead_code)]
-#[path = "reads/scoped_tree_fixture.rs"]
-mod fixture;
+use crate::reads::scoped_tree_fixture as fixture;
 
 #[test]
 fn shared_frames_match_full_frames_order_offsets_and_errors() {
@@ -33,7 +31,7 @@ fn shared_frames_match_full_frames_order_offsets_and_errors() {
     project
         .apply_batch(serde_json::from_value::<BatchRequest>(request).unwrap())
         .unwrap();
-    let shared = storage.shared_snapshot(&id).unwrap();
+    let shared = storage.shared_database(&id).unwrap();
     assert!(shared.trusted_scoped().unwrap().is_some());
     let mut compared = 0;
     for page in ["page", "library", "frame", "missing"] {
@@ -61,18 +59,11 @@ fn shared_frames_match_full_frames_order_offsets_and_errors() {
 
 #[test]
 fn i5_hot_scene_fonts_and_prerender_consumers_match_full() {
-    use fagent_storage::{ReadsMode, ShadowMode, Storage, Store, WritesMode};
+    use fagent_storage::{Storage, Store};
     let (root, storage, id) = fixture::fixture();
-    let full = storage.shared_snapshot(&id).unwrap();
+    let full = storage.shared_database(&id).unwrap();
     drop(storage);
-    let hot: Storage = Store::open_with_node_memory_writes(
-        root.path(),
-        ShadowMode::Off,
-        ReadsMode::On,
-        WritesMode::Off,
-    )
-    .unwrap()
-    .into();
+    let hot: Storage = Store::open(root.path()).unwrap().into();
     hot.reader_snapshot(&id).unwrap();
     let memory = hot.reader_snapshot(&id).unwrap();
     assert!(memory.from_memory && memory.shared.snapshot.nodes.is_empty());
@@ -115,7 +106,7 @@ fn i5_hot_scene_fonts_and_prerender_consumers_match_full() {
         serde_json::to_value(full.snapshot.as_ref()).unwrap()
     );
     assert_eq!(
-        serde_json::to_value(hot.shared_snapshot(&id).unwrap().snapshot.as_ref()).unwrap(),
+        serde_json::to_value(hot.shared_database(&id).unwrap().snapshot.as_ref()).unwrap(),
         serde_json::to_value(full.snapshot.as_ref()).unwrap()
     );
 }

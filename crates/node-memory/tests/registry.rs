@@ -3,7 +3,6 @@ mod support;
 
 use fagent_node_memory::{Eviction, ManualClock, Registry, RegistryConfig};
 use fagent_scene_input::{NodeKind, Snapshot};
-use serde_json::json;
 use std::sync::{mpsc, Arc};
 use std::time::Duration;
 use support::*;
@@ -77,7 +76,7 @@ fn budget_evicts_least_recently_used_first() {
     assert_eq!(evicted, [Eviction::OverBudget("b".into())]);
     // Growth from writes counts once the next eviction pass runs.
     let a = registry.get("a").unwrap();
-    let props = json!({"text":"x".repeat(size)});
+    let props = text(&"x".repeat(size));
     a.apply(&[create("big", NodeKind::Text, "f1", props)])
         .unwrap();
     clock.advance(Duration::from_secs(1));
@@ -122,8 +121,8 @@ fn readers_see_whole_batches() {
         std::thread::spawn(move || {
             for i in 0..200 {
                 let ops = [
-                    create(&format!("x{i}"), NodeKind::Text, "f1", json!({})),
-                    create(&format!("y{i}"), NodeKind::Text, "f1", json!({})),
+                    create(&format!("x{i}"), NodeKind::Text, "f1", text("x")),
+                    create(&format!("y{i}"), NodeKind::Text, "f1", text("x")),
                 ];
                 handle.apply(&ops).unwrap();
             }

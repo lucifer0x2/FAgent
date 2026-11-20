@@ -57,8 +57,8 @@ impl Resolver<'_> {
         let font = base
             .get("fontId")
             .map(|id| {
-                self.fonts
-                    .get(id.as_str().unwrap_or_default())
+                self.lookup
+                    .font(id.as_str().unwrap_or_default())
                     .ok_or_else(|| {
                         StorageError::validation("fontId", "Referenced font does not exist")
                     })
@@ -71,7 +71,7 @@ impl Resolver<'_> {
         let Some(family) = family else {
             return Ok(());
         };
-        let faces: Vec<&Font> = self.fonts.values().filter(|f| f.family == family).collect();
+        let faces: Vec<&Font> = self.lookup.fonts().filter(|f| f.family == family).collect();
         if faces.is_empty() {
             return Err(self.missing_family(family));
         }
@@ -124,7 +124,7 @@ impl Resolver<'_> {
 
     fn missing_family(&self, family: &str) -> StorageError {
         let families: std::collections::BTreeSet<_> =
-            self.fonts.values().map(|f| f.family.as_str()).collect();
+            self.lookup.fonts().map(|f| f.family.as_str()).collect();
         let available = families
             .iter()
             .take(10)

@@ -1,14 +1,21 @@
-//! Bounded end-to-end HOT dispatch, strict-page conflict and SQL rollback oracle.
+//! Bounded end-to-end strict-page conflict and SQL rollback oracle, with readers that
+//! keep the memory view they were handed across later commits.
 use super::*;
 
 #[test]
 fn i5_sqlite_stale_strict_dispatch_rollback_and_retained_reader() {
     let temp = tempfile::tempdir().unwrap();
     let pair = sqlite_pair(temp.path());
-    for name in ["off", "on"] {
+    for name in ["warm", "cold"] {
         let db = rusqlite::Connection::open(temp.path().join(name).join("diff/db.sql")).unwrap();
         db.execute_batch("CREATE TRIGGER i5_fail BEFORE UPDATE ON nodes WHEN json_extract(NEW.props_json,'$.name')='fail' BEGIN SELECT RAISE(ABORT,'i5 forced failure'); END;").unwrap();
     }
+    // Commits leave the project resident: the next read is served from memory.
+    let hot_reader = || {
+        let read = pair.warm.reader_snapshot(&pair.project).unwrap();
+        assert!(read.from_memory);
+        read
+    };
     pair.seed();
     let send = |key: &str, base: u64, operations: Value, pages: bool| {
         let mut request = json!({"projectId":pair.project,"expectedRevision":base,"idempotencyKey":key,"operations":operations});
@@ -25,13 +32,10 @@ fn i5_sqlite_stale_strict_dispatch_rollback_and_retained_reader() {
         false,
     );
     assert_eq!(unrelated["committedRevision"], 2);
-    let retained = pair.on.reader_snapshot(&pair.project).unwrap();
-    assert!(retained.from_memory);
-    let start = node_memory_shadow_stats();
+    let retained = hot_reader();
     let edit = json!([{"op":"update_node","id":"r0","props":{"name":"Allowed stale"}}]);
     let result = send("stale", 1, edit.clone(), true);
     assert_eq!(result["committedRevision"], 3);
-    assert!(node_memory_shadow_stats().write_incremental > start.write_incremental);
     assert_eq!(send("stale", 1, edit, true)["replayed"], true);
     assert_eq!(retained.shared.snapshot.revision, 2);
     assert!(retained
@@ -57,8 +61,8 @@ fn i5_sqlite_stale_strict_dispatch_rollback_and_retained_reader() {
         true,
     );
     assert_eq!(conflict["error"]["code"], "REVISION_CONFLICT");
-    let old = pair.on.reader_snapshot(&pair.project).unwrap();
-    assert!(old.from_memory);
+    let old = hot_reader();
+    let before = pair.warm.memory_stats();
     let failed = send(
         "sql-fail",
         4,
@@ -66,20 +70,26 @@ fn i5_sqlite_stale_strict_dispatch_rollback_and_retained_reader() {
         true,
     );
     assert!(failed.get("error").is_some());
-    assert!(node_memory_shadow_stats().write_aborts > start.write_aborts);
+    // The failed persist dropped the staged batch and evicted the project.
+    let aborted = pair.warm.memory_stats();
+    assert_eq!(aborted.write_aborts, 1);
+    assert_eq!(aborted.memory.evictions, before.memory.evictions + 1);
     assert_eq!(old.shared.snapshot.revision, 4);
     assert_eq!(
         old.shared.scoped().unwrap().node("r0").unwrap().props["name"],
         "Allowed stale"
     );
-    let after = pair.on.snapshot(&pair.project).unwrap();
+    let after = pair.warm.snapshot(&pair.project).unwrap();
     assert_eq!(after.revision, 4);
+    let reread = pair.warm.memory_stats();
+    assert_eq!(reread.full_fallbacks, aborted.full_fallbacks + 1, "evicted");
+    assert_eq!(reread.read_loads, aborted.read_loads + 1);
     assert_eq!(
         after.nodes.iter().find(|n| n.id == "r0").unwrap().props["name"],
         "Allowed stale"
     );
     // Explicit snapshot APIs must still materialize the complete authored model.
-    let shared = pair.on.shared_snapshot(&pair.project).unwrap();
+    let shared = pair.warm.shared_database(&pair.project).unwrap();
     assert_eq!(
         serde_json::to_value(shared.snapshot.as_ref()).unwrap(),
         serde_json::to_value(&after).unwrap()

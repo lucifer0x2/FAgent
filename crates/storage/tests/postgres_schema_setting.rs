@@ -18,7 +18,7 @@ fn a_configured_schema_holds_every_runtime_table_and_project() {
     let mut settings = config();
     settings.schema = DatabaseSchema::parse(&name).unwrap();
     let backend = PostgresBackend::with_config(settings.clone()).unwrap();
-    let namespace = backend.cache_namespace().to_owned();
+    let namespace = backend.database_namespace().to_owned();
     let storage = Storage::new(backend);
     let p = project(&storage, "schema-setting");
     p.apply_batch(request(p.id(), 0, "seed", page("Home")))
@@ -72,7 +72,7 @@ fn a_configured_schema_holds_every_runtime_table_and_project() {
 
     // Reconnecting to the same schema keeps its registry and data.
     let reopened = PostgresBackend::with_config(settings).unwrap();
-    assert_eq!(reopened.cache_namespace(), namespace);
+    assert_eq!(reopened.database_namespace(), namespace);
     let reopened = Storage::new(reopened);
     assert_eq!(reopened.snapshot(p.id()).unwrap(), p.snapshot().unwrap());
 }

@@ -1,8 +1,9 @@
 //! Exact page dependency closure over persistent authored/resource adjacency.
 //! Expanded props and effective fonts are scoped work for visited pages.
-use super::{view_indexes::references, ReadScope, ReadView};
-use crate::{validate::FontReferences, NodeKind, Result, StorageError};
-use std::collections::{BTreeMap, BTreeSet};
+use super::{snapshot_source::references_of, ReadScope, ReadView};
+use crate::{validate::FontReferences, Font, NodeKind, Result, Snapshot, StorageError};
+use serde_json::Value;
+use std::collections::{BTreeMap, BTreeSet, HashMap};
 
 impl ReadView {
     pub fn dependency_closure(&self, pages: &[String]) -> Result<BTreeSet<String>> {
@@ -25,6 +26,7 @@ impl ReadView {
             ));
         }
         let mut keys = BTreeSet::new();
+        let mut resources: Option<Resources<'_>> = None;
         let mut queue: Vec<_> = pages.iter().map(|p| format!("page:{p}")).collect();
         while let Some(key) = queue.pop() {
             if !keys.insert(key.clone()) {
@@ -36,15 +38,11 @@ impl ReadView {
                     let scoped = self.scoped();
                     let nodes = scoped.expand(ReadScope::Page(id), false)?;
                     for node in &nodes.authored {
-                        if let Some(refs) =
-                            self.index.dependencies.get(&format!("node:{}", node.id))
-                        {
-                            queue.extend(refs.iter().cloned());
-                        }
+                        queue.extend(references_of(&node.props));
                         queue.extend(self.notes_on(&node.id).map(|n| format!("note:{}", n.id)));
                     }
                     for node in &nodes.expanded {
-                        queue.extend(references(&node.props));
+                        queue.extend(references_of(&node.props));
                     }
                     let expanded: BTreeMap<_, _> = nodes
                         .expanded
@@ -65,12 +63,60 @@ impl ReadView {
                     }
                 }
                 _ => {
-                    if let Some(refs) = self.index.dependencies.get(&key) {
-                        queue.extend(refs.iter().cloned());
-                    }
+                    let resources = resources.get_or_insert_with(|| Resources::new(&self.snapshot));
+                    queue.extend(resources.dependencies(kind, id));
                 }
             }
         }
         Ok(keys)
+    }
+
+    /// Keys a token, style or font depends on; nothing for other resources.
+    #[cfg(test)]
+    pub(super) fn resource_dependencies(&self, kind: &str, id: &str) -> BTreeSet<String> {
+        Resources::new(&self.snapshot).dependencies(kind, id)
+    }
+}
+
+/// Tokens, styles and fonts by id, built once per closure walk.
+struct Resources<'a> {
+    tokens: HashMap<&'a str, &'a Value>,
+    styles: HashMap<&'a str, &'a Value>,
+    fonts: HashMap<&'a str, &'a Font>,
+}
+
+impl<'a> Resources<'a> {
+    fn new(meta: &'a Snapshot) -> Self {
+        Self {
+            tokens: meta
+                .tokens
+                .iter()
+                .map(|t| (t.id.as_str(), &t.value))
+                .collect(),
+            styles: meta
+                .styles
+                .iter()
+                .map(|s| (s.id.as_str(), &s.value))
+                .collect(),
+            fonts: meta.fonts.iter().map(|f| (f.id.as_str(), f)).collect(),
+        }
+    }
+
+    fn dependencies(&self, kind: &str, id: &str) -> BTreeSet<String> {
+        match kind {
+            "token" => self.tokens.get(id).copied(),
+            "style" => self.styles.get(id).copied(),
+            "font" => {
+                let Some(font) = self.fonts.get(id) else {
+                    return BTreeSet::new();
+                };
+                let mut keys = BTreeSet::from([format!("font-family:{}", font.family)]);
+                keys.extend(font.asset_id.as_ref().map(|asset| format!("asset:{asset}")));
+                return keys;
+            }
+            _ => None,
+        }
+        .map(references_of)
+        .unwrap_or_default()
     }
 }

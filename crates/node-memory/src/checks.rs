@@ -1,7 +1,6 @@
 //! Structural validation shared by load and writes. Error codes, fields and messages
 //! follow `Candidate::apply` in `fagent-scene-input`; property validation is not
 //! run here.
-use crate::props::{component_id, is_master};
 use crate::store::{Key, Store};
 use fagent_scene_input::validate::{structural, valid_id};
 use fagent_scene_input::{Node, NodeKind, Result, StorageError};
@@ -112,36 +111,6 @@ pub(crate) fn depth(depth: usize) -> Result<()> {
 /// Chain length of `key` (itself plus ancestors), counting at most `MAX_DEPTH + 1`.
 pub(crate) fn depth_of(store: &Store, key: Key) -> usize {
     1 + store.ancestors(key).take(MAX_DEPTH).count()
-}
-
-/// Levels below `key` in its deepest branch (0 for a leaf).
-pub(crate) fn height(store: &Store, key: Key) -> usize {
-    let mut deepest = 0;
-    let mut stack = vec![(key, 0)];
-    while let Some((key, depth)) = stack.pop() {
-        deepest = deepest.max(depth);
-        let children = store.slot(key).children.iter();
-        stack.extend(children.map(|&child| (child, depth + 1)));
-    }
-    deepest
-}
-
-/// For an instance: its `componentId` must name a component master. Reported on the
-/// node like `Candidate`'s property validation.
-pub(crate) fn instance_target(store: &Store, node: &Node) -> Result<()> {
-    if node.kind != NodeKind::Instance {
-        return Ok(());
-    }
-    let found = component_id(&node.props)
-        .and_then(|id| store.get(id))
-        .is_some_and(|slot| is_master(&slot.node.kind, &slot.node.props));
-    match found {
-        true => Ok(()),
-        false => Err(
-            StorageError::validation("props.componentId", "Expected a component frame")
-                .on_node(&node.id, node.kind.as_str()),
-        ),
-    }
 }
 
 /// A master would lose its component status or be deleted while instances use it.

@@ -4,9 +4,17 @@
 use super::Txn;
 use crate::checks;
 use crate::store::Prop;
+use fagent_scene_input::validate::check_node;
 use fagent_scene_input::Result;
 
 impl Txn<'_> {
+    /// `Candidate::apply` order: the structural errors `check_node` gives first (made
+    /// before the move so the store never holds a cycle), the move, `check_node`, then
+    /// placement. Only the moved node's depth is an operation error, as in
+    /// `Candidate::apply`: descendants moved deeper than the maximum depth are found by
+    /// end-of-batch validation, so the working state may hold them until then. Store
+    /// walks do not assume the depth bound (`depth_of` stops at it, the others are
+    /// iterative).
     pub(super) fn reparent(
         &mut self,
         id: &str,
@@ -18,25 +26,26 @@ impl Txn<'_> {
         let kind = self.store.node(key).kind.clone();
         let parent = checks::parent(self.store, id, &kind, Some(parent_id))?
             .expect("a non-page has a parent");
-        if self.store.ancestors(parent).any(|a| a == key) {
+        // `check_node`'s walk from the moved node meets it again within its first 128
+        // entries (the node, `parent`, then 127 ancestors) or fails on the depth first.
+        if self
+            .store
+            .ancestors(parent)
+            .take(checks::MAX_DEPTH - 1)
+            .any(|a| a == key)
+        {
             return Err(checks::cycle(id, parent_id));
         }
-        let depth = 1 + checks::depth_of(self.store, parent);
-        checks::depth(depth)?;
-        if depth > checks::depth_of(self.store, key) {
-            // Moving deeper: descendants must stay within the maximum too.
-            checks::depth(depth + checks::height(self.store, key))?;
-        }
-        checks::instance_target(self.store, self.store.node(key))?;
+        checks::depth(1 + checks::depth_of(self.store, parent))?;
         let old_parent = self.store.slot(key).parent;
-        self.store.unlink(old_parent, key, &mut self.log);
+        self.store.unlink(old_parent, key);
         if old_parent != Some(parent) {
-            self.store.set_parent(key, Some(parent), &mut self.log);
+            self.store.set_parent(key, Some(parent));
         }
+        check_node(&*self.store, self.store.node(key))?;
         self.place(key, Some(parent), index)?;
-        self.store.refresh(key, &mut self.log);
-        self.store
-            .stamp(key, Prop::Placement, self.rev, &mut self.log);
+        self.store.refresh(key);
+        self.store.stamp(key, Prop::Placement, self.rev);
         self.touch(id, true);
         Ok(())
     }
@@ -45,10 +54,9 @@ impl Txn<'_> {
         checks::not_virtual(id, None)?;
         let key = checks::existing(self.store, id)?;
         let parent = self.store.slot(key).parent;
-        self.store.unlink(parent, key, &mut self.log);
+        self.store.unlink(parent, key);
         self.place(key, parent, Some(index))?;
-        self.store
-            .stamp(key, Prop::Placement, self.rev, &mut self.log);
+        self.store.stamp(key, Prop::Placement, self.rev);
         self.touch(id, true);
         Ok(())
     }

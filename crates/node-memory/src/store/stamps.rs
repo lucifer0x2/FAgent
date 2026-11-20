@@ -3,8 +3,17 @@
 //! placement `(parentId, sortKey)`, or its creation (which writes every key at once).
 //! Revisions are stored as `u32` offsets from the load revision; nodes never written
 //! since load carry no table at all.
-use super::{Key, Log, Store, Undo};
+use super::{Key, Store};
 use std::collections::HashMap;
+use std::sync::Arc;
+
+/// Interned top-level props keys. Few and rarely new, so a version copies the table
+/// when a batch adds a key; ids never change.
+#[derive(Clone, Default)]
+pub(crate) struct PropNames {
+    ids: HashMap<Arc<str>, u32>,
+    names: Vec<Arc<str>>,
+}
 
 /// One stamped property of a node.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
@@ -114,69 +123,44 @@ impl Stamps {
     }
 }
 
-/// Interned props keys; ids are stable for the life of the store.
-#[derive(Default)]
-pub(crate) struct Interner {
-    ids: HashMap<String, u32>,
-    names: Vec<String>,
-}
-
-impl Interner {
-    pub(crate) fn intern(&mut self, name: &str) -> u32 {
-        if let Some(&id) = self.ids.get(name) {
-            return id;
-        }
-        let id = u32::try_from(self.names.len()).expect("props key count fits u32");
-        self.ids.insert(name.to_owned(), id);
-        self.names.push(name.to_owned());
-        id
-    }
-
-    pub(crate) fn find(&self, name: &str) -> Option<u32> {
-        self.ids.get(name).copied()
-    }
-
-    pub(crate) fn name(&self, id: u32) -> &str {
-        &self.names[id as usize]
-    }
-}
-
 impl Store {
     /// Records that `prop` of `key` was written at revision offset `rev`.
-    pub(crate) fn stamp(&mut self, key: Key, prop: Prop, rev: u32, log: &mut Log) {
-        let slot = self.slot_mut(key);
-        if slot.stamps.find(prop) == Some(rev) {
+    pub(crate) fn stamp(&mut self, key: Key, prop: Prop, rev: u32) {
+        if self.slot(key).stamps.find(prop) == Some(rev) {
             return;
         }
+        let slot = self.slot_mut(key);
         let before = slot.stamps.bytes();
-        let old = slot.stamps.set(prop, Some(rev));
+        slot.stamps.set(prop, Some(rev));
         let after = slot.stamps.bytes();
         self.bytes = self.bytes + after - before;
-        log.push(Undo::Stamp { key, prop, old });
     }
 
     /// Stamps a top-level props key by name.
-    pub(crate) fn stamp_key(&mut self, key: Key, name: &str, rev: u32, log: &mut Log) {
-        let prop = Prop::Key(self.props.intern(name));
-        self.stamp(key, prop, rev, log);
-    }
-
-    pub(super) fn unstamp(&mut self, key: Key, prop: Prop, old: Option<u32>) {
-        let slot = self.slot_mut(key);
-        let before = slot.stamps.bytes();
-        slot.stamps.set(prop, old);
-        let after = slot.stamps.bytes();
-        self.bytes = self.bytes + after - before;
+    pub(crate) fn stamp_key(&mut self, key: Key, name: &str, rev: u32) {
+        let id = match self.props.ids.get(name) {
+            Some(&id) => id,
+            None => {
+                let names = Arc::make_mut(&mut self.props);
+                let id = u32::try_from(names.names.len()).expect("props key count fits u32");
+                let name: Arc<str> = name.into();
+                names.names.push(name.clone());
+                names.ids.insert(name, id);
+                id
+            }
+        };
+        let prop = Prop::Key(id);
+        self.stamp(key, prop, rev);
     }
 
     pub(crate) fn prop_name(&self, prop: Prop) -> Option<&str> {
         match prop {
-            Prop::Key(id) => Some(self.props.name(id)),
+            Prop::Key(id) => Some(&self.props.names[id as usize]),
             _ => None,
         }
     }
 
     pub(crate) fn find_prop(&self, name: &str) -> Option<Prop> {
-        self.props.find(name).map(Prop::Key)
+        self.props.ids.get(name).copied().map(Prop::Key)
     }
 }

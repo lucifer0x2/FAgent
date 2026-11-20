@@ -44,7 +44,10 @@ fn deleting_a_subtree_removes_its_notes_only() {
 fn notes_survive_reopen_and_bundle_round_trips() {
     let (temp, store, p) = setup();
     let mut ops = initial();
-    ops.extend([note("a", "frame", "Crème brûlée — intent"), reply("a", "ok")]);
+    ops.extend([
+        note("a", "frame", "Crème brûlée — intent"),
+        reply("a", "ok"),
+    ]);
     ops.push(update("a", Some(true)));
     p.apply_batch(request(&p, 0, "initial", ops)).unwrap();
     let before = notes_json(&p);

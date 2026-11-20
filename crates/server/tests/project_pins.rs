@@ -1,6 +1,7 @@
 //! Task 07F item 1: the server pins opened projects, so reads by id or slug hit storage's
 //! registry. A project directory removed or replaced out of band must still read exactly as it
 //! did without pins: `PROJECT_NOT_FOUND` for the old identity, never another project's data.
+#[allow(dead_code)]
 mod support;
 use serde_json::{json, Value};
 use support::{design, Server};

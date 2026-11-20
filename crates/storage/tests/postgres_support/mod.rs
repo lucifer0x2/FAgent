@@ -22,26 +22,9 @@ pub fn setup() -> (Arc<PostgresBackend>, Storage) {
     (backend, storage)
 }
 
-pub fn cached() -> (PostgresBackend, SnapshotCache) {
-    let backend = PostgresBackend::with_config(config()).unwrap();
-    let cache = SnapshotCache::new(backend.cache_namespace());
-    (backend.with_cache(cache.clone()).unwrap(), cache)
-}
-
-/// Node-memory flags off, whatever the environment says: for tests of the legacy snapshot
-/// and revision index caches, which HOT reads replace (Task28 I5 evicts them).
-pub fn legacy_config() -> PostgresConfig {
-    let mut config = config();
-    config.node_memory_shadow = ShadowMode::Off;
-    config.node_memory_reads = ReadsMode::Off;
-    config.node_memory_writes = WritesMode::Off;
-    config
-}
-
-pub fn cached_legacy() -> (PostgresBackend, SnapshotCache) {
-    let backend = PostgresBackend::with_config(legacy_config()).unwrap();
-    let cache = SnapshotCache::new(backend.cache_namespace());
-    (backend.with_cache(cache.clone()).unwrap(), cache)
+/// A backend of its own: its node memory starts cold.
+pub fn backend() -> PostgresBackend {
+    PostgresBackend::with_config(config()).unwrap()
 }
 
 pub fn lock_entity_tables(client: &mut postgres::Client) -> postgres::Transaction<'_> {

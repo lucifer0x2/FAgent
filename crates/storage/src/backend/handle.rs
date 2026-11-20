@@ -61,11 +61,22 @@ impl Storage {
     pub fn snapshot(&self, key: &str) -> Result<Snapshot> {
         self.backend.snapshot(key)
     }
-    pub fn shared_snapshot(&self, key: &str) -> Result<crate::SharedSnapshot> {
-        self.backend.shared_snapshot(key)
+    /// See [`StorageBackend::shared_database`].
+    pub fn shared_database(&self, key: &str) -> Result<crate::SharedSnapshot> {
+        self.backend.shared_database(key)
     }
     pub fn reader_snapshot(&self, key: &str) -> Result<crate::ScopedRead> {
         self.backend.reader_snapshot(key)
+    }
+
+    /// See [`StorageBackend::memory_stats`].
+    pub fn memory_stats(&self) -> crate::NodeMemoryStats {
+        self.backend.memory_stats()
+    }
+
+    /// See [`StorageBackend::memory_read_failed`].
+    pub fn memory_read_failed(&self) {
+        self.backend.memory_read_failed()
     }
 
     /// See [`StorageBackend::scoped_snapshot`].
@@ -82,6 +93,14 @@ impl Storage {
         key: &str,
     ) -> Result<(Arc<Snapshot>, Option<SnapshotCacheIdentity>)> {
         self.backend.snapshot_with_cache_identity(key)
+    }
+
+    /// See [`StorageBackend::database_snapshot`].
+    pub fn database_snapshot(
+        &self,
+        key: &str,
+    ) -> Result<(Arc<Snapshot>, Option<SnapshotCacheIdentity>)> {
+        self.backend.database_snapshot(key)
     }
 
     fn handle(&self, project_id: String) -> Arc<ProjectHandle> {

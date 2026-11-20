@@ -1,11 +1,17 @@
 //! Shared test helpers: a small hand-written project, operation builders, a rebuild
 //! comparison that never prints whole indexes, and a deterministic PRNG.
 #![allow(dead_code)]
+pub mod batch_oracle;
 pub mod fixture;
 pub mod ops;
 pub mod oracle;
+pub mod random_cases;
+pub mod random_extra;
 pub mod random_ops;
+pub mod random_props;
 pub mod random_resources;
+pub mod random_scripted;
+pub mod scenario;
 
 #[allow(unused_imports)]
 pub use ops::*;
@@ -97,6 +103,7 @@ pub fn observe(state: &ProjectState) -> Observed {
 pub fn assert_unchanged(state: &ProjectState, before: &Observed) {
     let now = observe(state);
     assert!(now.snapshot == before.snapshot, "snapshot changed");
+    // A discarded batch also removes the ids it interned (no view of it survives).
     assert_eq!(now.bytes, before.bytes, "estimated bytes changed");
     assert_eq!(now.revision, before.revision, "revision changed");
     assert_eq!(
@@ -145,6 +152,7 @@ pub fn difference(a: &IndexDump, b: &IndexDump) -> Option<String> {
         .or_else(|| first("master_of", &a.master_of, &b.master_of))
         .or_else(|| first("instances_of", &a.instances_of, &b.instances_of))
         .or_else(|| first("linked_from", &a.linked_from, &b.linked_from))
+        .or_else(|| first("referenced_by", &a.referenced_by, &b.referenced_by))
         .or_else(|| first("notes_on", &a.notes_on, &b.notes_on))
 }
 

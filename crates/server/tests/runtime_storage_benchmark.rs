@@ -18,7 +18,7 @@ async fn current_runtime_single_writer_benchmark() {
         .unwrap();
     for count in [100, 5_000] {
         let mut canonical = None;
-        for engine in ["sqlite", "pgonly", "pgmoka"] {
+        for engine in ["sqlite", "pg-mem"] {
             eprintln!("Task19b: {engine}, {count} nodes: setup and direct calls");
             let measured = tokio::task::spawn_blocking(move || {
                 let project = fixture::prepare(engine, count);
@@ -54,7 +54,7 @@ async fn current_runtime_single_writer_benchmark() {
                     "sqliteVersion": sqlite_version,
                     "samplesPerGroup": metrics::SAMPLES,
                     "quantile": "nearest rank: sorted[ceil(p*N)-1]",
-                    "cellOrder": "nodes100 then5000; SQLite, PostgreSQL, PostgreSQL+Moka",
+                    "cellOrder": "nodes100 then5000; SQLite, PostgreSQL (node memory)",
                     "cells": cells,
                 }))
                 .unwrap(),
@@ -62,7 +62,7 @@ async fn current_runtime_single_writer_benchmark() {
             .unwrap();
         }
     }
-    assert_eq!(cells.len(), 6);
+    assert_eq!(cells.len(), 4);
     eprintln!(
         "Task19b raw samples: {}",
         output.join("samples.json").display()

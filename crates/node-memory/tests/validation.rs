@@ -3,9 +3,10 @@
 //! exactly as before.
 mod support;
 
-use fagent_node_memory::Operation;
+use fagent_node_memory::{ManualClock, MemoryConfig, NodeMemory, Operation};
 use fagent_scene_input::{NodeKind, Token};
 use serde_json::{json, Value};
+use std::sync::Arc;
 use support::*;
 
 /// A prefix touching every kind of change: create, update, reparent (across pages and
@@ -35,7 +36,11 @@ fn prefix() -> Vec<Operation> {
             text: "kept".into(),
             author: None,
         },
-        update("a", json!({"links":[{"to":"t2"},{"to":"f2"}]}), false),
+        update(
+            "a",
+            json!({"links":[{"to":"t2"},{"to":"f2","on":"hover","action":"overlay"}]}),
+            false,
+        ),
         delete("c"),
         delete("t2"),
         update("m1n", json!({"component":null}), true),
@@ -73,7 +78,7 @@ fn assert_fails_at(last: Operation, code: &str, field: Option<&str>, at_last: bo
     assert!(delta.changed_ids().contains(&"note".to_owned()));
     assert_eq!(
         state.node("a").unwrap().props,
-        json!({"links":[{"to":"f2"}]})
+        json!({"links":[{"to":"f2","on":"hover","action":"overlay"}]})
     );
 }
 
@@ -148,9 +153,25 @@ fn update_failures_roll_back() {
     let field = Some("props.componentId");
     assert_fails(update("i2", json!({"componentId":"f1"}), true), VF, field);
     assert_fails(update("i2", json!({"componentId":null}), true), VF, field);
-    // newi (created in the prefix) uses master "new": checked at the end of the batch.
-    let in_use = update("new", json!({"component":null}), true);
-    assert_fails_at(in_use, "COMPONENT_IN_USE", None, false);
+}
+
+/// newi (created in the prefix) uses master "new". Unmarking "new" is no operation
+/// error, as in `Candidate::apply`; the end-of-batch instance rule rejects the batch on
+/// the instance, without an operation index, on the state and through the engine.
+#[test]
+fn unmarking_a_used_master_is_an_end_of_batch_error() {
+    let mut ops = prefix();
+    ops.push(update("new", json!({"component":null}), true));
+    let mut state = load(small());
+    let error = state.begin(&ops).err().expect("end-of-batch rules reject");
+    assert_eq!(error.field.as_deref(), Some("props.componentId"));
+    assert_eq!(error.op_index, None);
+    let memory = NodeMemory::new(MemoryConfig::default(), Arc::new(ManualClock::default()));
+    let project = memory.load(small()).unwrap();
+    let error = project.begin(1, &ops).err().expect("rejected");
+    assert_eq!(error.field.as_deref(), Some("props.componentId"));
+    assert_eq!(error.op_index, None);
+    assert_eq!(memory.stats().rejected, 1);
 }
 
 #[test]

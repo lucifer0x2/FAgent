@@ -1,6 +1,6 @@
 //! Immutable authored adjacency, reusable without borrowing or cloning node payloads.
 use crate::{Node, NodeKind};
-use std::collections::{BTreeMap, BTreeSet};
+use std::collections::BTreeMap;
 
 #[derive(Default)]
 pub struct NodeTopology {
@@ -42,16 +42,6 @@ impl NodeTopology {
 
     pub fn component_users(&self, id: &str) -> impl Iterator<Item = &str> {
         self.users.get(id).into_iter().flatten().map(String::as_str)
-    }
-
-    /// Property-only edits preserve topology unless component identity changes.
-    pub fn preserves(operations: &[crate::Operation], changed: &BTreeSet<String>) -> bool {
-        operations.iter().all(|op| match op {
-            crate::Operation::UpdateNode { props, .. } => {
-                props.get("componentId").is_none() && props.get("component").is_none()
-            }
-            _ => false,
-        }) && changed.len() <= operations.len()
     }
 
     pub fn estimated_bytes(&self) -> usize {

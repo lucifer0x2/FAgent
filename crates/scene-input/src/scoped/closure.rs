@@ -77,8 +77,12 @@ impl<'a> ScopedSnapshot<'a> {
 
     /// Expansion reads masters through the revision-bound index, so no per-call
     /// dependency maps are built; output equals the closure-restricted expansion.
+    /// A view applies its source's cap (the engine's configured node limit).
     pub(super) fn expand_authored(&self, id: &str, authored: &[&'a Node]) -> Result<Vec<Node>> {
-        let expanded = crate::instances::expand_with(self, authored)?;
+        let limit = self
+            .view
+            .map_or(crate::MAX_NODES, |v| v.source.max_expanded());
+        let expanded = crate::instances::expand_with(self, authored, limit)?;
         if !expanded.iter().any(|n| n.id == id) {
             return Err(StorageError::new(
                 "INVALID_REQUEST",

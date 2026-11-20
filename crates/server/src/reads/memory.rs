@@ -1,12 +1,12 @@
-//! Task28 I2: the snapshot a tree or find read runs on.
+//! The snapshot a tree or find read runs on.
 //!
 //! Scoped reads of the latest revision (`get_design_context` by frameId,
 //! `get_subtree` by nodeId, `get_outline`/`find_nodes` by nodeId or frameId) ask
-//! storage for a scoped snapshot, which with memory reads on holds a published
-//! whole-project view. The same readers run on it. A reader error in memory is
-//! retried on today's snapshot, so memory never fails a read today's path serves.
+//! storage for a scoped snapshot, which holds a published whole-project node-memory
+//! view when memory is current. The same readers run on it. A reader error in memory is
+//! retried on the database snapshot, so memory never fails a read that path serves.
 //! Project-wide outline/find, resource lists and viewport preparation use the same
-//! revision-bound capability. Explicit `revision` reads keep today's full path.
+//! revision-bound capability. Explicit `revision` reads keep the full database path.
 use super::{find, pagination, tree, viewports, ReadRequest};
 use crate::{error::Result, state::AppState};
 use fagent_storage::SharedSnapshot;
@@ -14,7 +14,7 @@ use serde_json::Value;
 
 pub(super) async fn read(state: &AppState, name: &str, req: ReadRequest) -> Result<Value> {
     let Some(target) = target(name, &req) else {
-        let shared = today(state, &req.project_id).await?;
+        let shared = database(state, &req.project_id).await?;
         return run(state, name, req, &shared).await;
     };
     let source = state
@@ -27,21 +27,23 @@ pub(super) async fn read(state: &AppState, name: &str, req: ReadRequest) -> Resu
         return run(state, name, req, &source.shared).await;
     }
     let memory = run(state, name, req.clone(), &source.shared).await;
-    if memory.is_ok() && !source.verify {
+    if memory.is_ok() {
         return memory;
     }
-    if memory.is_err() {
-        fagent_storage::node_memory_read_failed();
-    }
-    let shared = today(state, &req.project_id).await?;
-    let expected = run(state, name, req, &shared).await;
-    if source.verify {
-        super::memory_verify::same(name, &memory, &expected);
-    }
-    expected
+    state.store.memory_read_failed();
+    let shared = database(state, &req.project_id).await?;
+    run(state, name, req, &shared).await
 }
 
-/// The scope ID of a read memory may serve, or `None` for today's path.
+/// The same read on the database snapshot only, as the memory differential
+/// compares it.
+#[cfg(test)]
+pub(super) async fn read_database(state: &AppState, name: &str, req: ReadRequest) -> Result<Value> {
+    let shared = database(state, &req.project_id).await?;
+    run(state, name, req, &shared).await
+}
+
+/// The scope ID of a read memory may serve, or `None` for the database path.
 fn target(name: &str, req: &ReadRequest) -> Option<String> {
     if req.revision.is_some() {
         return None;
@@ -59,12 +61,13 @@ fn target(name: &str, req: &ReadRequest) -> Option<String> {
     Some(id.clone())
 }
 
-async fn today(state: &AppState, project: &str) -> Result<SharedSnapshot> {
+/// The latest revision from the database only, never from node memory.
+async fn database(state: &AppState, project: &str) -> Result<SharedSnapshot> {
     let id = project.to_owned();
-    state.db(move |store| store.shared_snapshot(&id)).await
+    state.db(move |store| store.shared_database(&id)).await
 }
 
-/// One tree or find read on `shared`, exactly as before Task28.
+/// One tree or find read on `shared`, the same on memory views and database snapshots.
 async fn run(
     state: &AppState,
     name: &str,

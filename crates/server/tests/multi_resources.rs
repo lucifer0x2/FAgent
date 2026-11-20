@@ -1,3 +1,4 @@
+#[allow(dead_code)]
 mod support;
 use serde_json::{json, Value};
 use support::{design, Server};

@@ -5,10 +5,9 @@ mod index;
 mod input;
 mod navigation;
 pub(crate) mod persistent;
+mod snapshot_source;
 mod traversal;
 mod view;
-mod view_delta;
-mod view_indexes;
 mod view_reads;
 #[cfg(test)]
 mod view_tests;
@@ -19,11 +18,12 @@ use crate::{
     Node, Note, Result, Snapshot,
 };
 pub use index::ScopeIndex;
+pub use snapshot_source::references_of;
 use std::{
     collections::BTreeMap,
     sync::{Arc, OnceLock},
 };
-pub use view::ReadView;
+pub use view::{ReadView, ViewSource};
 
 #[derive(Clone, Copy, Debug)]
 pub enum ReadScope<'a> {
@@ -118,7 +118,7 @@ impl<'a> ScopedSnapshot<'a> {
     /// ordering at the read layer, exactly as for the full source vector.
     pub fn roots(&self) -> Box<dyn Iterator<Item = &'a Node> + '_> {
         match self.view {
-            Some(view) => Box::new(view.index.roots.iter().filter_map(|(_, id)| view.node(id))),
+            Some(view) => view.source.roots(),
             None => Box::new(self.index.roots.iter().map(|&i| &self.snapshot.nodes[i])),
         }
     }
@@ -126,12 +126,7 @@ impl<'a> ScopedSnapshot<'a> {
     /// Authored frames in snapshot source order, including nested frames.
     pub fn frames(&self) -> Box<dyn Iterator<Item = &'a Node> + '_> {
         match self.view {
-            Some(view) => Box::new(
-                view.index
-                    .frames
-                    .iter()
-                    .filter_map(|(_, _, id)| view.node(id)),
-            ),
+            Some(view) => Box::new(view.frames().into_iter()),
             None => Box::new(self.index.frames.iter().map(|&i| &self.snapshot.nodes[i])),
         }
     }
@@ -139,7 +134,7 @@ impl<'a> ScopedSnapshot<'a> {
     /// Immediate authored children in source order, without expanding a page.
     pub fn children(&self, id: &str) -> Box<dyn Iterator<Item = &'a Node> + '_> {
         if let Some(view) = self.view {
-            return Box::new(view.children(id).filter_map(|id| view.node(id)));
+            return view.source.children(id);
         }
         Box::new(
             self.index
@@ -155,20 +150,12 @@ impl<'a> ScopedSnapshot<'a> {
     /// Include `ScopedNodes::dependencies` for intent on virtual source/master IDs.
     pub fn notes_for_nodes<'id>(&self, ids: impl IntoIterator<Item = &'id str>) -> Vec<&'a Note> {
         if let Some(view) = self.view {
-            let ids: std::collections::BTreeSet<_> = ids
+            let notes: BTreeMap<&str, &Note> = ids
                 .into_iter()
-                .flat_map(|id| {
-                    view.index
-                        .anchors
-                        .get(id)
-                        .into_iter()
-                        .flat_map(|ids| ids.iter())
-                })
+                .flat_map(|id| view.source.notes_on(id))
+                .map(|note| (note.id.as_str(), note))
                 .collect();
-            return ids
-                .into_iter()
-                .filter_map(|id| view.notes.get(id).map(Arc::as_ref))
-                .collect();
+            return notes.into_values().collect();
         }
         let positions: std::collections::BTreeSet<_> = ids
             .into_iter()

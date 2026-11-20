@@ -1,117 +1,125 @@
 //! Snapshot resources held next to the nodes: tokens, styles, assets, fonts and notes,
-//! each by id (the stored `ORDER BY id`), plus notes by anchor node. Writes are logged
-//! with the replaced value so a failed batch restores them exactly.
-use super::{Log, Store, Undo};
+//! each by id (the stored `ORDER BY id`), plus notes by anchor node. Each map is
+//! shared between versions and copied on the first write of a batch; notes are
+//! shared individually, so copying the note map never copies note text. Token
+//! writes keep the token index (`token_index`) in step.
+use super::token_index::TokenIndex;
+use super::Store;
 use fagent_scene_input::{Asset, Font, Note, Snapshot, Style, Token};
 use std::collections::{BTreeMap, BTreeSet, HashMap};
+use std::sync::Arc;
 
-#[derive(Default)]
+/// Note ids of one anchor, borrowed from the anchor index only (not from the id).
+pub(crate) type NoteIds<'a> = std::iter::Map<
+    std::iter::Flatten<std::option::IntoIter<&'a BTreeSet<String>>>,
+    fn(&String) -> &str,
+>;
+
+#[derive(Clone, Default)]
 pub(crate) struct Resources {
-    pub tokens: BTreeMap<String, Token>,
-    pub styles: BTreeMap<String, Style>,
-    pub assets: BTreeMap<String, Asset>,
-    pub fonts: BTreeMap<String, Font>,
-    pub notes: BTreeMap<String, Note>,
+    pub tokens: Arc<BTreeMap<String, Token>>,
+    pub styles: Arc<BTreeMap<String, Style>>,
+    pub assets: Arc<BTreeMap<String, Asset>>,
+    pub fonts: Arc<BTreeMap<String, Font>>,
+    pub notes: Arc<BTreeMap<String, Arc<Note>>>,
     /// Note ids by anchor node id.
-    anchors: HashMap<String, BTreeSet<String>>,
+    anchors: Arc<HashMap<String, BTreeSet<String>>>,
+    /// Theme names and alias edges of `tokens`.
+    pub token_index: TokenIndex,
 }
 
-/// Inverse of one resource write: the value before it (`None`: did not exist).
-#[derive(Debug)]
-pub(crate) enum ResUndo {
-    Token(String, Option<Box<Token>>),
-    Style(String, Option<Box<Style>>),
-    Note(String, Option<Box<Note>>),
-}
-
-fn by_id<T>(items: Vec<T>, id: impl Fn(&T) -> &String) -> BTreeMap<String, T> {
-    items.into_iter().map(|x| (id(&x).clone(), x)).collect()
+fn by_id<T>(items: Vec<T>, id: impl Fn(&T) -> &String) -> Arc<BTreeMap<String, T>> {
+    Arc::new(items.into_iter().map(|x| (id(&x).clone(), x)).collect())
 }
 
 impl Resources {
     /// Moves the resources out of `snapshot`, leaving its vectors empty.
     pub(crate) fn take(snapshot: &mut Snapshot) -> Self {
-        let mut res = Self {
-            tokens: by_id(std::mem::take(&mut snapshot.tokens), |t| &t.id),
+        // The note map keeps one note per id; the anchor index is built from that map,
+        // so every indexed id resolves to a note on that anchor.
+        let notes: BTreeMap<String, Arc<Note>> = std::mem::take(&mut snapshot.notes)
+            .into_iter()
+            .map(|n| (n.id.clone(), Arc::new(n)))
+            .collect();
+        let mut anchors: HashMap<String, BTreeSet<String>> = HashMap::new();
+        for note in notes.values() {
+            let set = anchors.entry(note.node_id.clone()).or_default();
+            set.insert(note.id.clone());
+        }
+        let tokens = by_id(std::mem::take(&mut snapshot.tokens), |t| &t.id);
+        Self {
+            token_index: TokenIndex::build(tokens.values()),
+            tokens,
             styles: by_id(std::mem::take(&mut snapshot.styles), |s| &s.id),
             assets: by_id(std::mem::take(&mut snapshot.assets), |a| &a.id),
             fonts: by_id(std::mem::take(&mut snapshot.fonts), |f| &f.id),
-            notes: by_id(std::mem::take(&mut snapshot.notes), |n| &n.id),
-            anchors: HashMap::new(),
-        };
-        for note in res.notes.values() {
-            let set = res.anchors.entry(note.node_id.clone()).or_default();
-            set.insert(note.id.clone());
+            notes: Arc::new(notes),
+            anchors: Arc::new(anchors),
         }
-        res
     }
 
-    /// Copies the resources into `snapshot`, in id order.
-    pub(crate) fn fill(&self, snapshot: &mut Snapshot) {
+    /// Copies tokens, styles, assets and fonts into `snapshot`, in id order.
+    pub(crate) fn fill_resources(&self, snapshot: &mut Snapshot) {
         snapshot.tokens = self.tokens.values().cloned().collect();
         snapshot.styles = self.styles.values().cloned().collect();
         snapshot.assets = self.assets.values().cloned().collect();
         snapshot.fonts = self.fonts.values().cloned().collect();
-        snapshot.notes = self.notes.values().cloned().collect();
+    }
+
+    /// Copies every resource, notes included, into `snapshot`, in id order.
+    pub(crate) fn fill(&self, snapshot: &mut Snapshot) {
+        self.fill_resources(snapshot);
+        snapshot.notes = self.notes.values().map(|n| n.as_ref().clone()).collect();
     }
 
     /// Ids of the notes anchored to node `id`, in id order.
-    pub(crate) fn notes_on<'a>(&'a self, id: &'a str) -> impl Iterator<Item = &'a str> + 'a {
+    pub(crate) fn notes_on(&self, id: &str) -> NoteIds<'_> {
         let notes = self.anchors.get(id).into_iter().flatten();
-        notes.map(String::as_str)
+        notes.map(String::as_str as fn(&String) -> &str)
     }
 
-    fn put_note(&mut self, note: Option<Note>, id: &str) -> Option<Note> {
+    pub(crate) fn note(&self, id: &str) -> Option<&Note> {
+        self.notes.get(id).map(Arc::as_ref)
+    }
+
+    fn put_note(&mut self, note: Option<Note>, id: &str) {
+        let notes = Arc::make_mut(&mut self.notes);
         let old = match note {
-            Some(note) => self.notes.insert(id.to_owned(), note),
-            None => self.notes.remove(id),
+            Some(note) => notes.insert(id.to_owned(), Arc::new(note)),
+            None => notes.remove(id),
         };
+        let anchors = Arc::make_mut(&mut self.anchors);
         if let Some(old) = &old {
-            if let Some(set) = self.anchors.get_mut(&old.node_id) {
+            if let Some(set) = anchors.get_mut(&old.node_id) {
                 set.remove(&old.id);
                 if set.is_empty() {
-                    self.anchors.remove(&old.node_id);
+                    anchors.remove(&old.node_id);
                 }
             }
         }
-        if let Some(new) = self.notes.get(id) {
-            let set = self.anchors.entry(new.node_id.clone()).or_default();
+        if let Some(new) = notes.get(id) {
+            let set = anchors.entry(new.node_id.clone()).or_default();
             set.insert(new.id.clone());
-        }
-        old
-    }
-
-    pub(super) fn undo(&mut self, entry: ResUndo) {
-        match entry {
-            ResUndo::Token(id, old) => match old {
-                Some(token) => drop(self.tokens.insert(id, *token)),
-                None => drop(self.tokens.remove(&id)),
-            },
-            ResUndo::Style(id, old) => match old {
-                Some(style) => drop(self.styles.insert(id, *style)),
-                None => drop(self.styles.remove(&id)),
-            },
-            ResUndo::Note(id, old) => drop(self.put_note(old.map(|n| *n), &id)),
         }
     }
 }
 
 impl Store {
-    pub(crate) fn put_token(&mut self, token: Token, log: &mut Log) {
+    /// Inserts or replaces a token; returns the token it replaced.
+    pub(crate) fn put_token(&mut self, token: Token) -> Option<Token> {
         let id = token.id.clone();
-        let old = self.res.tokens.insert(id.clone(), token).map(Box::new);
-        log.push(Undo::Res(ResUndo::Token(id, old)));
+        let tokens = Arc::make_mut(&mut self.res.tokens);
+        let old = tokens.insert(id.clone(), token);
+        self.res.token_index.replace(old.as_ref(), &tokens[&id]);
+        old
     }
 
-    pub(crate) fn put_style(&mut self, style: Style, log: &mut Log) {
-        let id = style.id.clone();
-        let old = self.res.styles.insert(id.clone(), style).map(Box::new);
-        log.push(Undo::Res(ResUndo::Style(id, old)));
+    pub(crate) fn put_style(&mut self, style: Style) {
+        Arc::make_mut(&mut self.res.styles).insert(style.id.clone(), style);
     }
 
     /// Inserts or replaces (`Some`) or removes (`None`) note `id`.
-    pub(crate) fn put_note(&mut self, id: &str, note: Option<Note>, log: &mut Log) {
-        let old = self.res.put_note(note, id).map(Box::new);
-        log.push(Undo::Res(ResUndo::Note(id.to_owned(), old)));
+    pub(crate) fn put_note(&mut self, id: &str, note: Option<Note>) {
+        self.res.put_note(note, id);
     }
 }

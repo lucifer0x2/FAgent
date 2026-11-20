@@ -100,19 +100,6 @@ fn load_rejects_structural_errors() {
             "",
         ),
         (
-            vec![page.clone(), node("f", "frame", Some("p"), json!(1))],
-            "VALIDATION_FAILED",
-            "props",
-        ),
-        (
-            vec![
-                page.clone(),
-                node("i", "instance", Some("p"), json!({"componentId":"p"})),
-            ],
-            "VALIDATION_FAILED",
-            "props.componentId",
-        ),
-        (
             vec![
                 page.clone(),
                 node("a", "frame", Some("b"), json!({})),
@@ -138,4 +125,19 @@ fn load_rejects_structural_errors() {
         assert_eq!(error.code, code, "case {i}");
         assert_eq!(error.field.as_deref().unwrap_or(""), field, "case {i}");
     }
+}
+
+/// Props shape is admission's rule, not a structural one: a node with scalar props
+/// loads, so a batch can still delete it, and admission reports the defect.
+#[test]
+fn scalar_props_load_and_fail_admission() {
+    let node = |id: &str, kind: &str, parent: Option<&str>, props: serde_json::Value| json!({"id":id,"kind":kind,"parentId":parent,"sortKey":0,"props":props});
+    let nodes = vec![
+        node("p", "page", None, json!({})),
+        node("f", "frame", Some("p"), json!(1)),
+    ];
+    let state = ProjectState::from_snapshot(snapshot(nodes)).expect("loads");
+    let error = state.admit().unwrap_err();
+    assert_eq!(error.code, "VALIDATION_FAILED");
+    assert_eq!(error.field.as_deref(), Some("props"));
 }

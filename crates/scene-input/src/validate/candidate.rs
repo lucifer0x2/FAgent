@@ -59,8 +59,8 @@ impl Candidate {
         for theme in &themes {
             time("validate.theme", || -> Result<()> {
                 let context = super::scope::Resolver {
-                    candidate: self,
-                    nodes: &self.nodes,
+                    lookup: self,
+                    overlay: None,
                     theme,
                 };
                 for style in self.styles.values() {
@@ -75,9 +75,7 @@ impl Candidate {
         time("validate.animation_triggers", || {
             self.validate_animation_triggers()
         })?;
-        time("validate.instances", || {
-            self.validate_instances(None, &themes)
-        })?;
+        time("validate.instances", || self.validate_instances(&themes))?;
         Ok(())
     }
     fn place(

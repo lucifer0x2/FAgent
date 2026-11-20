@@ -3,13 +3,11 @@ mod scoped_support;
 use fagent_storage::*;
 use scoped_support::*;
 use serde_json::json;
-use std::sync::Arc;
 
 fn exercise(storage: &Storage, p: &ProjectHandle) {
     seed(p);
-    let old = storage.shared_snapshot(p.id()).unwrap();
-    let again = storage.shared_snapshot(p.id()).unwrap();
-    assert!(Arc::ptr_eq(&old.indexes, &again.indexes));
+    let old = storage.shared_database(p.id()).unwrap();
+    let again = storage.shared_database(p.id()).unwrap();
     assert_eq!(old.indexes.page("instance"), Some("p1"));
     assert_eq!(
         old.indexes.component_users("master").collect::<Vec<_>>(),
@@ -43,10 +41,10 @@ fn exercise(storage: &Storage, p: &ProjectHandle) {
         .operations
         .push(update("missing", json!({"width":1})));
     assert!(p.apply_batch(failed).is_err());
-    assert!(Arc::ptr_eq(
-        &old.indexes,
-        &storage.shared_snapshot(p.id()).unwrap().indexes
-    ));
+    assert_eq!(
+        storage.shared_database(p.id()).unwrap().snapshot.revision,
+        base
+    );
 
     let committed = BatchRequest {
         idempotency_key: "commit-index".into(),
@@ -54,9 +52,8 @@ fn exercise(storage: &Storage, p: &ProjectHandle) {
         ..preview.clone()
     };
     p.apply_batch(committed.clone()).unwrap();
-    let next = storage.shared_snapshot(p.id()).unwrap();
+    let next = storage.shared_database(p.id()).unwrap();
     assert_eq!(next.snapshot.revision, base + 1);
-    assert!(!Arc::ptr_eq(&old.indexes, &next.indexes));
     assert!(next.indexes.reference_users("style:fill").next().is_none());
     assert_eq!(
         next.indexes.component_users("master").collect::<Vec<_>>(),
@@ -69,17 +66,22 @@ fn exercise(storage: &Storage, p: &ProjectHandle) {
         ["r1"]
     );
     assert!(p.apply_batch(committed).unwrap().replayed);
-    assert!(Arc::ptr_eq(
-        &next.indexes,
-        &storage.shared_snapshot(p.id()).unwrap().indexes
-    ));
+    assert_eq!(
+        storage.shared_database(p.id()).unwrap().snapshot.revision,
+        base + 1
+    );
+    // Node memory is always on: the commit left the project resident at its
+    // revision.
+    let resident = storage.scoped_snapshot(p.id(), "r1").unwrap();
+    assert!(resident.from_memory);
+    assert_eq!(resident.shared.snapshot.revision, base + 1);
 
     strict(
         p,
         "new-user",
         vec![update("instance", json!({"componentId":"leaf"}))],
     );
-    let moved = storage.shared_snapshot(p.id()).unwrap();
+    let moved = storage.shared_database(p.id()).unwrap();
     assert!(moved.indexes.component_users("master").next().is_none());
     assert_eq!(
         moved.indexes.component_users("leaf").collect::<Vec<_>>(),
@@ -99,9 +101,8 @@ fn exercise(storage: &Storage, p: &ProjectHandle) {
 
     // A resource write gets a fresh identity even if topology is unchanged.
     strict(p, "resource-index", vec![token("base", json!("#445566"))]);
-    let resources = storage.shared_snapshot(p.id()).unwrap();
+    let resources = storage.shared_database(p.id()).unwrap();
     assert_eq!(resources.snapshot.revision, base + 3);
-    assert!(!Arc::ptr_eq(&resources.indexes, &moved.indexes));
     assert_eq!(
         resources.edit_context(vec!["p1".into()]).unwrap(),
         edit_context((*resources.snapshot).clone(), vec!["p1".into()]).unwrap()
@@ -109,15 +110,15 @@ fn exercise(storage: &Storage, p: &ProjectHandle) {
 }
 
 #[test]
-fn sqlite_commits_reads_previews_replays_and_old_readers_share_revision_indexes() {
-    let (_temp, storage, p) = sqlite_legacy("revision-index");
+fn sqlite_commits_reads_previews_replays_and_old_readers_keep_revision_indexes() {
+    let (_temp, storage, p) = sqlite("revision-index");
     exercise(&storage, &p);
 }
 
 #[test]
 #[ignore = "fresh temporary PostgreSQL via scripts/task19-check.sh"]
-fn postgres_commits_reads_previews_replays_and_old_readers_share_revision_indexes() {
-    let (backend, _) = postgres_support::cached_legacy();
+fn postgres_commits_reads_previews_replays_and_old_readers_keep_revision_indexes() {
+    let backend = postgres_support::backend();
     let storage = Storage::new(backend);
     let p = postgres_support::project(&storage, "revision-index");
     exercise(&storage, &p);
@@ -127,8 +128,8 @@ fn postgres_commits_reads_previews_replays_and_old_readers_share_revision_indexe
 #[ignore = "fresh temporary PostgreSQL via scripts/task19-check.sh"]
 fn postgres_generation_namespace_and_schema_are_authoritative() {
     use postgres_support::*;
-    let (backend, _) = cached();
-    let namespace = backend.cache_namespace().to_owned();
+    let backend = backend();
+    let namespace = backend.database_namespace().to_owned();
     struct Restore(String);
     impl Drop for Restore {
         fn drop(&mut self) {
@@ -141,18 +142,17 @@ fn postgres_generation_namespace_and_schema_are_authoritative() {
     let _restore = Restore(namespace);
     let storage = Storage::new(backend);
     let p = project(&storage, "recreated-index");
-    let old = storage.shared_snapshot(p.id()).unwrap();
+    let old = storage.shared_database(p.id()).unwrap();
     sql()
         .execute(
             "DELETE FROM fagent_runtime_v1.projects WHERE project_id=$1",
             &[&p.id()],
         )
         .unwrap();
-    assert!(storage.shared_snapshot(p.id()).is_err());
+    assert!(storage.shared_database(p.id()).is_err());
     sql().execute("INSERT INTO fagent_runtime_v1.projects(project_id,slug,name,schema_version,revision) VALUES($1,$2,$3,$4,0)", &[&p.id(), &old.snapshot.slug, &b"Replacement".to_vec(), &(SCHEMA_VERSION as i32)]).unwrap();
-    let recreated = storage.shared_snapshot(p.id()).unwrap();
+    let recreated = storage.shared_database(p.id()).unwrap();
     assert_eq!(old.snapshot.revision, recreated.snapshot.revision);
-    assert!(!Arc::ptr_eq(&old.indexes, &recreated.indexes));
     let replacement = uuid::Uuid::new_v4().to_string();
     sql()
         .execute(
@@ -160,10 +160,10 @@ fn postgres_generation_namespace_and_schema_are_authoritative() {
             &[&replacement],
         )
         .unwrap();
-    let rotated = storage.shared_snapshot(p.id()).unwrap();
-    assert!(!Arc::ptr_eq(&recreated.indexes, &rotated.indexes));
+    let rotated = storage.shared_database(p.id()).unwrap();
+    assert_eq!(rotated.snapshot.revision, recreated.snapshot.revision);
     sql().execute("UPDATE fagent_runtime_v1.projects SET schema_version=schema_version+1 WHERE project_id=$1", &[&p.id()]).unwrap();
     assert!(
-        matches!(storage.shared_snapshot(p.id()), Err(error) if error.code=="SCHEMA_UNSUPPORTED")
+        matches!(storage.shared_database(p.id()), Err(error) if error.code=="SCHEMA_UNSUPPORTED")
     );
 }

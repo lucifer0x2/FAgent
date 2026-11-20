@@ -25,14 +25,10 @@ impl SqliteBackend {
         }
     }
 
-    /// Today's shared snapshot with the identity of the same read.
-    fn shared_with_identity(&self, project: &str) -> Result<crate::shadow::Loaded> {
-        let (snapshot, identity) = self.snapshot_with_cache_identity(project)?;
-        let indexes = self
-            .store
-            .root
-            .indexes
-            .for_snapshot(&snapshot, identity.clone());
+    /// The database shared snapshot with the identity of the same read.
+    fn shared_with_identity(&self, project: &str) -> Result<crate::memory::Loaded> {
+        let (snapshot, identity) = self.database_snapshot(project)?;
+        let indexes = Arc::new(crate::RevisionIndexes::new(&snapshot.nodes));
         Ok((
             crate::SharedSnapshot::committed(snapshot, indexes),
             identity,
@@ -87,12 +83,8 @@ impl StorageBackend for SqliteBackend {
     }
 
     fn snapshot(&self, project: &str) -> Result<Snapshot> {
-        self.pins
-            .read(&self.store, project, |handle| {
-                let snapshot = handle.snapshot()?;
-                Ok((identity::snapshot_meta(&snapshot), snapshot))
-            })
-            .map(|(_, snapshot)| snapshot)
+        self.snapshot_with_cache_identity(project)
+            .map(|(snapshot, _)| Arc::unwrap_or_clone(snapshot))
     }
 
     fn snapshot_cache_identity(&self, project: &str) -> Result<Option<SnapshotCacheIdentity>> {
@@ -101,31 +93,37 @@ impl StorageBackend for SqliteBackend {
             .map(|(_, identity)| identity)
     }
 
-    fn shared_snapshot(&self, project: &str) -> Result<crate::SharedSnapshot> {
+    fn shared_database(&self, project: &str) -> Result<crate::SharedSnapshot> {
         self.shared_with_identity(project).map(|(shared, _)| shared)
     }
 
     fn scoped_snapshot(&self, project: &str, target: &str) -> Result<crate::ScopedRead> {
-        let read = self.store.root.shadow.scoped_read(
+        self.store.root.memory.scoped_read(
             target,
             || self.snapshot_cache_identity(project),
             || self.shared_with_identity(project),
-        )?;
-        if self
-            .store
-            .root
-            .shadow
-            .claim_cache_cleanup(&read.shared.snapshot.project_id)
-        {
-            self.store
-                .root
-                .indexes
-                .evict(&read.shared.snapshot.project_id);
-        }
-        Ok(read)
+        )
+    }
+
+    fn memory_stats(&self) -> crate::NodeMemoryStats {
+        self.store.root.memory.stats()
+    }
+
+    fn memory_read_failed(&self) {
+        self.store.root.memory.read_failed()
     }
 
     fn snapshot_with_cache_identity(
+        &self,
+        project: &str,
+    ) -> Result<(Arc<Snapshot>, Option<SnapshotCacheIdentity>)> {
+        self.store.root.memory.full_read(
+            || self.snapshot_cache_identity(project),
+            || self.database_snapshot(project),
+        )
+    }
+
+    fn database_snapshot(
         &self,
         project: &str,
     ) -> Result<(Arc<Snapshot>, Option<SnapshotCacheIdentity>)> {

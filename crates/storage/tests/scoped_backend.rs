@@ -69,12 +69,12 @@ fn custom_identity_keeps_conservative_full_validation_and_legacy_optout() {
     })).unwrap();
     let reference = resolved_expanded_nodes(&snapshot, "default").unwrap_err();
     let storage = Storage::new(Custom(snapshot));
-    let shared = storage.shared_snapshot("custom").unwrap();
+    let shared = storage.shared_database("custom").unwrap();
     assert!(shared.trusted_scoped().unwrap().is_none());
     assert_eq!(
         serde_json::to_value(shared.scoped().err().unwrap()).unwrap(),
         serde_json::to_value(reference).unwrap()
     );
-    let again = storage.shared_snapshot("custom").unwrap();
+    let again = storage.shared_database("custom").unwrap();
     assert!(!Arc::ptr_eq(&shared.indexes, &again.indexes));
 }

@@ -1,5 +1,6 @@
 //! Task08: workspace hints (`project_created`, `project_activity`) on the project stream and on
 //! `GET /api/v1/events`, without durable replay for another project's commits.
+#[allow(dead_code)]
 mod support;
 use futures_util::{stream::BoxStream, StreamExt};
 use serde_json::{json, Value};
