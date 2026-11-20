@@ -10,10 +10,12 @@ pub struct Args {
     pub low_copy: bool,
     /// First load parses from a buffered file reader instead of whole-file bytes.
     pub reader: bool,
+    /// Spike 1b option to run instead of the default benchmark: a, ord, hash, radix.
+    pub spike: Option<String>,
 }
 
 const USAGE: &str =
-    "usage: bench [--nodes N] [--seed S] [--runs R] [--load-runs L] [--low-copy] [--reader]";
+    "usage: bench [--nodes N] [--seed S] [--runs R] [--load-runs L] [--low-copy] [--reader] [--spike a|ord|hash|radix]";
 
 impl Args {
     pub fn parse() -> Self {
@@ -24,9 +26,14 @@ impl Args {
             load_runs: 7,
             low_copy: false,
             reader: false,
+            spike: None,
         };
         let mut it = std::env::args().skip(1);
         while let Some(flag) = it.next() {
+            if flag == "--spike" {
+                args.spike = Some(it.next().expect(USAGE));
+                continue;
+            }
             let mut value = || it.next().expect(USAGE).parse::<usize>().expect(USAGE);
             match flag.as_str() {
                 "--nodes" => args.nodes = value(),

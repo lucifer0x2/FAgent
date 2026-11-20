@@ -2,7 +2,7 @@
 
 **Priority (2026-11-18):** requested by the user after the Task 28 commit-path review; not yet placed in the order
 34 → 36 → 37 → 31/35 → 33.
-**Status:** Not assigned. Phases run in order; each phase ends with a report to the user, and the next phase starts only
+**Status:** Phase 1 done (2026-11-18, `feat/task-41-node-memory-engine`); spike 1b done (2026-11-18, `spike/task-41-1b`), user chose the radix trie (c); phase 2 done (2026-11-18, `feat/task-41-phase-2`); phase 3 done (2026-11-19, same branch: delta rules, classifier and reference path removed; see `docs/TASK41-REPORT.md`); phase 4 done (2026-11-19, branch `feat/node-memory-optimization`, which carries the whole task and awaits review/merge: Moka caches, test-only oracles and `validate::incremental` removed, latest-revision full reads from memory); phase 5 (lazy expansion cache) optional, not started. Phases run in order; each phase ends with a report to the user, and the next phase starts only
 after the user's go-ahead.
 **Depends on:** Task 28 code as it is on `main` (I0–I5 implemented; I4/I5 deep tests and benchmarks were deferred).
 Supersedes the open parts of Task 28 (flags, shadow modes, I5 cleanup) once this task is accepted.
@@ -73,7 +73,7 @@ docs listed under "Docs". Do not touch the viewer, renderer, export backends or 
 One public struct owns every HOT project and exposes a small API; sketch, names final in phase 1:
 
 - `load(snapshot) -> Result<Admission>`: index the project and run the full admission validation once. The result says
-  whether the stored data is valid (see "Open question").
+  whether the stored data is valid (see "Admission on invalid stored data").
 - `view(project) -> Option<Arc<ReadView>>`: latest published revision; never blocks on writers.
 - `begin(project, ops) -> Result<Staged>`: apply ops under the project write lock with per-op checks, then the
   end-of-batch delta rules. `Staged` exposes the revision, `Delta`, rows to persist (with preimages), changed ids,
@@ -180,12 +180,12 @@ never knows where a snapshot came from.
 `docs/PERFORMANCE.md`, `docs/ARCHITECTURE.md`, `docs/SERVER.md` (commit flow, error-order note), `AGENTS.md`
 "Current status", `docs/agents/LOG.md`.
 
-## Open question (confirm in phase 2)
+## Admission on invalid stored data (decided 2026-11-18)
 
-What happens when admission finds that stored data is invalid (rows written by an older validator or edited by hand).
-Proposed default: reads are served; batches keep diff-only validation (today's incremental path has the same
-precondition); the admission errors are counted and logged with project and node ids, never content. Alternative:
-reject writes with a dedicated error until the project is repaired.
+When admission finds that stored data is invalid (rows written by an older validator or edited by hand): reads are
+served; batches keep diff-only validation (today's incremental path has the same precondition); the admission errors
+are counted and logged with project and node ids, never content. Implemented in phase 2. Final struct name:
+`NodeMemory`.
 
 ## Outputs
 

@@ -5,7 +5,7 @@ How the server, storage, render jobs and the browser viewer fit together, and ho
 ```text
 agent (MCP) / browser ──► fagent-server  HTTP API · MCP · SSE · serves web/dist and the
                             │            hash-named, immutable /engine-wasm module
-                            ├─► fagent-storage  SQLite | PostgreSQL (+ node-memory behind a flag)
+                            ├─► fagent-storage  SQLite | PostgreSQL (+ node-memory, always on)
                             └─► export jobs: queue → admission → runner, backend fixed at build time
                                   ├─ vello:    in process  fagent-layout → fagent-text →
                                   │            fagent-paint-vello (vello_cpu) → PNG via paint-core
@@ -19,7 +19,7 @@ browser viewer (web/) ──► engine-wasm in a Worker: scene-wasm → fagent-p
 | --- | --- |
 | `crates/server` (`fagent-server`) | HTTP/MCP/SSE, jobs (render, export), viewer static files, public viewer |
 | `crates/storage` | SQLite or PostgreSQL storage, revisions, assets and fonts |
-| `crates/node-memory` | In-memory node indexes (`FAGENT_NODE_MEMORY_*`, off by default) |
+| `crates/node-memory` | `NodeMemory`: in-memory engine for hot projects, no database knowledge; every latest-revision read (scoped and full snapshots) and every batch goes through it. Full validation once per load (admission); each batch is validated on its delta (per-op checks, then the end-of-batch rules of `scene-input` `validate::delta`). Storage keeps identity and freshness, persists the rows a batch returns and reads past revisions from the database; there is no storage snapshot cache |
 | `crates/scene-input` | Authored models, validation and scene input preparation |
 | `crates/layout` | Taffy layout with text measurement (also the chromium worker's `layout-step`) |
 | `crates/text` | Font loading, HarfRust shaping and glyph outlines shared by measure and paint |

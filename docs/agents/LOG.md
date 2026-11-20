@@ -60,8 +60,13 @@ Append-only. Rules for entries:
 
 ### Task 41 — Node-memory engine — 2026-11-18
 
-- Packaged [Task 41](../../tasks/41-node-memory-engine.md) at the user's request after the commit-path review: one self-contained engine struct in `crates/node-memory` with no database knowledge, always on (no `FAGENT_NODE_MEMORY_*` flags or modes), full validation once at load (warm | cold), diff-only validation per commit with per-op checks kept, error order among end-of-batch errors allowed to change, no pre-expanded instances.
-- Open: not assigned; admission behavior for invalid stored data to confirm in phase 2.
+- Packaged [Task 41](../../tasks/41-node-memory-engine.md) at the user's request after the commit-path review: one engine struct in `crates/node-memory` with no database knowledge, always on, full validation once at load, diff-only validation per commit with per-op checks kept, error order among end-of-batch errors allowed to change, no pre-expanded instances.
+- Decisions: struct name `NodeMemory`; invalid stored data is admitted, served, counted and logged with ids/codes only; spike 1b result (c) adopted, one persistent `ProjectState` over a hand-written radix trie (`imbl` allowed for the spike only); pure diff-only validation, a stored defect rejects a batch only when the batch's closure reaches it; the expanded-node limit follows `Limits.max_nodes`; phase 4 runs on `feat/node-memory-optimization`, which carries the whole task; `memory_snapshot`/`evict_memory` removed (2026-11-19).
+- Phases 1–4 done 2026-11-18/19 (boundary, validator trait and admission, delta rules, cleanup of Moka, test-only oracles and shadow code). Results, measurements and behavior changes: [TASK41-REPORT.md](../TASK41-REPORT.md).
+- Review fixes 2026-11-19: links into a frame whose recreated parent changed kind, the note limit on stored excess, flow names through a `flow:` index, per-master expanded-size counters, shared component-graph walk and commit staging; see the report's "Review fixes".
+- CodeRabbit review of PR #5, 2026-11-19/20: 15 code findings fixed (`4c7d30e`, `634cf52`, `32465b6`); commit validation now expands one affected instance at a time; tests and review-only items deferred (local notes). See the report's "CodeRabbit review fixes".
+- Merged to `main` in PR #5 (`df1de4a`, 2026-11-20); docs, report and spike 1b bench examples follow on `docs/task-41-docs-bench`.
+- Open: phase 5 (lazy expansion cache, optional); ~900-instance edits validate in 15–22 ms at 200k; admission ~0.8–1.0 s per 200k load; removing write-path expansion entirely (rule 6 vs rule 7).
 
 ### CodeRabbit pull request review — 2026-11-18
 
