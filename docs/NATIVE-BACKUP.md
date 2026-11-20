@@ -130,7 +130,7 @@ corruption; they do not authenticate an archive from an untrusted sender.
 ## Recover into a new database
 
 Keep the application stopped during recovery and start a new process only after
-validation; do not reuse a running app's Moka cache against replaced data. Unload
+validation; do not reuse a running app's node memory against replaced data. Unload
 the backup LaunchAgent and native app if loaded, leaving PostgreSQL running:
 
 ```sh
@@ -200,7 +200,7 @@ launchctl bootstrap "gui/$(id -u)" "$HOME/Library/LaunchAgents/org.fagent.backup
 
 A failed restore leaves an unused recovery database for inspection, not an
 overwritten live database. Restoring to a previously running database requires
-either a cold app restart or cache-namespace rotation; the new-name procedure
+either a cold app restart or database-namespace rotation; the new-name procedure
 uses a cold app.
 
 ## Focused verification
