@@ -195,25 +195,47 @@ impl<V: Clone> Trie<V> {
         old
     }
 
-    /// Clears `key`, returning its value. Emptied nodes are kept: keys are interned
-    /// ids that a later create of the same id reuses.
+    /// Clears `key`, returning its value. Nodes emptied on its path are dropped from
+    /// this version (shared copies stay with older versions), so churn through fresh
+    /// keys keeps the trie sized by its live entries. `depth` never shrinks, which
+    /// keeps the root aligned for [`Trie::diff`].
     pub(crate) fn remove(&mut self, key: u32) -> Option<V> {
         self.get(key)?;
-        let mut node = Arc::make_mut(self.root.as_mut()?);
-        let mut level = self.depth;
-        loop {
-            match node {
-                Node::Branch(children) => {
-                    node = Arc::make_mut(children[slot(key, level)].as_mut()?);
-                }
-                Node::Leaf(values) => {
-                    let old = values[slot(key, 0)].take();
-                    self.len -= usize::from(old.is_some());
-                    return old;
-                }
-            }
-            level = level.wrapping_sub(1);
+        let root = self.root.as_mut()?;
+        let (old, freed) = remove_at(root, key, self.depth);
+        self.len -= usize::from(old.is_some());
+        self.nodes -= freed;
+        if is_empty(root) {
+            self.root = None;
+            self.nodes -= 1;
         }
+        old
+    }
+}
+
+/// Clears `key` below `node` (at `level`); returns the value and the emptied
+/// descendants it unlinked. The caller drops `node` itself when it is left empty.
+fn remove_at<V: Clone>(node: &mut Arc<Node<V>>, key: u32, level: u32) -> (Option<V>, usize) {
+    match Arc::make_mut(node) {
+        Node::Leaf(values) => (values[slot(key, 0)].take(), 0),
+        Node::Branch(children) => {
+            let Some(child) = children[slot(key, level)].as_mut() else {
+                return (None, 0);
+            };
+            let (old, mut freed) = remove_at(child, key, level - 1);
+            if is_empty(child) {
+                children[slot(key, level)] = None;
+                freed += 1;
+            }
+            (old, freed)
+        }
+    }
+}
+
+fn is_empty<V>(node: &Node<V>) -> bool {
+    match node {
+        Node::Leaf(values) => values.iter().all(Option::is_none),
+        Node::Branch(children) => children.iter().all(Option::is_none),
     }
 }
 
@@ -323,5 +345,38 @@ mod tests {
         assert_eq!(keys, vec![0, 14, 21]);
         assert_eq!(trie.iter().count(), trie.len());
         assert!(trie.node_bytes() > 0);
+    }
+
+    /// Creating and deleting blocks of fresh keys keeps only the live entries' nodes;
+    /// a removed key can be inserted again, and older versions keep their entries.
+    #[test]
+    fn churn_through_fresh_keys_frees_emptied_nodes() {
+        let mut trie = Trie::default();
+        trie.insert(0, 0);
+        // Grow to the final depth first: the levels added above key 0 stay.
+        trie.insert(1 << 20, 0);
+        trie.remove(1 << 20);
+        let settled = trie.nodes;
+        assert_eq!(settled, 4);
+        let mut kept = Vec::new();
+        for round in 1..200u32 {
+            let block = round * 4096;
+            for key in block..block + 100 {
+                trie.insert(key, key);
+            }
+            kept.push(trie.clone());
+            for key in block..block + 100 {
+                assert_eq!(trie.remove(key), Some(key));
+            }
+            assert_eq!((trie.len(), trie.nodes), (1, settled), "round {round}");
+        }
+        assert_eq!(trie.remove(0), Some(0));
+        assert_eq!((trie.len(), trie.nodes, trie.iter().count()), (0, 0, 0));
+        trie.insert(4096, 7);
+        assert_eq!(trie.get(4096), Some(&7));
+        assert_eq!(kept[0].get(4096), Some(&4096));
+        assert_eq!(kept[0].len(), 101);
+        let changed = trie.diff(&kept[0], |a, b| a == b);
+        assert_eq!(changed.len(), 101, "{changed:?}");
     }
 }
