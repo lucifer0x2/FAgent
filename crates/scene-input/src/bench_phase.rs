@@ -98,7 +98,7 @@ mod tests {
     #[test]
     fn default_build_keeps_project_caps_and_records_nothing() {
         assert_eq!(crate::MAX_NODES, 200_000);
-        assert_eq!(crate::MAX_NOTES, 5_000);
+        assert_eq!(crate::NoteLimits::DEFAULT.notes, 20_000);
         assert_eq!(super::time("phase", || 7), 7);
         let _span = super::Span::new("phase");
     }

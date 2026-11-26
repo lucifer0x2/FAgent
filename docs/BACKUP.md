@@ -96,7 +96,7 @@ schema for the declared version before upgrading only its private staging databa
 unexpected tables, views, triggers or mismatched versions remain rejected. Export
 always writes schema 5 and retains authored components, instance references and
 overrides; virtual children are never persisted. There is no public bundle route yet.
-Note rows are bounded (5000), their JSON `id` must equal the row and each note must
+Note rows are bounded by the server's note limit (20000 by default, `FAGENT_MAX_NOTES`), their JSON `id` must equal the row and each note must
 anchor to an existing node. The database schema upgrade is one-way:
 an older binary reports `SCHEMA_UNSUPPORTED` rather than reading it. No downgrade or overwrite restore is provided.
 

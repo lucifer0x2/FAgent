@@ -10,7 +10,7 @@ pub(crate) fn preflight(conn: &Connection) -> Result<()> {
         ("styles", MAX_NODES),
         ("assets", MAX_FILES - 3),
         ("fonts", MAX_FILES),
-        ("notes", MAX_NOTES),
+        ("notes", note_limits().notes),
     ] {
         let count: i64 =
             conn.query_row(&format!("SELECT count(*) FROM {table}"), [], |r| r.get(0))?;

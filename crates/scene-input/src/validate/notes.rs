@@ -41,11 +41,9 @@ impl Candidate {
                     author: author_of(author)?,
                 };
                 let note = self.note_mut(id)?;
-                if note.replies.len() >= MAX_NOTE_REPLIES {
-                    return Err(invalid(
-                        "replies",
-                        "Note already has 100 replies; create a new note",
-                    ));
+                let limits = note_limits();
+                if note.replies.len() >= limits.replies {
+                    return Err(limits.replies_full());
                 }
                 note.replies.push(reply);
                 id
@@ -104,8 +102,9 @@ impl Candidate {
 
     /// Whole-document checks, shared by batches and bundle imports.
     pub(super) fn validate_notes(&self) -> Result<()> {
-        if self.notes.len() > MAX_NOTES {
-            return Err(too_many_notes());
+        let limits = note_limits();
+        if self.notes.len() > limits.notes {
+            return Err(limits.too_many_notes());
         }
         for (key, note) in &self.notes {
             check_id(&note.id)?;
@@ -135,10 +134,6 @@ impl Candidate {
     }
 }
 
-pub(super) fn too_many_notes() -> StorageError {
-    invalid("notes", "Project exceeds 5000 notes")
-}
-
 fn not_unique() -> StorageError {
     invalid("id", "Note ID must be unique and not a node ID")
 }
@@ -157,8 +152,9 @@ pub(super) fn check_note(lookup: &dyn Lookup, note: &Note) -> Result<()> {
     }
     content(&note.text)?;
     author_of(&note.author)?;
-    if note.replies.len() > MAX_NOTE_REPLIES {
-        return Err(invalid("replies", "Note exceeds 100 replies"));
+    let limits = note_limits();
+    if note.replies.len() > limits.replies {
+        return Err(limits.too_many_replies());
     }
     for reply in &note.replies {
         content(&reply.text)?;
@@ -172,18 +168,11 @@ fn invalid(field: &str, message: &str) -> StorageError {
 }
 
 fn content(text: &str) -> Result<String> {
-    if (1..=MAX_NOTE_TEXT).contains(&text.chars().count()) {
-        Ok(text.to_string())
-    } else {
-        Err(invalid("text", "Note text must be 1–2000 characters"))
-    }
+    note_limits().check_text(text)?;
+    Ok(text.to_string())
 }
 
 fn author_of(author: &Option<String>) -> Result<Option<String>> {
-    match author {
-        Some(a) if !(1..=MAX_NOTE_AUTHOR).contains(&a.chars().count()) => {
-            Err(invalid("author", "Note author must be 1–64 characters"))
-        }
-        _ => Ok(author.clone()),
-    }
+    note_limits().check_author(author.as_deref())?;
+    Ok(author.clone())
 }

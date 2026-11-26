@@ -295,6 +295,11 @@ installed launcher already exports private configuration assignments, so this
 setting does not require a launcher change. Keep `server.env` mode600 and never
 print it: the same file contains the database credential.
 
+The note limits (`FAGENT_MAX_NOTES`, `FAGENT_MAX_NOTE_TEXT`, `FAGENT_MAX_NOTE_REPLIES`,
+`FAGENT_MAX_NOTE_AUTHOR`; ranges in [`SERVER.md`](SERVER.md)) go in the same file, for example
+`FAGENT_MAX_NOTE_TEXT=8000`. They take effect when the server restarts, and the server log
+prints the raised values once.
+
 Every request must use an allowed `Host`; an `Origin` header must match that
 particular host. Sign-in requires that matching origin. The selected host also
 controls generated resource/job URLs and the JWT audience. Cookies remain

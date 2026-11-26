@@ -217,7 +217,7 @@ fn with_notes(count: usize) -> Snapshot {
 
 #[test]
 fn too_many_stored_notes() {
-    let snapshot = with_notes(fagent_scene_input::MAX_NOTES + 1);
+    let snapshot = with_notes(fagent_scene_input::note_limits().notes + 1);
     let touching = [Operation::CreateNote {
         id: "extra".into(),
         node_id: "b".into(),

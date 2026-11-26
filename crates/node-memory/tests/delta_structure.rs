@@ -135,7 +135,7 @@ fn descendants_moved_past_depth_128_and_back() {
 #[test]
 fn too_many_notes() {
     let mut snapshot = small();
-    for i in 0..5000 {
+    for i in 0..fagent_scene_input::note_limits().notes {
         let note = json!({"id": format!("n{i}"), "nodeId": "a", "text": "hi"});
         snapshot.notes.push(serde_json::from_value(note).unwrap());
     }

@@ -80,7 +80,7 @@ impl SharedSnapshot {
             None => {
                 bench_phase::count("reads.scope_index_builds", 1);
                 let index = Arc::new(ScopeIndex::new(&self.snapshot));
-                // Benchmark-only oversized note graphs are usable but not retained.
+                // Note graphs over the reservation are usable but not retained.
                 if index.estimated_bytes() <= self.indexes.read_weight {
                     *cached = Some(index.clone());
                 }

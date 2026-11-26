@@ -1,9 +1,10 @@
 mod artifacts;
+mod note_limits;
 mod options;
 mod postgres_env;
 
 use fagent_server::{PublicViewer, RenderBackend};
-use fagent_storage::{PostgresBackend, PostgresConfig, Storage, Store};
+use fagent_storage::{NoteLimits, PostgresBackend, PostgresConfig, Storage, Store};
 use options::{
     bind_host, env_port, live_updates, render_backend, switch, trusted_proxy, viewer_overscan,
 };
@@ -40,7 +41,11 @@ FAGENT_PUBLIC_ALLOWED_ORIGINS adds comma-separated exact HTTPS origins (at most 
 Point Funnel only at the public viewer port, NEVER at the local MCP port.
 FAGENT_VIEWER_OVERSCAN sets how far the Vello viewer draws beyond each viewport edge, as a
 percent per side from 0 to 50 (for example 10 or 12.5). It defaults to 0 (off); both listeners
-report it as the overscan ratio in /api/v1/viewer.";
+report it as the overscan ratio in /api/v1/viewer.
+Note limits can only be raised: FAGENT_MAX_NOTES per project (default 20000, at most 1000000),
+FAGENT_MAX_NOTE_TEXT characters per note or reply (2000, at most 100000),
+FAGENT_MAX_NOTE_REPLIES per note (100, at most 1000) and FAGENT_MAX_NOTE_AUTHOR characters
+(64, at most 256).";
 
 pub struct Startup {
     pub storage: StorageOptions,
@@ -51,6 +56,8 @@ pub struct Startup {
     pub render_backend: RenderBackend,
     /// Viewer overscan ratio per side (`FAGENT_VIEWER_OVERSCAN` percent / 100), 0 when unset.
     pub viewer_overscan: f64,
+    /// Note limits from `FAGENT_MAX_NOTE*`; the defaults when unset.
+    pub note_limits: NoteLimits,
 }
 
 impl Startup {
@@ -126,6 +133,7 @@ impl Startup {
 
         let render_backend = render_backend(backend)?;
         let viewer_overscan = viewer_overscan()?;
+        let note_limits = note_limits::note_limits()?;
         let port = match port {
             Some(port) => port,
             None => env_port()?,
@@ -171,6 +179,7 @@ impl Startup {
             workspace,
             render_backend,
             viewer_overscan,
+            note_limits,
         }))
     }
 }

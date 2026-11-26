@@ -1,29 +1,20 @@
 //! Note operations with the checks, messages and order of `Candidate::apply_note`.
 use super::Txn;
 use crate::checks;
-use fagent_scene_input::{
-    Note, NoteReply, Operation, Result, StorageError, MAX_NOTE_AUTHOR, MAX_NOTE_REPLIES,
-    MAX_NOTE_TEXT,
-};
+use fagent_scene_input::{note_limits, Note, NoteReply, Operation, Result, StorageError};
 
 fn invalid(field: &str, message: &str) -> StorageError {
     StorageError::validation(field, message)
 }
 
 fn content(text: &str) -> Result<String> {
-    match (1..=MAX_NOTE_TEXT).contains(&text.chars().count()) {
-        true => Ok(text.to_owned()),
-        false => Err(invalid("text", "Note text must be 1–2000 characters")),
-    }
+    note_limits().check_text(text)?;
+    Ok(text.to_owned())
 }
 
 fn author_of(author: &Option<String>) -> Result<Option<String>> {
-    match author {
-        Some(a) if !(1..=MAX_NOTE_AUTHOR).contains(&a.chars().count()) => {
-            Err(invalid("author", "Note author must be 1–64 characters"))
-        }
-        _ => Ok(author.clone()),
-    }
+    note_limits().check_author(author.as_deref())?;
+    Ok(author.clone())
 }
 
 impl Txn<'_> {
@@ -81,11 +72,9 @@ impl Txn<'_> {
                     author: author_of(author)?,
                 };
                 let mut note = self.existing_note(id)?;
-                if note.replies.len() >= MAX_NOTE_REPLIES {
-                    return Err(invalid(
-                        "replies",
-                        "Note already has 100 replies; create a new note",
-                    ));
+                let limits = note_limits();
+                if note.replies.len() >= limits.replies {
+                    return Err(limits.replies_full());
                 }
                 note.replies.push(reply);
                 self.put(id, Some(note));

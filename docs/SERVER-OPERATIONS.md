@@ -75,12 +75,14 @@ JSON read back; defaults are omitted:
 | Operation | Rule (failures are `VALIDATION_FAILED` with `field` and `opIndex`) |
 | --- | --- |
 | `create_note {id,nodeId,text,author?}` | `id` new and not a node ID (`id`); `nodeId` an existing page, frame or descendant (`nodeId`). |
-| `reply_note {id,text,author?}` | Appends to `replies`; the note must exist (`id`); at most 100 replies (`replies`: create a new note). |
+| `reply_note {id,text,author?}` | Appends to `replies`; the note must exist (`id`); at most 100 replies by default (`replies`: create a new note). |
 | `update_note {id,text?,resolved?,nodeId?}` | At least one field (`update_note`); `resolved:false` reopens; `nodeId` re-anchors. |
 | `delete_note {id}` | The note must exist (`id`). |
 
-- `text` is 1–2000 characters, `author` (self-declared, unauthenticated) 1–64; at most 5000
-  notes per project. `create_node` rejects an ID held by a note.
+- `text` is 1–2000 characters, `author` (self-declared, unauthenticated) 1–64; at most 20000
+  notes per project. These are defaults; the server raises them with `FAGENT_MAX_NOTES`,
+  `FAGENT_MAX_NOTE_TEXT`, `FAGENT_MAX_NOTE_REPLIES` and `FAGENT_MAX_NOTE_AUTHOR` (see
+  [`SERVER.md`](SERVER.md)). `create_node` rejects an ID held by a note.
 - `delete_subtree` also deletes the notes anchored to every deleted node; their IDs are in
   `changedIds` and in `get_changes` `removed`. History stays readable with
   `get_changes includeOperations`.
