@@ -48,10 +48,12 @@ impl Font {
         let scale = (size * 65536.0) as i32;
         let scaled = ShaperFont::new(&instance).with_scale(scale);
         let glyph_metrics = instance.glyph_metrics();
-        let features = [
+        let tracked = [
             Feature::new(Tag::new(b"liga"), 0, ..),
             Feature::new(Tag::new(b"clig"), 0, ..),
         ];
+        let features: &[Feature] = if spacing == 0.0 { &[] } else { &tracked };
+        let language = Language::new("und");
         let mut run = PositionedRun {
             glyphs: Vec::new(),
             advance: 0.0,
@@ -76,13 +78,17 @@ impl Font {
                 buffer.push(c as u32, (item.range.start + offset) as u32);
             }
             buffer.set_direction(Direction::LeftToRight);
-            buffer.set_language(Language::new("und"));
+            buffer.set_language(language.clone());
             buffer.set_script(Some(item.script));
-            let options = if spacing == 0.0 {
-                ShapeOptions::new()
-            } else {
-                ShapeOptions::new().features(&features)
-            };
+            // The plan `harfrust::shape` would compile for these properties, reused.
+            let plan = self.plans.get(
+                &instance,
+                Direction::LeftToRight,
+                Some(item.script),
+                language.as_ref(),
+                features,
+            );
+            let options = ShapeOptions::new().plan(Some(&plan)).features(features);
             harfrust::shape(&scaled, &mut buffer, options).map_err(|_| TextError::Shape)?;
             let infos = buffer.glyph_infos();
             let positions = buffer.glyph_positions();

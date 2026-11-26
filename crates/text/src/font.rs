@@ -1,3 +1,4 @@
+use crate::plans::PlanCache;
 use crate::{decode, TextError};
 use sha2::{Digest, Sha256};
 use std::sync::Arc;
@@ -19,6 +20,8 @@ pub struct Font {
     face: Option<Face>,
     // User-space values for every axis, retained for avar2 inter-axis mapping.
     location: Vec<(harfrust::Tag, f32)>,
+    /// Compiled shape plans of this face, shared by clones (`plans.rs`).
+    pub(crate) plans: PlanCache,
 }
 
 impl Font {
@@ -56,6 +59,7 @@ impl Font {
             hash,
             face: None,
             location,
+            plans: PlanCache::default(),
         })
     }
 
@@ -83,6 +87,8 @@ impl Font {
             }
         }
         self.inner = crate::optical::at_location(&self.inner, &self.location);
+        // Plans of the previous instance are not shared with this font's clones.
+        self.plans = PlanCache::default();
         self.face = Some(Face {
             family,
             weight,

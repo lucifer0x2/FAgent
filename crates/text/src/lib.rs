@@ -10,6 +10,7 @@ mod measure;
 mod measurer;
 mod metrics;
 mod optical;
+mod plans;
 mod shaping;
 mod transform;
 mod wrap;
