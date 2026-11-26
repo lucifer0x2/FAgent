@@ -165,7 +165,9 @@ pub struct Snapshot {
     pub retention: Retention,
 }
 
+mod note_limits;
 mod notes;
 mod requests;
+pub use note_limits::*;
 pub use notes::*;
 pub use requests::*;

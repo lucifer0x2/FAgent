@@ -41,8 +41,9 @@ pub fn schema() -> Value {
         json!({"style":object(json!({"id":id(),"name":text(256),"kind":{"enum":["fill","text"]},"value":{"oneOf":[{"type":"string","maxLength":16},{"type":"object","maxProperties":50}]}}),&["id","name","kind","value"])}),
         &["style"],
     );
-    let note = text(2000);
-    let author = text(64);
+    let limits = fagent_storage::note_limits();
+    let note = text(limits.text as u64);
+    let author = text(limits.author as u64);
     add(
         "create_note",
         json!({"id":id(),"nodeId":id(),"text":note,"author":author}),

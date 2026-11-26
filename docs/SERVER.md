@@ -40,6 +40,17 @@ SQLite is the default storage provider. Use `DATABASE_PROVIDER=postgresql` and s
 
 `FAGENT_VIEWER_OVERSCAN` sets the Vello viewer's overscan: how far it draws beyond each viewport edge, as a percent per side from 0 to 50 (integer or decimal, for example `10` or `12.5`). It defaults to 0 (off); an empty variable is unset and any other value (sign, exponent, `%`, spaces, over 50) stops startup and names the variable. Both listeners report it as a ratio in `GET /api/v1/viewer` (`overscan: 0.1` for `10`); see "Overscan" in [`VIEWER.md`](VIEWER.md).
 
+Note limits can be raised, never lowered, through the environment; an empty variable is unset and any other value (sign, spaces, below the default, over the ceiling) stops startup and names the variable. A server started with raised limits prints them once.
+
+| Variable | Limit | Default | Ceiling |
+| --- | --- | --- | --- |
+| `FAGENT_MAX_NOTES` | Notes per project | 20000 | 1000000 |
+| `FAGENT_MAX_NOTE_TEXT` | Characters of one note or reply text | 2000 | 100000 |
+| `FAGENT_MAX_NOTE_REPLIES` | Replies per note | 100 | 1000 |
+| `FAGENT_MAX_NOTE_AUTHOR` | Characters of one author | 64 | 256 |
+
+The `apply_batch` schema publishes the text and author limits in use, and project bundles are checked against the same note count. A server with lower limits (the variables removed again, or a rollback to an older release) still admits and serves a stored project over them, as node memory does for any invalid stored data; it judges a batch that writes such a note, or raises the note count, by its own limits and rejects bundles over them.
+
 `--host` takes `127.0.0.1` (default) or `0.0.0.0`, which listens on every interface for a container whose port is published on host loopback only; Host/Origin checks are unchanged, and worker callbacks and `imageUrl` still use `http://127.0.0.1:<port>`, so no other address is accepted. See "Docker" in `README.md`.
 
 The backend serves the built viewer. For frontend development, `npm --prefix web run dev` proxies `/api` to port 3847. No frontend call mutates design data.

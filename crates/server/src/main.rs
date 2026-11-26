@@ -15,6 +15,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         workspace,
         render_backend,
         viewer_overscan,
+        note_limits,
     }) = startup::Startup::from_env()?
     else {
         println!("{}", startup::HELP);
@@ -24,6 +25,19 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         );
         return Ok(());
     };
+    // Before any schema is published or project opened: every note check reads these.
+    fagent_storage::configure_note_limits(note_limits)?;
+    if note_limits != fagent_storage::NoteLimits::DEFAULT {
+        let fagent_storage::NoteLimits {
+            notes,
+            text,
+            replies,
+            author,
+        } = note_limits;
+        println!(
+            "Note limits: {notes} notes, {text} text characters, {replies} replies, {author} author characters"
+        );
+    }
     let listener = tokio::net::TcpListener::bind(SocketAddr::from((host, port))).await?;
     let public_listener = match public_viewer {
         Some((port, viewer)) => {

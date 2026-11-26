@@ -54,10 +54,11 @@ fn cached_scope_index_for_another_snapshot_is_neither_used_nor_replaced() {
 }
 
 #[test]
-fn five_thousand_notes_on_distinct_128_byte_anchors_fit_the_reservation() {
+fn default_note_limit_on_distinct_128_byte_anchors_fits_the_reservation() {
+    let count = fagent_scene_input::note_limits().notes.min(20_000);
     let mut snapshot = snapshot();
     let anchor = |i: usize| format!("{i:0>128}");
-    for i in 0..5000 {
+    for i in 0..count {
         snapshot.nodes.push(Node {
             id: anchor(i),
             parent_id: Some("page".into()),
@@ -66,7 +67,7 @@ fn five_thousand_notes_on_distinct_128_byte_anchors_fit_the_reservation() {
             props: json!({"width":1,"height":1}),
         });
     }
-    snapshot.notes = (0..5000)
+    snapshot.notes = (0..count)
         .map(|i| Note {
             id: format!("note{i:0>124}"),
             node_id: anchor(i),
@@ -91,9 +92,10 @@ fn five_thousand_notes_on_distinct_128_byte_anchors_fit_the_reservation() {
     let retained = indexes.read_scope.lock().unwrap().clone();
     let index = retained.expect("worst-case note graph is retained");
     assert!(index.estimated_bytes() <= indexes.read_weight);
-    // Note-position metadata alone stays inside the 2 MiB note reservation.
-    let notes: usize = (0..5000).map(|i| 96 + anchor(i).len() + 8).sum();
-    assert!(notes <= READ_NOTES_BUDGET, "{notes}");
+    // Note-position metadata alone stays inside the note reservation.
+    let notes: usize = (0..count).map(|i| 96 + anchor(i).len() + 8).sum();
+    assert!(notes <= read_notes_budget(), "{notes}");
+    assert!(read_notes_budget() >= READ_NOTES_BUDGET);
 }
 
 #[test]

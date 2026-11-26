@@ -5,8 +5,15 @@ use crate::{
 };
 
 const DEPENDENCY_BUDGET: usize = 4 * 1024 * 1024;
-// Default MAX_NOTES=5000, anchors <=128 bytes: <=1,160,000 proxy bytes.
 const READ_NOTES_BUDGET: usize = 2 * 1024 * 1024;
+/// Note-position metadata of one note on a distinct 128-byte anchor.
+const NOTE_POSITION_BYTES: usize = 96 + 128 + 8;
+
+/// Reservation for the note graph of a full project: 2 MiB, or more when the note limit
+/// needs it (20,000 notes on 128-byte anchors take 4,640,000 bytes).
+fn read_notes_budget() -> usize {
+    READ_NOTES_BUDGET.max(fagent_scene_input::note_limits().notes * NOTE_POSITION_BYTES)
+}
 
 pub struct RevisionIndexes {
     pub(crate) memory: Option<Arc<fagent_scene_input::read_scope::ReadView>>,
@@ -37,7 +44,7 @@ impl RevisionIndexes {
         pages: Arc<PageIndex>,
     ) -> Self {
         let mut references = BTreeMap::new();
-        let mut read_weight = READ_NOTES_BUDGET;
+        let mut read_weight = read_notes_budget();
         for node in nodes {
             scan(&node.props, &node.id, &mut references);
             // Reserve lazy read metadata before admission. Child-map overhead is

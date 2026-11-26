@@ -6,17 +6,18 @@
 use super::Batch;
 use crate::links::flow_start;
 use crate::validate::navigation::{check_flows, check_node_links, root_frames};
-use crate::validate::notes::{check_note, too_many_notes};
+use crate::validate::notes::check_note;
 use crate::validate::{scope::Resolver, Lookup};
-use crate::{Node, NodeKind, Result, MAX_NOTES};
+use crate::{note_limits, Node, NodeKind, Result};
 use std::collections::BTreeSet;
 
 /// The note limit fails only when the batch raises the count above it (or further
 /// above a stored excess); a batch that leaves the count as it was does not reach it.
 pub(super) fn notes(before: &dyn Lookup, after: &dyn Lookup, batch: &Batch<'_>) -> Result<()> {
     let count = after.note_count();
-    if count > MAX_NOTES && count > before.note_count() {
-        return Err(too_many_notes());
+    let limits = note_limits();
+    if count > limits.notes && count > before.note_count() {
+        return Err(limits.too_many_notes());
     }
     for note in batch.notes.iter().filter_map(|id| after.note(id)) {
         check_note(after, note)?;

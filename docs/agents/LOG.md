@@ -79,3 +79,9 @@ Append-only. Rules for entries:
 - Reported: `apply_batch_file` returned the generic schema `INVALID_REQUEST` for every call; the three required arguments were valid, but a bad operation in the JSON file (re-validated as `apply_batch`) or an `idempotencyKey` outside `[A-Za-z0-9_-]` produced the same message with no field.
 - Fixed on `fix/schema-error-fields`: rejections carry the field path in the message and `error.field`, `opIndex` for operations; `oneOf` blames the variant accepting the most sent fields. Accepted inputs unchanged. Details in `docs/SERVER.md` (MCP section).
 - Review follow-up: quoted key paths escape C1 controls (U+0085) too; on an unknown-field tie a key no tied form accepts is reported as unknown instead of "send only one of".
+
+### Configurable note limits — 2026-11-26
+
+- User request: raise the default note count to 20000 and make the note text, reply and author limits configurable through the environment, then deploy natively.
+- Done on `feat/note-limits-env`: `NoteLimits` in scene-input (defaults, ceilings, messages) replaces the `MAX_NOTE*` constants; the server reads `FAGENT_MAX_NOTES`, `FAGENT_MAX_NOTE_TEXT`, `FAGENT_MAX_NOTE_REPLIES`, `FAGENT_MAX_NOTE_AUTHOR` once at startup (raise only, default..=ceiling). The `apply_batch` schema, bundle preflight and the note read reservation follow the configured limits. Docs: `SERVER.md`, `SERVER-OPERATIONS.md`, `BACKUP.md`, `NATIVE-RUNTIME.md`.
+- Verified: scene-input, node-memory and storage tests, server startup/schema/context tests, clippy, wasm32 check; a debug server rejects `FAGENT_MAX_NOTES=100`, prints raised limits and publishes `maxLength` 8000 for note text in `tools/list`. `notes::a_notes_only_commit_enqueues_no_prerender` fails here on `main` too (no prerender in this environment).
