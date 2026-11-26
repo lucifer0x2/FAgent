@@ -21,7 +21,8 @@
     "test:continuity": "node tests/canvas-continuity.mjs",
     "test:zoom": "node tests/zoom.mjs",
     "test:engine": "node tests/engine-smoke.mjs",
-    "test:engine-board": "node tests/engine-board.mjs --strict"
+    "test:engine-board": "node tests/engine-board.mjs --strict",
+    "test:engine-load": "node tests/engine-load.mjs"
   },
   "dependencies": {
     "konva": "^10.0.0",
