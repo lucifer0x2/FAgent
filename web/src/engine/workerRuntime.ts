@@ -1,3 +1,4 @@
+import { FramePacer } from "./drawPacing.ts";
 import type { EngineApi, EngineModule, SurfaceApi } from "./engineApi.ts";
 import { FrameLoader, type FrameLoaderDeps } from "./frameLoader.ts";
 import {
@@ -12,7 +13,7 @@ import type { Backend, Camera, GpuFault, PageMessage, WorkerMessage } from "./pr
 
 export interface RuntimeDeps
   extends Omit<FrameLoaderDeps, "engine" | "requestRender" | "post">,
-    Pick<PresentProbeDeps, "samplePixels"> {
+    Pick<PresentProbeDeps, "samplePixels" | "pollTask"> {
   loadModule(): Promise<EngineModule>;
   post(message: WorkerMessage, transfer?: Transferable[]): void;
   /** A fresh canvas for a backend to draw into (a canvas keeps its first context). */
@@ -71,7 +72,11 @@ export function engineRuntime(deps: RuntimeDeps) {
   let rebuilt = false;
   let attaching = false;
   let dirty = false;
+  /** A camera, layout or backend change is pending: drawn at the next opportunity. */
+  let urgent = false;
   let scheduled = false;
+  /** Committed frames' messages, shown progressively (`drawPacing.ts`). */
+  const pacer = new FramePacer(deps.now, (message) => deps.post(message));
   let layoutSeq = 0;
   /** The page's camera (its viewport), and the overscan margin drawn around it. */
   let camera: Camera | undefined;
@@ -126,14 +131,47 @@ export function engineRuntime(deps: RuntimeDeps) {
     engine.set_camera(c.scale, c.tx, c.ty, c.width, c.height);
   };
 
-  const requestRender = () => {
-    dirty = true;
+  /**
+   * One drawing opportunity (between two frame computations, or an animation frame):
+   * committed frames are shown when the pacer says so; any other change is drawn at once.
+   */
+  const tick = () => {
+    if (pacer.due()) {
+      if (dirty) render();
+      // Nothing was committed since the last image, which therefore shows these frames.
+      else pacer.release();
+    } else if (dirty && (urgent || !pacer.pending())) render();
+  };
+  const schedule = () => {
     if (scheduled || !backend) return;
     scheduled = true;
     deps.nextFrame(() => {
       scheduled = false;
-      if (dirty) render();
+      tick();
+      if (dirty || pacer.pending()) schedule();
     });
+  };
+  const requestRender = () => {
+    dirty = true;
+    urgent = true;
+    schedule();
+  };
+  /** A committed frame: drawn when the pacer releases it. */
+  const progress = () => {
+    dirty = true;
+    schedule();
+  };
+  /** The loader's messages: committed frames wait for their draw; `synced` comes last. */
+  const loaderPost = (message: WorkerMessage) => {
+    if (message.type === "frame" && !message.error && !message.reused)
+      return pacer.hold(message);
+    if (message.type === "synced") {
+      // The last frames must not wait for an animation frame: a worker gets none while its
+      // page is hidden or not composited (seen in an embedded browser pane).
+      if (dirty) render(true);
+      pacer.release();
+    }
+    deps.post(message);
   };
   /**
    * Once a backend is attached, draws what arrived meanwhile (a layout, a camera) at once,
@@ -148,18 +186,19 @@ export function engineRuntime(deps: RuntimeDeps) {
   const loader = new FrameLoader({
     ...deps,
     engine: () => engine!,
-    requestRender,
+    post: loaderPost,
+    requestRender: progress,
     // Frame computation keeps this worker busy for seconds, which starves its animation
-    // frames. Between frames, after queued layout/camera messages have run, draw any
-    // pending change right away: committed frames appear one by one, and a pan or zoom
-    // made during the computation is drawn before the next frame starts.
+    // frames. Between frames, after queued layout/camera messages have run, draw what is
+    // due: a pan, zoom or layout made during the computation is drawn before the next frame
+    // starts, and committed frames appear progressively, paced by `drawPacing.ts`.
     yieldTask: async () => {
       await deps.yieldTask();
       // Backend setup awaits the GPU between these steps; computing frames meanwhile
       // would hold each of its steps back by a whole frame (seconds before anything
       // shows), and nothing can be drawn until it is done.
-      while (attaching) await deps.yieldTask();
-      if (dirty) render();
+      while (attaching) await deps.pollTask();
+      tick();
     },
   });
 
@@ -180,7 +219,7 @@ export function engineRuntime(deps: RuntimeDeps) {
       if (status === "ok") return;
       if (status !== "pending") throw new Error(status);
       if (deps.now() > deadline) throw new Error("renderer probe timed out");
-      await deps.yieldTask();
+      await deps.pollTask();
     }
   }
 
@@ -269,20 +308,28 @@ export function engineRuntime(deps: RuntimeDeps) {
     if (attached) drawAttached();
   }
 
-  function render() {
+  /** `releaseAll`: the last image of a sync also shows every held frame. */
+  function render(releaseAll = false) {
     if (!engine || !backend || attaching) return;
     if (backend === "webgpu" && !engine.device_lost() && checkGpuError()) return;
+    const releasing = releaseAll || pacer.due();
     dirty = false;
+    urgent = false;
     try {
       const start = deps.now();
       engine.render();
       const image = canvas!.transferToImageBitmap();
+      const ms = deps.now() - start;
+      pacer.drew(ms);
+      // The frames this image shows first, then the image, in one burst: the page shows the
+      // image in the task that receives it and drops skeletons at its next publication.
+      if (releasing) pacer.release();
       deps.post(
         { type: "drawn", layout: layoutSeq, ...(camera ? { camera, margin } : {}), image },
         [image],
       );
       // Recent draw times (encode + submit, worker thread) for diagnostics and benchmarks.
-      timings.push([Math.round(start * 10) / 10, Math.round((deps.now() - start) * 10) / 10]);
+      timings.push([Math.round(start * 10) / 10, Math.round(ms * 10) / 10]);
       if (timings.length > 600) timings.splice(0, timings.length - 600);
     } catch (cause) {
       // Not drawn: the rebuilt device or the next backend draws it.
@@ -306,13 +353,10 @@ export function engineRuntime(deps: RuntimeDeps) {
       case "sync":
         await booted;
         if (!engine) return;
+        // Its first committed frame is drawn at once, the next ones paced, and the last ones
+        // before `synced` is posted (`loaderPost`).
+        pacer.startSync();
         await loader.sync(message);
-        // Frames committed between computations are drawn before the next one starts; the
-        // last one must not wait for an animation frame either. A worker gets none while
-        // its page is hidden or not composited (seen in an embedded browser pane), and the
-        // page has already removed that frame's skeleton: it would stay blank until an
-        // animation frame finally ran.
-        if (dirty) render();
         return;
       case "layout":
         await booted;

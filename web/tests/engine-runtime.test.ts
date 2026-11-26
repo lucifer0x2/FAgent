@@ -13,6 +13,11 @@ import {
   overscanRatio,
 } from "../src/engine/overscan.ts";
 import { engineRuntime } from "../src/engine/workerRuntime.ts";
+import {
+  PROGRESS_DRAW_MAX_MS,
+  PROGRESS_DRAW_MIN_MS,
+  progressGap,
+} from "../src/engine/drawPacing.ts";
 
 const storage = (value: string | null) => ({ getItem: () => value });
 
@@ -70,6 +75,8 @@ function fakeModule(
     blank?: boolean;
     /** `max_texture_size` of the attached backend (0: unknown). */
     maxTexture?: number;
+    /** Runs at each `compute` (a test clock advancing by one frame's computation). */
+    onCompute?: () => void;
   } = {},
 ) {
   const calls: string[] = [];
@@ -132,6 +139,7 @@ function fakeModule(
     required_fonts: () => "[]",
     compute: (_revision: number, id: string) => {
       calls.push(`compute:${id}`);
+      options.onCompute?.();
       return JSON.stringify({ assets: [], width: 10, height: 10, diagnostics: [] });
     },
     commit: (id: string) => calls.push(`commit:${id}`),
@@ -158,6 +166,8 @@ function runtime(
   module: EngineModule | Error,
   hasWebGpu = true,
   yieldTask = () => Promise.resolve(),
+  now = () => 0,
+  pollTask = yieldTask,
 ) {
   const posted: WorkerMessage[] = [];
   /** Images posted with `drawn`, in the transfer list of their message. */
@@ -187,8 +197,9 @@ function runtime(
     nextFrame: (callback) => frames.push(callback),
     hasWebGpu: () => hasWebGpu,
     every: () => () => {},
-    now: () => 0,
+    now,
     yieldTask,
+    pollTask,
     fetchBytes: async () => new ArrayBuffer(0),
     decodeImage: async () => ({ data: new Uint8Array(4), width: 1, height: 1 }),
   });
@@ -233,6 +244,25 @@ test("a renderer probe mismatch rejects the backend before anything is drawn", a
   assert.deepEqual(kinds(posted), ["ready", "backend-failed:webgpu"]);
   assert.ok(calls.includes("detach"));
   assert.ok(!calls.some((call) => call.startsWith("render")));
+});
+
+test("GPU waits poll on a timer task, never on the frame yield (which would spin the worker)", async () => {
+  let clock = 0;
+  let yields = 0;
+  let polls = 0;
+  const { module } = fakeModule({ probe: { webgpu: "pending" } });
+  const { posted, attach } = runtime(
+    module,
+    true,
+    async () => void (yields++, (clock += 1_000)),
+    () => clock,
+    async () => void (polls++, (clock += 1_000)),
+  );
+  await attach("webgpu");
+  assert.ok(polls >= 3, "the pending probe is polled until its deadline");
+  assert.equal(yields, 0);
+  const failed = posted.find((m) => m.type === "backend-failed");
+  assert.match(failed && "error" in failed ? failed.error : "", /probe timed out/);
 });
 
 test("present probe: a WebGPU canvas that stays blank is rejected before anything is drawn", async () => {
@@ -438,28 +468,54 @@ const sync = (frames: string[]) =>
     bypass: false,
   }) as const;
 
-test("a busy worker draws each committed frame and a new layout without animation frames", async () => {
-  const { module, calls } = fakeModule();
-  const { handle, attach, posted, transferred, flush } = runtime(module);
+test("a busy worker draws the first frame at once, paces the next ones and always draws the last, without animation frames", async () => {
+  // Each frame computation takes 40 ms of worker time; draws take none, so the progress
+  // gap is its minimum (`drawPacing.ts`).
+  let clock = 0;
+  const { module, calls } = fakeModule({ onCompute: () => (clock += 40) });
+  const { handle, attach, posted, transferred, flush } = runtime(
+    module,
+    true,
+    () => Promise.resolve(),
+    () => clock,
+  );
+  assert.equal(progressGap(0), PROGRESS_DRAW_MIN_MS);
+  assert.equal(PROGRESS_DRAW_MIN_MS, 100);
   await attach("webgpu"); // animation frames never run below (`flush` is not called)
   calls.length = 0;
   const camera = { scale: 0.5, tx: 3, ty: 4, width: 10, height: 10 };
   await handle({ type: "camera", camera });
   await handle({ type: "layout", placements: [], seq: 7 });
-  await handle(sync(["a", "b"]));
+  await handle(sync(["a", "b", "c", "d", "e", "f"]));
   assert.deepEqual(calls, [
     "layout",
-    "render:webgpu", // the new (empty) layout replaces the previous page at once
+    "render:webgpu", // the new (empty) layout replaces the previous page at once (t=0)
     "snapshot",
     "compute:a",
     "commit:a",
-    "render:webgpu", // frame a is shown before frame b is computed
+    "render:webgpu", // the first frame is shown before the next is computed (t=40)
     "compute:b",
     "commit:b",
-    "render:webgpu", // the last frame too: it never waits for an animation frame
+    "compute:c",
+    "commit:c",
+    "compute:d",
+    "commit:d",
+    "render:webgpu", // b–d together, once the gap since the last draw has passed (t=160)
+    "compute:e",
+    "commit:e",
+    "compute:f",
+    "commit:f",
+    "render:webgpu", // the last frames never wait for the gap or an animation frame (t=240)
   ]);
+  // Each committed frame's message comes in the burst of the image that shows it, so the
+  // page never drops a skeleton before the frame's pixels; `synced` comes last.
+  assert.deepEqual(
+    posted
+      .filter((m) => m.type === "drawn" || m.type === "frame" || m.type === "synced")
+      .map((m) => (m.type === "frame" ? m.frameId : m.type)),
+    ["drawn", "a", "drawn", "b", "c", "d", "drawn", "e", "f", "drawn", "synced"],
+  );
   const drawn = posted.filter((m) => m.type === "drawn");
-  assert.equal(drawn.length, 3, "each render is posted at once, not at a rendering step");
   for (const message of drawn) {
     assert.equal(message.layout, 7);
     assert.deepEqual(message.camera, camera, "with the camera it was drawn with");
@@ -470,7 +526,64 @@ test("a busy worker draws each committed frame and a new layout without animatio
     "images move to the page, they are not copied",
   );
   flush();
-  assert.equal(posted.filter((m) => m.type === "drawn").length, 3, "nothing left to draw");
+  assert.equal(posted.filter((m) => m.type === "drawn").length, 4, "nothing left to draw");
+});
+
+test("a camera or layout change during a load is drawn before the next frame, unpaced", async () => {
+  let clock = 0;
+  let step = async () => {};
+  const { module, calls } = fakeModule({ onCompute: () => (clock += 10) });
+  const { handle, attach, posted } = runtime(
+    module,
+    true,
+    async () => {
+      await Promise.resolve();
+      await step();
+    },
+    () => clock,
+  );
+  await attach("webgpu");
+  await handle({ type: "layout", placements: [], seq: 1 });
+  calls.length = 0;
+  let sent = false;
+  // Between frames b and c (well inside the progress gap) the page pans.
+  step = async () => {
+    if (sent || !calls.includes("commit:b")) return;
+    sent = true;
+    await handle({
+      type: "camera",
+      camera: { scale: 1, tx: 1, ty: 0, width: 10, height: 10 },
+    });
+  };
+  await handle(sync(["a", "b", "c"]));
+  assert.deepEqual(calls, [
+    "snapshot",
+    "compute:a",
+    "commit:a",
+    "render:webgpu", // first frame
+    "compute:b",
+    "commit:b",
+    "render:webgpu", // the pan (with frame b), not held back by the gap
+    "compute:c",
+    "commit:c",
+    "render:webgpu", // last frame
+  ]);
+  // The pan's image shows frame b, but b's message waits for the paced release: releasing
+  // it would change what the page publishes (hug heights, then a new layout to draw), one
+  // draw per frame again.
+  assert.deepEqual(
+    posted
+      .filter((m) => m.type === "drawn" || m.type === "frame" || m.type === "synced")
+      .map((m) => (m.type === "frame" ? m.frameId : m.type))
+      .slice(-7),
+    ["a", "drawn", "drawn", "b", "c", "drawn", "synced"],
+  );
+});
+
+test("progress gap: grows with the draw time between its bounds", () => {
+  assert.equal(progressGap(2), PROGRESS_DRAW_MIN_MS);
+  assert.equal(progressGap(16), 160);
+  assert.equal(progressGap(80), PROGRESS_DRAW_MAX_MS);
 });
 
 test("frames wait for the backend: nothing computes while WebGPU is still being set up", async () => {

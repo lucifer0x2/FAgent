@@ -2,6 +2,7 @@ import { checkedResourceBytes } from "../../../renderer/resource-bytes";
 import type { EngineModule } from "./engineApi";
 import type { PageMessage, WorkerMessage } from "./protocol";
 import { engineRuntime } from "./workerRuntime";
+import { messageYield } from "./yieldTask";
 
 const scope = globalThis as unknown as {
   onmessage: (event: MessageEvent<PageMessage>) => void;
@@ -63,7 +64,9 @@ const handle = engineRuntime({
     scope.requestAnimationFrame
       ? scope.requestAnimationFrame(callback)
       : setTimeout(callback, 16),
-  yieldTask: () => new Promise((resolve) => setTimeout(resolve, 0)),
+  yieldTask: messageYield(),
+  // GPU waits (attach, probes) poll on a timer: a MessageChannel loop would spin the worker.
+  pollTask: () => new Promise((resolve) => setTimeout(resolve, 0)),
   every: (callback, ms) => {
     const timer = setInterval(callback, ms);
     return () => clearInterval(timer);

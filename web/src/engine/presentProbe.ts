@@ -27,7 +27,8 @@ const IDLE_WAIT_MS = 1_000;
 export interface PresentProbeDeps {
   /** Straight RGBA8 of `image` (PRESENT_PROBE_SIZE square), e.g. via a 2D canvas. */
   samplePixels(image: ImageBitmap): ArrayLike<number>;
-  yieldTask(): Promise<void>;
+  /** Waits before polling the GPU again (a timer: a message yield would spin a core). */
+  pollTask(): Promise<void>;
   now(): number;
 }
 
@@ -69,8 +70,8 @@ export async function presentProbe(
     }
     // Uncaptured errors arrive as events: let the probe frames finish first.
     const deadline = deps.now() + IDLE_WAIT_MS;
-    while (!engine.gpu_idle() && deps.now() < deadline) await deps.yieldTask();
-    await deps.yieldTask();
+    while (!engine.gpu_idle() && deps.now() < deadline) await deps.pollTask();
+    await deps.pollTask();
     const error = engine.gpu_error();
     if (error) throw new Error(`GPU error: ${error}`);
   } finally {
