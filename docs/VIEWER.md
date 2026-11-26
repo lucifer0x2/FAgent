@@ -348,10 +348,20 @@ bar shows the backend (`Vello · WebGPU`, `Vello · WebGL2`, `Vello · vello_cpu
 - The page sends the accepted snapshot once per revision (`sync`), the frame targets, the board
   layout and the camera. The worker parses the snapshot once, computes frames one at a time
   (fonts fetched and hash-checked in the worker, images decoded with `createImageBitmap`), keeps
-  every scene in Rust and draws on its own `OffscreenCanvas`, one coalesced draw per worker
-  animation frame, plus one between frame computations and one right after each `sync` when
-  something changed, so the last committed frame is drawn even when the worker gets no
-  animation frame (hidden or non-composited page). Unchanged frames (same content digest) move
+  every scene in Rust and draws on its own `OffscreenCanvas`, at most one draw per worker
+  animation frame. Between two frame computations the worker yields through a `MessageChannel`
+  (`web/src/engine/yieldTask.ts`; a nested `setTimeout(0)` chain is clamped to 4 ms per frame),
+  so camera, layout and sync messages received meanwhile run first, and a camera or layout
+  change is drawn before the next frame starts. Waits on the GPU (backend attach, renderer and
+  present probes) poll on a timer instead (`pollTask`), so they do not spin the worker. Committed frames are drawn progressively but
+  paced (`web/src/engine/drawPacing.ts`): every draw encodes the whole board, so the first frame
+  of a sync is drawn at once and later ones together at most once per gap (10× the last draw
+  time, 100–250 ms); the last ones are drawn right before `synced`, so they never wait for an
+  animation frame (hidden or non-composited page). A committed frame's `frame` message is held
+  until the image that shows it and posted just before that `drawn`, so the page never drops a
+  skeleton before the pixels; camera and layout draws in between show held frames without
+  releasing them (releasing would change hug heights, hence the layout, one draw per frame
+  again). Failed and reused frames are reported at once. Unchanged frames (same content digest) move
   to the new revision without recomputing and repeat the summary and missing assets the engine
   shows, so a view that never received them (another scope showed the frame first, or a newer
   sync replaced the view) replaces that frame's skeleton too. A frame stays drawn until its
@@ -453,11 +463,79 @@ Apple M3 Pro, Chromium 156 (full build, new headless, real GPU), production buil
   on WebGPU/WebGL2. In the viewer, `engine-smoke` differs from Canvas2D in 0.58% of pixels of the
   fixture screenshot (text antialiasing).
 
+### Measurements — 2026-11-26 (large-board cold load)
+
+Apple M3 Pro (quiet: load average 2.3–2.9 on 11 cores), Google Chrome 158 (new headless, real
+GPU, WebGPU), production build, 1440×900 at DPR 2, Layers closed. Fixture
+(`web/tests/engine-load-fixture.mjs`): 225 screens over 10 pages + 4 component masters = 229 root
+frames, 6,782 authored nodes, 3,602 instances, 5 fonts, root frames `height: "hug"`. Base is
+`77e2430` (viewer and engine wasm both built from it); new adds paced draws, `MessageChannel`
+yields and the shape plan cache. Interleaved: five rounds of one cold run per build (base, new,
+base, …), each run a new browser context; the same release server for both. p50 (min–max), ms
+from navigation:
+
+| | base All pages | new All pages | base `pg-1` (23 frames) | new `pg-1` |
+| --- | --- | --- | --- | --- |
+| Worker created | 362 (360–365) | 359 (355–362) | 361 (355–369) | 363 (361–366) |
+| `sync` sent | 416 (414–418) | 410 (408–415) | 393 (383–399) | 394 (389–396) |
+| `backend` (WebGPU attached) | 946 (943–961) | 944 (938–945) | 837 (823–844) | 836 (827–847) |
+| First frame committed | 983 (979–996) | 980 (975–983) | 969 (959–978) | 967 (958–976) |
+| First `drawn` with it | 984 (980–997) | 980 (976–983) | 976 (966–985) | 967 (958–976) |
+| **`synced`** | **8,595 (8,534–8,777)** | **2,824 (2,812–2,829)** | **1,739 (1,721–1,754)** | **1,199 (1,192–1,210)** |
+| Last `drawn` | 8,610 (8,550–8,793) | 2,844 (2,832–2,849) | 1,755 (1,736–1,770) | 1,217 (1,210–1,228) |
+| Draws while loading | 413 (408–419) | 33 (32–34) | 39 (37–39) | 7 |
+| Worker `render` total | 4,805 | 393 | 528 | 110 |
+| Worker `compute` total | 2,526 | 1,305 | 293 | 165 |
+| Worker `frame_keys` | 466 | 466 | 362 | 365 |
+| Worker `required_fonts` | 99 | 80 | 12 | 11 |
+| Worker `set_layout` (calls) | 31 (227) | 4 (20) | 1 (24) | <1 |
+| Main-thread long tasks | none | none | none | none |
+
+- `synced` on All pages drops by 5.8 s (−67%), on one page by 0.54 s (−31%); every run of the
+  new build is faster than every run of the base. `load_font` (11 ms) and `load_snapshot`
+  (10 ms) are unchanged; the remaining cost is `compute` (1.3 s: shaping, allocation, JSON,
+  sha256 digests) and `frame_keys` (0.47 s, whole-snapshot resolve; Task 35).
+- Progressive display: the new build draws every ~56 ms on average while loading ((`synced` −
+  first frame) / draws), never more than 250 ms apart by construction. The page-side "commit →
+  drawn" latency the harness reports is ~0 on the new build because `frame` messages are now
+  posted just before the `drawn` that shows them (base: p95 18 ms, one draw per frame).
+- Zooming while loading (`--interact`, 3 runs each, 6 cameras per run): every camera is drawn
+  before the next frame; camera → `drawn` p50 14–20 ms, max 25–33 ms (base 11–18 / 19–22 ms);
+  `synced` 2.86–2.89 s (base 8.51–8.69 s).
+- GPU waits now poll on a timer (`pollTask`). With the `MessageChannel` yield there, the attach
+  spun ~5.7k probe polls in ~0.5 s of worker time; the timer costs ~20 ms on `synced` (All pages
+  2,806 → 2,824 ms in two interleaved series) and leaves the core idle during the attach.
+- Board (`test:engine-board --strict`, 12 frames, base then new back to back): Vello pan at Fit
+  draw p95 14.5/15.7 → 14.3/14.9 ms (Layers open/closed), pan at 100% 8.9/8.5 → 8.5/8.4 ms, zoom
+  17.5/16.8 → 18.1/18.8 ms (24 draws, noisy), cold load 828–838 → 827–835 ms, no long task.
+
+Rerun (the base dist must carry the base engine wasm: build it in a worktree of the base commit
+with `npm run build:engine-wasm`, then `vite build --outDir <base-dist>` there):
+
+```bash
+export REPAINT_SERVER_BIN=target/release/fagent-server
+node web/tests/engine-load.mjs --channel chrome --runs 1 --scopes all,pg-1 --dist <base-dist> --label base-1
+node web/tests/engine-load.mjs --channel chrome --runs 1 --scopes all,pg-1 --dist <new-dist> --label new-1
+node web/tests/engine-load.mjs --channel chrome --runs 3 --scopes all --interact --dist <new-dist> --label interact-new
+```
+
+Repeat the first two lines alternately for each round; summaries land in
+`artifacts/engine-load/summary-<label>.json` (ignored).
+
 ### Tests
 
 - `npm --prefix web test` includes `engine-runtime.test.ts` (renderer choice, the WebGPU → WebGL2 →
   vello_cpu → Canvas2D chain, probe rejection, device loss rebuild-once, snapshot sent once per
-  revision) and `engine-frames.test.ts` (frame loader: order, reuse, missing font/asset, supersede).
+  revision; paced draws with a fake clock: first frame at once, later ones per gap, the last
+  always before `synced`, held `frame` messages posted before their `drawn`; a camera or layout
+  during a load drawn unpaced without releasing held frames; `progressGap` bounds; GPU waits poll
+  on `pollTask`, never on the frame yield) and `engine-frames.test.ts` (frame loader: order,
+  reuse, missing font/asset, supersede).
+- `cargo test -p fagent-text` covers the shape plan cache (`crates/text/src/plans.rs`): reuse only
+  for the same script and features, clones share, fonts never share, cached plans shape exactly
+  like fresh ones.
+- `npm --prefix web run test:engine-load` (`web/tests/engine-load.mjs`) measures the cold load of
+  a large synthetic project (see the 2026-11-26 measurements for options).
 - `cargo test -p fagent-engine-wasm`: compute summary equals the JSON scene path, staging,
   hit test (clip ancestors, revision, board offsets), reuse, layout release, drawing with backdrop,
   culling and LOD through `vello_cpu`.
@@ -468,6 +546,8 @@ Apple M3 Pro, Chromium 156 (full build, new headless, real GPU), production buil
   GPU → vello_cpu, module failure → Canvas2D. `npm --prefix web run test:engine-board` measures the
   board (fails on a > 50 ms canvas-path long task). `FAGENT_TEST_RENDERER=vello node
   web/tests/node-actions-smoke.mjs` runs the export/copy/context-menu smoke on the engine.
+  Without the pinned browsers in `.runtime/browsers`, `FAGENT_TEST_CHANNEL=chrome` runs these
+  (GPU and GPU-less cases) on an installed Google Chrome.
 
 **Open (outside P1):** tile cache so Fit composites instead of re-encoding (Task 31); Safari 26 and
 slower machines before any default change; image mipmaps at very small zoom; glyph-atlas eviction
