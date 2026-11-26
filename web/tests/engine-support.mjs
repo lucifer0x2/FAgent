@@ -42,13 +42,16 @@ export async function startVite(api, { mode = "dev" } = {}) {
 }
 
 /** `gpu`: full Chromium (WebGPU/WebGL2 on the real GPU); otherwise the headless shell
- *  with GPU and software GL disabled (no WebGPU adapter, no WebGL2 context). */
+ *  with GPU and software GL disabled (no WebGPU adapter, no WebGL2 context).
+ *  `FAGENT_TEST_CHANNEL=chrome` uses an installed Google Chrome instead of the pinned builds,
+ *  for both cases (the GPU-less case then runs Chrome with the same flags). */
 export async function launch({ gpu = true } = {}) {
   const { chromium } = await import("playwright");
+  const channel = process.env.FAGENT_TEST_CHANNEL;
   return chromium.launch(
     gpu
-      ? { channel: "chromium", headless: true, args: ["--force-color-profile=srgb"] }
-      : { headless: true, args: ["--disable-gpu", "--disable-software-rasterizer"] },
+      ? { channel: channel ?? "chromium", headless: true, args: ["--force-color-profile=srgb"] }
+      : { channel, headless: true, args: ["--disable-gpu", "--disable-software-rasterizer"] },
   );
 }
 

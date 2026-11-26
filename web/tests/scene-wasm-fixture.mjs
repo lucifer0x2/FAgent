@@ -25,6 +25,9 @@ export async function startSceneFixture() {
     const url = new URL(req.url, "http://fixture");
     if (url.pathname === "/api/v1/viewer/auth")
       return json(res, { authenticated: true, required: false });
+    // Local listener capabilities, as `GET /api/v1/viewer` answers them.
+    if (url.pathname === "/api/v1/viewer")
+      return json(res, { readOnly: false, liveUpdates: true, overscan: 0 });
     if (url.pathname === "/api/v1/projects")
       return json(res, {
         projects: [
