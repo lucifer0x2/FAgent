@@ -15,13 +15,17 @@ export const LOAD_PROBE = () => {
   }).observe({ type: "resource", buffered: true });
   const load = {
     events,
-    /** The latest sync (of `expected` frames when given) is synced and drawn after. */
+    /**
+     * The latest sync (of `expected` frames when given) is synced and an image was drawn
+     * since it was sent: the worker draws a load's last frames right before `synced`, and
+     * nothing may draw after it.
+     */
     done(expected) {
-      const syncs = events.filter((e) => e[0] === "sync");
-      const last = syncs.at(-1);
+      const start = events.findLastIndex((e) => e[0] === "sync");
+      const last = events[start];
       if (!last || (expected != null && last[2] !== expected)) return false;
-      const synced = events.findIndex((e) => e[0] === "synced" && e[2] === last[3]);
-      return synced >= 0 && events.slice(synced).some((e) => e[0] === "drawn");
+      const synced = events.findIndex((e, i) => i > start && e[0] === "synced" && e[2] === last[3]);
+      return synced >= 0 && events.slice(start).some((e) => e[0] === "drawn");
     },
   };
   window.__load = load;
@@ -55,12 +59,22 @@ export const LOAD_PROBE = () => {
  * Appended to the glue module: wraps each Engine method with a timer (worker globals).
  * `__engineLog` holds [name, start, end, detail] (worker clock) for `compute` (frame id),
  * `commit` (frame id when committed, else null), `render` (whether it returned),
- * `set_camera`, `load_font` and `add_image` (resource id).
+ * `set_camera`, `load_font` and `add_image` (resource id), and `drawn` for each image the
+ * worker posted (after the post returned; the worker looks `postMessage` up per call).
  */
 export const ENGINE_TIMES = `
 ;{
   const times = (globalThis.__engineTimes = {});
   const log = (globalThis.__engineLog = []);
+  const post = globalThis.postMessage;
+  globalThis.postMessage = function (message, transfer) {
+    const result = post.call(globalThis, message, transfer);
+    if (message?.type === "drawn") {
+      const at = performance.now();
+      log.push(["drawn", at, at, null]);
+    }
+    return result;
+  };
   const detail = {
     compute: (args) => args[1],
     commit: (args, result, ok) => (ok && result ? args[0] : null),
@@ -108,20 +122,24 @@ export const pct = (values, p) => {
 
 /**
  * Latency from each frame committed in the worker during the last sync to the delivered
- * `drawn` of the first draw that started after it. Each successful `render` posts one
- * `drawn`, so draws and page `drawn` events pair in order; if their counts differ (an image
- * lost after its render), each draw pairs with the first `drawn` received after it ended.
+ * `drawn` of the first image whose render started after it. The worker logs each image it
+ * posted (`drawn`), right after the render that drew it, so every image carries its own
+ * render's start: a render whose image was never posted (it threw after returning) pairs
+ * with nothing. Posts and page `drawn` events pair in order (messages keep their order).
  */
 function commitLatencies(events, log, syncAt) {
-  const renders = log.filter((c) => c[0] === "render" && c[3]);
   const drawn = events.filter((e) => e[0] === "drawn").map((e) => e[1]);
-  const delivered = (i) =>
-    renders.length === drawn.length ? drawn[i] : drawn.find((at) => at >= renders[i][2]);
+  const images = [];
+  let renderStart;
+  for (const c of log) {
+    if (c[0] === "render") renderStart = c[3] ? c[1] : undefined;
+    else if (c[0] === "drawn") images.push(renderStart);
+  }
   return log
     .filter((c) => c[0] === "commit" && c[3] != null && c[1] >= syncAt)
     .map((commit) => {
-      const draw = renders.findIndex((r) => r[1] >= commit[2]);
-      const at = draw >= 0 ? delivered(draw) : undefined;
+      const image = images.findIndex((start) => start != null && start >= commit[2]);
+      const at = image >= 0 ? drawn[image] : undefined;
       return at == null ? Infinity : at - commit[2];
     });
 }
@@ -223,7 +241,11 @@ export function summarize(events, longTasks, engine, log = []) {
       firstFrame: round(events[firstFrame]?.[1]),
       firstDrawn: firstFrame >= 0 ? at("drawn", firstFrame) : null,
       synced: round(events[syncedIndex]?.[1]),
-      lastDrawn: syncedIndex >= 0 ? at("drawn", syncedIndex) : null,
+      /** The image showing the load's last frames: posted right before `synced`, else after. */
+      lastDrawn:
+        syncedIndex >= 0
+          ? round((events.slice(lastIndex, syncedIndex).findLast((e) => e[0] === "drawn") ?? first("drawn", syncedIndex))?.[1])
+          : null,
     },
     /** `synced` − `backend`: what the load costs once a backend can draw. */
     syncedAfterBackend: synced != null && backend != null ? round(synced - backend) : null,

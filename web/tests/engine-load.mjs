@@ -3,8 +3,10 @@
 // engine-load-fixture.mjs, a production build of this checkout, Chromium with a real GPU,
 // 1440×900 at DPR 2, Layers closed. Each run is a new browser context (cold page, warm HTTP
 // cache off). Marks come from the page clock (navigation = 0): Worker created, `/snapshot`
-// request started, `sync` sent, first frame message, first `drawn` after it, `synced`, first
-// `drawn` after `synced`. Worker-side engine method times and the times of `compute`,
+// request started, `sync` sent, first frame message, first `drawn` after it, `synced`, the
+// `drawn` showing the last frames (posted right before `synced`, else the first after it).
+// Commit → `drawn` pairs each commit with the image of the first render after it (the worker
+// logs each posted image). Worker-side engine method times and the times of `compute`,
 // `commit`, `render` and `set_camera` come from wrapping the wasm-bindgen glue's
 // `Engine.prototype` through a route, so the product carries no probe; they are moved onto
 // the page clock through both `performance.timeOrigin`s.
@@ -225,6 +227,13 @@ async function run(browser, base, project, scope) {
 }
 
 /**
+ * Edit rounds count across every scope of the run: each edit gets its own idempotency key
+ * (a repeated key would replay or reject instead of committing) and `--edit-shared` a white
+ * no earlier scope stored records for.
+ */
+let editRound = 0;
+
+/**
  * Warm: one persistent profile in a temporary directory. The first navigation is cold and
  * fills the cache; each further one reloads the same page (after `--edit`/`--edit-shared`
  * changed the project through MCP while the page was away, so no live update recomputes
@@ -249,9 +258,10 @@ async function series(base, project, scope, mcp) {
     for (let i = 0; i < counts.runs; i++) {
       if (counts.edit || args["edit-shared"]) {
         await page.goto("about:blank");
+        const round = ++editRound;
         project.revision = args["edit-shared"]
-          ? await editShared(mcp, project, project.revision, i + 1)
-          : await editFrames(mcp, project, project.revision, counts.edit, i + 1);
+          ? await editShared(mcp, project, project.revision, round)
+          : await editFrames(mcp, project, project.revision, counts.edit, round);
       }
       const result = await load(page, base, project, scope);
       result.written = await cacheIdle(page);
