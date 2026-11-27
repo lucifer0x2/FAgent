@@ -2,14 +2,17 @@
 //! `overrides={…}`, `stroke=c,w,a`, `props={…}`) replace the stored prop. Partial writes of
 //! an object prop merge into the stored object at commit (`merge:true`, a JSON merge patch):
 //! layout flags and `p`/`gap`/`align`/`justify`, `<prop>.<field>=` (`layout.gap=8`,
-//! `stroke.width=2`), `<descendant>.<key>=` instance overrides, and `stroke=color[,width]`.
-//! A statement with both writes a replacing update for object values, then a merging one.
+//! `stroke.width=2`), instance descendant overrides (`ph.text=`, and the bare `ph="x"` and
+//! `ph={…}` of `use`: a bare key that is no catalog prop names a descendant), and
+//! `stroke=color[,width]`. `key=null` removes a prop or field, so nulls always go into the
+//! merge patch. A statement with both writes a replacing update for object values, then a
+//! merging one.
 use super::error::Result;
-use super::keys::{self, effective_key, layout_field};
+use super::keys::{effective_key, layout_field};
 use super::lexer::Token;
 use super::parser::{DirectiveStmt, Part};
 use super::props::{self, Target};
-use super::{value, OcdError};
+use super::value;
 use fagent_storage::{merge_props, merges};
 use serde_json::{json, Map, Value};
 
@@ -21,12 +24,12 @@ pub fn update(d: &DirectiveStmt) -> Result<Vec<Value>> {
     let (mut whole, mut patch) = (Vec::new(), Map::new());
     for part in &d.parts {
         match partial(part)? {
-            Some(fields) => merge_props(&mut patch, &fields),
+            Some(fields) => compose(&mut patch, fields),
             None => whole.push(part.clone()),
         }
     }
     let mut replace = props::build(&whole, Target::Update, None)?;
-    if patch.is_empty() {
+    if patch.is_empty() && !replace.values().any(Value::is_null) {
         return Ok(vec![op(&id, replace, false)]);
     }
     // A prop written whole takes this statement's partial writes before it replaces.
@@ -35,10 +38,10 @@ pub fn update(d: &DirectiveStmt) -> Result<Vec<Value>> {
             merge_props(&mut replace, &Map::from_iter([(key, fields)]));
         }
     }
-    // Scalars, lists and references replace in a merge patch too; records and `null` do not.
-    let (records, values): (Map<_, _>, Map<_, _>) = replace
-        .into_iter()
-        .partition(|(_, value)| merges(value) || value.is_null());
+    // Scalars, lists, references and `null` (a removal) go into the merge patch; records
+    // replace in an update of their own, since a merge patch would merge them.
+    let (records, values): (Map<_, _>, Map<_, _>) =
+        replace.into_iter().partition(|(_, value)| merges(value));
     patch.extend(values);
     let mut ops = Vec::new();
     if !records.is_empty() {
@@ -58,14 +61,32 @@ fn op(id: &str, props: Map<String, Value>, merge: bool) -> Value {
     op
 }
 
+/// Adds one partial write to the statement's merge patch: records merge field by field and
+/// the later write wins, including a `null` (applying the patch removes that field).
+fn compose(into: &mut Map<String, Value>, patch: Map<String, Value>) {
+    for (key, value) in patch {
+        let nested = merges(&value) && into.get(&key).is_some_and(merges);
+        if nested {
+            if let (Some(Value::Object(old)), Value::Object(new)) = (into.get_mut(&key), value) {
+                compose(old, new);
+            }
+        } else {
+            into.insert(key, value);
+        }
+    }
+}
+
 /// The props one partial write patches, or `None` for a whole value.
 fn partial(part: &Part) -> Result<Option<Map<String, Value>>> {
     let single = |target| props::build(std::slice::from_ref(part), target, None).map(Some);
     match part {
         Part::Flag(_) => single(Target::Update),
         Part::Attr(key, raw) if key.text == "stroke" => {
-            // A JSON object or all three list fields replace; a color[,width] list patches.
-            match raw.text.starts_with('{') || value::split(raw, ',').len() == 3 {
+            // A JSON object, all three list fields or `null` replace; a color[,width] patches.
+            let whole = raw.text.starts_with('{')
+                || value::is_null(raw)
+                || value::split(raw, ',').len() == 3;
+            match whole {
                 true => Ok(None),
                 false => single(Target::Update),
             }
@@ -77,7 +98,10 @@ fn partial(part: &Part) -> Result<Option<Map<String, Value>>> {
                 None => single(Target::Instance),
             },
             None if layout_field(&key.text).is_some() => single(Target::Update),
-            None if effective_key(&key.text).is_none() && key.text != "props" => Err(unknown(key)),
+            // `ph="x"`, `ph={…}`: as on `use`, a key that is no prop names a descendant.
+            None if effective_key(&key.text).is_none() && key.text != "props" => {
+                single(Target::Instance)
+            }
             None => Ok(None),
         },
         _ => Ok(None),
@@ -102,16 +126,4 @@ fn field_patch(
         value = json!({ name: value });
     }
     Ok(Map::from_iter([(prop.to_owned(), value)]))
-}
-
-/// An unknown key on `@set`; an instance descendant is written `<id>.<key>=`.
-fn unknown(token: &Token) -> OcdError {
-    let error = keys::unknown(token);
-    OcdError {
-        message: format!(
-            "{}; for an instance descendant write <descendantId>.text=\"…\"",
-            error.message
-        ),
-        ..error
-    }
 }

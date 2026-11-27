@@ -94,6 +94,43 @@ fn wrap_stretch_equalizes_heights_per_line() {
     assert_eq!(["a", "b", "c"].map(|id| b[id][3]), [60., 60., 30.]);
 }
 
+/// FB-27: a `free` frame with no authored height stretches to its row like any unset cross
+/// size, whether the row's height is set or hugs a taller sibling, and also inside a
+/// `col` parent that stacks the row.
+#[test]
+fn free_frame_with_unset_height_stretches_in_a_row() {
+    for row_height in [json!(80), json!("hug"), Value::Null] {
+        let mut row = json!({"width":"fill","layout":{"mode":"row","gap":8,"align":"stretch"}});
+        if !row_height.is_null() {
+            row["height"] = row_height.clone();
+        }
+        let b = run(input(
+            (300., 200.),
+            json!({"mode":"column"}),
+            json!([
+                node("row", "f", "frame", row),
+                node(
+                    "x",
+                    "row",
+                    "frame",
+                    json!({"width":24,"layout":{"mode":"free"}})
+                ),
+                node(
+                    "dot",
+                    "x",
+                    "rectangle",
+                    json!({"x":4,"y":4,"width":8,"height":8})
+                ),
+                rect("tall", "row", 10., 55.)
+            ]),
+        ));
+        let expected = row_height.as_f64().map_or(55., |h| h as f32);
+        assert_eq!(b["row"][3], expected, "{row_height}");
+        assert_eq!((b["x"][2], b["x"][3]), (24., expected), "{row_height}");
+        assert_eq!(b["dot"], [4., 4., 8., 8.], "{row_height}");
+    }
+}
+
 /// Text without a font fails later, so `LAYOUT_INVALID` proves the guard ran first.
 fn guarded(layout: Value) -> Value {
     let mut v = input(

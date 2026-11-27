@@ -73,7 +73,7 @@ fn a_partial_stroke_merges_and_a_full_one_replaces() {
 }
 
 #[test]
-fn descendant_keys_merge_one_override_and_bare_ones_fail() {
+fn descendant_keys_merge_one_override() {
     assert_eq!(
         ops("@set card ph.fill=$pri ph.text=Hi label.visible=false"),
         merged(
@@ -81,18 +81,38 @@ fn descendant_keys_merge_one_override_and_bare_ones_fail() {
             "label":{"visible":false}}})
         )
     );
-    for part in [r#"ph="x""#, r#"ph={"text":"x"}"#, "opacty=4"] {
-        let e = error(&format!("@set card {part}"));
-        assert_eq!((e.line, e.column), (1, 11), "{part}");
-        assert!(e.message.starts_with("Unknown key"), "{}", e.message);
-        assert!(e.message.contains("<descendantId>.text="), "{}", e.message);
-    }
-    assert_eq!(
-        error("@set card opacty=4").suggestion.as_deref(),
-        Some("opacity")
-    );
     let e = error("@set card layout.=4");
     assert_eq!((e.line, e.column), (1, 18), "{}", e.message);
+}
+
+/// FB-17, FB-35: `@set` takes the bare descendant forms of `use` (`ph="x"`, `ph={…}`).
+#[test]
+fn bare_descendant_keys_match_the_dotted_form() {
+    assert_eq!(ops(r#"@set card ph="A""#), ops(r#"@set card ph.text="A""#));
+    assert_eq!(
+        ops(r#"@set card ph={"text":"A","visible":false}"#),
+        ops(r#"@set card ph.text="A" ph.visible=false"#)
+    );
+    // One merge patch: other overrides of `card` stay, later writes win per field.
+    assert_eq!(
+        ops(r#"@set card ph="A" ph.fill=$pri label={"visible":false} gap=8"#),
+        merged(
+            json!({"overrides":{"ph":{"text":"A","fill":{"tokenId":"pri"}},
+            "label":{"visible":false}},"layout":{"gap":8}})
+        )
+    );
+    // A bare key that is not a catalog prop is a descendant; storage checks the target.
+    assert_eq!(
+        ops("@set card opacty=4"),
+        merged(json!({"overrides":{"opacty":{"text":"4"}}}))
+    );
+    let e = error("@set card ph=[1]");
+    assert_eq!((e.line, e.column), (1, 14), "{}", e.message);
+    assert!(
+        e.message.contains("\"text\" or a {json} object"),
+        "{}",
+        e.message
+    );
 }
 
 #[test]

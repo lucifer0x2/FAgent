@@ -6,7 +6,7 @@
 //! `operations`. A successful result lists generated node IDs as `autoIds`.
 use super::{compile, Compiled, OcdError, MAX_OPERATIONS};
 use crate::error::ApiError;
-use fagent_storage::{BatchRequest, MAX_BATCH_BYTES};
+use fagent_storage::{suggest_prop, BatchRequest, MAX_BATCH_BYTES};
 use serde_json::{json, Map, Value};
 
 /// Statement positions of the compiled operations, by operation index, the node each one
@@ -15,6 +15,8 @@ use serde_json::{json, Map, Value};
 pub struct Positions {
     lines: Vec<(usize, usize)>,
     nodes: Vec<Option<String>>,
+    /// The override targets each compiled `update_node` writes (empty for other operations).
+    overrides: Vec<Vec<String>>,
     auto_ids: Vec<(usize, String)>,
 }
 
@@ -24,22 +26,52 @@ impl Positions {
     /// An error checked on the whole batch names only its `nodeId`: the last statement that
     /// created or updated that node gives the position.
     pub fn locate(&self, mut error: ApiError) -> ApiError {
-        match error.0.op_index {
-            Some(index) if index < self.lines.len() => self.at(index, error),
+        let index = match error.0.op_index {
+            Some(index) if index < self.lines.len() => index,
             Some(index) => {
                 error.0.op_index = Some(index - self.lines.len());
-                error
+                return error;
             }
             None => {
                 let node = error.0.node.as_ref().and_then(|n| n.node_id.as_deref());
                 let index =
                     node.and_then(|id| self.nodes.iter().rposition(|n| n.as_deref() == Some(id)));
                 match index {
-                    Some(index) => self.at(index, error),
-                    None => error,
+                    Some(index) => index,
+                    None => return error,
                 }
             }
+        };
+        let error = self.not_instance(index, error);
+        self.at(index, error)
+    }
+    /// `@set x ph="A"` or `ph.fill=` on a node that is not an instance: storage rejects the
+    /// `overrides` it compiles to; say that descendant keys need an instance, and suggest the
+    /// prop a misspelled bare key most likely meant.
+    fn not_instance(&self, index: usize, mut error: ApiError) -> ApiError {
+        let Some(targets) = self.overrides.get(index).filter(|t| !t.is_empty()) else {
+            return error;
+        };
+        let kind = error.0.node.as_ref().and_then(|n| n.node_kind.as_deref());
+        let on_node = matches!(kind, Some(kind) if kind != "instance");
+        if error.0.field.as_deref() != Some("props.overrides") || !on_node {
+            return error;
         }
+        let near = targets.iter().find_map(|t| suggest_prop(t).map(|s| (t, s)));
+        let hint = match near {
+            Some((target, prop)) => {
+                format!("; `{target}` is no node property (did you mean `{prop}`?)")
+            }
+            None => String::new(),
+        };
+        error.0.message = format!(
+            "{}. Descendant keys (<descendantId>=\"text\", <descendantId>.<key>=…, overrides) need an instance{hint}",
+            error.0.message
+        );
+        if let (Some((_, prop)), Some(context)) = (near, error.0.node.as_mut()) {
+            context.suggestion.get_or_insert_with(|| prop.into());
+        }
+        error
     }
     fn at(&self, index: usize, error: ApiError) -> ApiError {
         match self.lines.get(index) {
@@ -77,9 +109,11 @@ pub fn compile_into(
         auto_ids,
     } = compile(source)?;
     let nodes = operations.iter().map(node_of).collect();
+    let overrides = operations.iter().map(override_targets).collect();
     let positions = Positions {
         lines: positions,
         nodes,
+        overrides,
         auto_ids,
     };
     if let Some(Value::Array(inline)) = args.get("operations") {
@@ -147,6 +181,14 @@ fn node_of(op: &Value) -> Option<String> {
     match op["op"].as_str() {
         Some("create_node" | "update_node") => op["id"].as_str().map(Into::into),
         _ => None,
+    }
+}
+
+/// The descendant IDs an `update_node` overrides.
+fn override_targets(op: &Value) -> Vec<String> {
+    match (op["op"].as_str(), op["props"]["overrides"].as_object()) {
+        (Some("update_node"), Some(targets)) => targets.keys().cloned().collect(),
+        _ => Vec::new(),
     }
 }
 
