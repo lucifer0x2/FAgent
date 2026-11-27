@@ -65,10 +65,7 @@ impl Worker {
                 .as_str()
                 .filter(|s| s.len() <= 64 && s.bytes().all(|c| c.is_ascii_uppercase() || c == b'_'))
                 .unwrap_or("WORKER_FAILED");
-            return Err(ApiError::new(
-                code,
-                "Render worker could not complete this representation",
-            ));
+            return Err(ApiError::new(code, &message(&response)));
         }
         Ok(response)
     }
@@ -77,6 +74,16 @@ impl Worker {
         let _ = self.child.wait().await;
     }
 }
+/// The worker's own message for its error code (such as which budget a `PIXEL_BUDGET` hit),
+/// when it is short printable text; otherwise the generic one.
+fn message(response: &Value) -> String {
+    response["message"]
+        .as_str()
+        .filter(|m| !m.is_empty() && m.chars().count() <= 300)
+        .filter(|m| !m.chars().any(char::is_control))
+        .unwrap_or("Render worker could not complete this representation")
+        .to_owned()
+}
 fn failure() -> ApiError {
     ApiError::new(
         "WORKER_FAILED",
@@ -84,3 +91,24 @@ fn failure() -> ApiError {
     )
 }
 use tokio::io::AsyncReadExt;
+
+#[cfg(test)]
+mod tests {
+    use serde_json::json;
+
+    /// FB-49: a worker failure keeps its own message, so `PIXEL_BUDGET` says which budget.
+    #[test]
+    fn worker_errors_pass_their_own_message_through() {
+        let own = json!({"status":"failed","code":"PIXEL_BUDGET","message":"Render pixel budget exceeded"});
+        assert_eq!(super::message(&own), "Render pixel budget exceeded");
+        let generic = "Render worker could not complete this representation";
+        for response in [
+            json!({"status":"failed","code":"PIXEL_BUDGET"}),
+            json!({"status":"failed","message":""}),
+            json!({"status":"failed","message":"line\nbreak"}),
+            json!({"status":"failed","message":"x".repeat(301)}),
+        ] {
+            assert_eq!(super::message(&response), generic, "{response}");
+        }
+    }
+}

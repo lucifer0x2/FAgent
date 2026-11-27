@@ -28,7 +28,7 @@ impl Jobs {
         match result {
             Err(error) => {
                 entry.value["status"] = json!("failed");
-                entry.value["error"] = json!(error.0);
+                entry.value["error"] = error.value()["error"].clone();
             }
             Ok((computed, rendered)) if entry.value["kind"] == "export" => {
                 super::export::finish(entry, &self.config.base_url, &computed, rendered);
@@ -62,7 +62,7 @@ impl Jobs {
                     }
                     Ok(Rendered::Export(_)) => {}
                     Err(error) => {
-                        entry.value["error"] = json!(error.0);
+                        entry.value["error"] = error.value()["error"].clone();
                     }
                 }
             }
