@@ -1,6 +1,8 @@
 // A large multi-page project for engine-load.mjs, seeded through MCP on a temporary backend:
 // by default 225 root frames over 10 pages, column/row stacks, ~2.7k component instances
 // (nav, button, card, footer; nested), five fonts and one image. Synthetic content only.
+// Every root frame uses the color token `paper` (white), so editing it changes every frame's
+// content digest (engine-load.mjs --edit-shared); its value equals the former literal fill.
 import { readFile } from "node:fs/promises";
 import { connectMcp } from "../../spikes/e2e/protocol.mjs";
 import { stripesPNG } from "./fixture-png.mjs";
@@ -18,6 +20,14 @@ const COPY = [
   "Large boards stay responsive: unchanged frames are reused and only edited ones recompute.",
 ];
 
+/** The shared token every root frame paints with (white). */
+export const SHARED_TOKEN = "paper";
+const PAPER = { tokenId: SHARED_TOKEN };
+const paperToken = (value) => ({
+  op: "upsert_token",
+  token: { id: SHARED_TOKEN, name: "Paper", type: "color", value },
+});
+
 const node = (id, kind, parentId, props) => ({ op: "create_node", id, kind, parentId, props });
 const text = (id, parentId, value, fontId, fontSize, extra = {}) =>
   node(id, "text", parentId, {
@@ -33,10 +43,10 @@ function components(assetId) {
       name: "Button", component: { name: "Button" }, x: 0, y: 0, width: 140, height: 40,
       radius: 8, fill: "#1672e8", layout: { mode: "row", align: "center", padding: 10, gap: 8 },
     }),
-    text("button-label", "button", "Get started", "font_lato_bold", 14, { fill: "#ffffff" }),
+    text("button-label", "button", "Get started", "font_lato_bold", 14, { fill: PAPER }),
     node("card", "frame", "components", {
       name: "Card", component: { name: "Card" }, x: 200, y: 0, width: 312, height: "hug",
-      radius: 12, fill: "#ffffff", stroke: { color: "#c9d3e0", width: 1 },
+      radius: 12, fill: PAPER, stroke: { color: "#c9d3e0", width: 1 },
       shadow: [{ x: 0, y: 4, blur: 12, color: "#1d2433" }],
       layout: { mode: "column", padding: 16, gap: 10 },
     }),
@@ -50,7 +60,7 @@ function components(assetId) {
     node("card-cta", "instance", "card-meta", { componentId: "button" }),
     node("nav", "frame", "components", {
       name: "Nav", component: { name: "Nav" }, x: 0, y: 600, width: 1440, height: 72,
-      fill: "#ffffff", layout: { mode: "row", align: "center", padding: 24, gap: 32 },
+      fill: PAPER, layout: { mode: "row", align: "center", padding: 24, gap: 32 },
     }),
     text("nav-logo", "nav", "Fagent Studio", "font_lato_bold", 20, { width: 220 }),
     ...["Product", "Pricing", "Docs", "Blog", "Company"].map((label, i) =>
@@ -60,7 +70,7 @@ function components(assetId) {
       name: "Footer", component: { name: "Footer" }, x: 0, y: 800, width: 1440, height: "hug",
       fill: "#0f172a", layout: { mode: "column", padding: 48, gap: 12 },
     }),
-    text("footer-title", "footer", "Fagent Studio", "font_lato_bold", 22, { fill: "#ffffff" }),
+    text("footer-title", "footer", "Fagent Studio", "font_lato_bold", 22, { fill: PAPER }),
     text("footer-copy", "footer", COPY[1], "font_noto", 14, { fill: "#cbd5e1" }),
     text("footer-legal", "footer", "© Example Inc. All rights reserved.", "font_lato", 12, { fill: "#94a3b8" }),
   ];
@@ -108,7 +118,7 @@ function screen(page, index, rows) {
   }
   ops.push(
     node(`${id}-article`, "frame", id, {
-      name: "Article", width: "fill", height: "hug", fill: "#ffffff",
+      name: "Article", width: "fill", height: "hug", fill: PAPER,
       layout: { mode: "column", padding: 64, gap: 12 },
     }),
     ...[0, 1, 2].map((p) =>
@@ -158,7 +168,7 @@ export async function seedLargeProject(base, root, { frames = 225, pages = 10 } 
       base64: stripesPNG(320, 120).toString("base64"),
     });
     revision = image.committedRevision;
-    const ops = components(image.asset.id);
+    const ops = [paperToken("#ffffff"), ...components(image.asset.id)];
     let instances = ops.filter((op) => op.kind === "instance").length;
     sizes.forEach((count, p) => {
       const page = `pg-${p}`;
@@ -177,9 +187,13 @@ export async function seedLargeProject(base, root, { frames = 225, pages = 10 } 
       revision = result.committedRevision;
     }
     // Counted from the generated operations, so the benchmark waits for what exists.
-    const screens = ops.filter((op) => op.kind === "frame" && /^pg-\d+$/.test(op.parentId)).length;
+    const screenIds = ops
+      .filter((op) => op.kind === "frame" && /^pg-\d+$/.test(op.parentId))
+      .map((op) => op.id);
+    const screens = screenIds.length;
     return {
-      projectId, revision, nodes: ops.length, instances, frames: screens, pages: sizes.length + 1,
+      projectId, revision, nodes: ops.filter((op) => op.op === "create_node").length, instances,
+      frames: screens, pages: sizes.length + 1, screenIds,
       // Every root frame, the component masters included (the All pages board shows them).
       rootFrames: screens + ops.filter((op) => op.parentId === "components").length,
       pageIds: sizes.map((_, p) => `pg-${p}`), fonts: FONTS.length + 1,
@@ -187,4 +201,34 @@ export async function seedLargeProject(base, root, { frames = 225, pages = 10 } 
   } finally {
     await mcp.close();
   }
+}
+
+/**
+ * Edits made between warm loads (engine-load.mjs), through an open MCP session; each
+ * resolves with the committed revision. `editFrames` retitles `count` screens spread over
+ * the pages (one content digest each); `editShared` sets the shared token to a white not
+ * used before in this series, which changes every root frame's digest.
+ */
+export async function editFrames(mcp, project, revision, count, round) {
+  const ids = project.screenIds;
+  if (count > ids.length) throw new Error(`--edit ${count} exceeds ${ids.length} screens`);
+  const operations = Array.from({ length: count }, (_, j) => {
+    const id = ids[Math.floor((j * ids.length) / count)];
+    return { op: "update_node", id: `${id}-h1`, props: { text: `${id}: edit ${round}` } };
+  });
+  const result = await mcp.call("apply_batch", {
+    projectId: project.projectId, expectedRevision: revision,
+    idempotencyKey: `edit-${round}`, operations,
+  });
+  return result.committedRevision;
+}
+
+export async function editShared(mcp, project, revision, round) {
+  const result = await mcp.call("apply_batch", {
+    projectId: project.projectId, expectedRevision: revision,
+    idempotencyKey: `shared-${round}`,
+    // A new white per round: a value seen before would match records stored for it.
+    operations: [paperToken(`#${(0xffffff - round).toString(16).padStart(6, "0")}`)],
+  });
+  return result.committedRevision;
 }

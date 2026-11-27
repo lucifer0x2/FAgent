@@ -34,7 +34,7 @@ export const LOAD_PROBE = () => {
       events.push(["worker", performance.now()]);
       this.addEventListener("message", ({ data: m }) => {
         const at = performance.now();
-        if (m?.type === "frame") events.push(["frame", at, m.frameId, Boolean(m.error), Boolean(m.reused)]);
+        if (m?.type === "frame") events.push(["frame", at, m.frameId, Boolean(m.error), Boolean(m.reused), Boolean(m.restored)]);
         else if (m?.type === "drawn") events.push(["drawn", at, JSON.stringify(m.camera ?? null)]);
         else if (m?.type === "synced") events.push(["synced", at, m.generation, m.error ?? null]);
         else if (m?.type === "ready" || m?.type === "backend") events.push([m.type, at]);
@@ -95,6 +95,9 @@ export const ENGINE_TIMES = `
   }
 }
 `;
+
+/** Engine methods whose call counts each run reports (scene work, fonts, cache records). */
+const ENGINE_CALLS = ["frame_keys", "compute", "import_record", "export_record", "required_fonts", "load_font", "render"];
 
 const round = (v) => (v == null ? null : Math.round(v));
 export const pct = (values, p) => {
@@ -199,6 +202,15 @@ export function summarize(events, longTasks, engine, log = []) {
       .filter(([, t]) => t.ms >= 1)
       .map(([name, t]) => [name, { n: t.n, ms: round(t.ms), max: round(t.max) }]),
   );
+  const synced = events[syncedIndex]?.[1];
+  const backend = first("backend")?.[1];
+  // The last sync's window in order, consecutive frame messages folded into a count.
+  const trace = [];
+  for (const e of events.slice(Math.max(lastIndex, 0), syncedIndex + 1)) {
+    const top = trace.at(-1);
+    if (e[0] === "frame" && top?.[0] === "frames") top[2]++;
+    else trace.push(e[0] === "frame" ? ["frames", round(e[1]), 1] : [e[0], round(e[1])]);
+  }
   return {
     marks: {
       worker: at("worker"),
@@ -206,16 +218,24 @@ export function summarize(events, longTasks, engine, log = []) {
       ready: at("ready"),
       backend: at("backend"),
       sync: round(syncAt),
+      /** The worker's first `commit` of the last sync (computed or imported frame). */
+      firstCommit: round(log.find((c) => c[0] === "commit" && c[3] != null && c[1] >= (last?.[1] ?? 0))?.[2]),
       firstFrame: round(events[firstFrame]?.[1]),
       firstDrawn: firstFrame >= 0 ? at("drawn", firstFrame) : null,
       synced: round(events[syncedIndex]?.[1]),
       lastDrawn: syncedIndex >= 0 ? at("drawn", syncedIndex) : null,
     },
+    /** `synced` − `backend`: what the load costs once a backend can draw. */
+    syncedAfterBackend: synced != null && backend != null ? round(synced - backend) : null,
+    /** Engine calls per method in the whole run, whatever their time (scene work counts). */
+    calls: Object.fromEntries(ENGINE_CALLS.map((name) => [name, engine?.[name]?.n ?? 0])),
     syncs: syncs.length,
     frames: frames.length,
     failed: frames.filter((e) => e[3]).length,
     reused: frames.filter((e) => e[4]).length,
+    restored: frames.filter((e) => e[5]).length,
     drawsWhileLoading: draws.length,
+    trace,
     commitToDrawn: { count: committed.length, ...spread(committed) },
     frameToDrawn: spread(notified),
     cameraToDrawn: {
@@ -247,8 +267,19 @@ export function aggregate(runs) {
   const engine = Object.fromEntries(
     [...names].map((name) => [name, stat(runs.map((r) => r.engineMs[name]?.ms))?.p50]),
   );
+  const calls = Object.fromEntries(
+    ENGINE_CALLS.map((name) => [name, stat(runs.map((r) => r.calls?.[name] ?? 0))]),
+  );
+  const cacheKeys = [...new Set(runs.flatMap((r) => Object.keys(r.cache ?? {})))].filter(
+    (key) => runs.every((r) => typeof (r.cache?.[key] ?? 0) === "number"),
+  );
   return {
     marks,
+    syncedAfterBackend: stat(runs.map((r) => r.syncedAfterBackend)),
+    fontWindowMs: stat(runs.map((r) => r.fonts?.windowMs)),
+    fontFetchMs: stat(runs.map((r) => r.fonts?.fetchMs)),
+    calls,
+    cache: Object.fromEntries(cacheKeys.map((key) => [key, stat(runs.map((r) => r.cache?.[key] ?? 0))])),
     drawsWhileLoading: stat(runs.map((r) => r.drawsWhileLoading)),
     commitToDrawnP95: stat(runs.map((r) => r.commitToDrawn.p95)),
     commitToDrawnMax: stat(runs.map((r) => r.commitToDrawn.max)),
