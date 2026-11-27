@@ -102,7 +102,7 @@ fn build() -> Vec<Tool> {
         (
             "get_outline",
             vec!["projectId"],
-            "Ordered id/parentId/kind/name/sortKey of the whole project tree. Start here to find the page or frame ID for a scoped read; depth:1 lists every page with its root frames. It carries no props. Instances are leaves with componentId and childCount.",
+            "Ordered id/parentId/kind/name/sortKey of the whole project tree. Start here to find the page or frame ID for a scoped read; depth:1 lists every page with its root frames. It carries no props unless properties names authored keys: each entry then adds props with only those keys (properties:[\"x\",\"y\",\"width\",\"height\"] gives root frame bounds). Instances are leaves with componentId and childCount.",
         ),
         (
             "get_subtree",

@@ -35,7 +35,7 @@ pub(super) fn read(
         .filter(|(_, d)| req.depth.is_none_or(|max| *d <= max))
     {
         let mut value = if name == "get_outline" {
-            json!({"id":node.id,"parentId":node.parent_id,"kind":node.kind,"name":node.props["name"],"sortKey":node.sort_key})
+            super::tree_nodes::outline_entry(node, req.properties.as_ref())
         } else {
             let mut value = json!(node);
             if let Some(props) = &req.properties {
