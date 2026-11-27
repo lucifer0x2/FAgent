@@ -107,6 +107,7 @@ fn differential(pair: &Pair, seeds: std::ops::Range<u64>, steps: usize) {
         total.replays += tally.replays;
         total.previews += tally.previews;
         total.oracle += tally.oracle;
+        total.deleted_notes += tally.deleted_notes;
     }
     let (warm, (cold_hits, cold_loads)) = (pair.warm.memory_stats(), pair.cold_writes.get());
     eprintln!(
@@ -119,6 +120,10 @@ fn differential(pair: &Pair, seeds: std::ops::Range<u64>, steps: usize) {
         "stale bases must report concurrent writes"
     );
     assert!(total.oracle > 0, "batches at the current base were checked");
+    assert!(
+        total.deleted_notes > 0,
+        "node deletions reported their notes"
+    );
     // The warm storage staged in its resident copy; the cold ones loaded every time.
     assert!(warm.write_hits > warm.write_loads, "{warm:?}");
     assert_eq!(cold_hits, 0, "cold storages start empty");

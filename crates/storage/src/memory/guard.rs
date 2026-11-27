@@ -151,6 +151,7 @@ pub(crate) fn result(
         project_id: before.metadata().project_id.clone(),
         committed_revision: prepared.revision(),
         changed_ids: prepared.changed_ids().to_vec(),
+        deleted_note_ids: prepared.deleted_note_ids().to_vec(),
         render_status: "pending".into(),
         ..Default::default()
     };

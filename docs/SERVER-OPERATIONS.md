@@ -84,8 +84,9 @@ JSON read back; defaults are omitted:
   `FAGENT_MAX_NOTE_TEXT`, `FAGENT_MAX_NOTE_REPLIES` and `FAGENT_MAX_NOTE_AUTHOR` (see
   [`SERVER.md`](SERVER.md)). `create_node` rejects an ID held by a note.
 - `delete_subtree` also deletes the notes anchored to every deleted node; their IDs are in
-  `changedIds` and in `get_changes` `removed`. History stays readable with
-  `get_changes includeOperations`.
+  `changedIds` and in `get_changes` `removed`, and the batch result and dry run list them in
+  `deletedNoteIds` (sorted, omitted when none; notes recreated later in the same batch are
+  left out). History stays readable with `get_changes includeOperations`.
 - `changedIds` of a note operation is the note ID; `get_changes` groups live ones as `notes`.
 - A commit whose operations are all note operations enqueues no prerender (its `commit` event
   is still sent). It still advances the revision, so older scene keys and cursors go stale.
@@ -130,7 +131,8 @@ Versioned backup/export/import/restore are public **storage APIs**, documented i
 ## Mutation responses and image fit
 
 `apply_batch` and `import_asset` answer with the same top-level commit fields:
-`projectId`, `committedRevision`, `changedIds`, `renderStatus` and `replayed`.
+`projectId`, `committedRevision`, `changedIds`, `renderStatus` and `replayed`; a batch that
+deletes noted nodes adds `deletedNoteIds`.
 `import_asset` adds `asset` (the stored metadata) and still repeats the commit
 fields under `result`, the earlier nested shape, so existing clients keep working.
 Read `committedRevision` at the top level for the next `expectedRevision`

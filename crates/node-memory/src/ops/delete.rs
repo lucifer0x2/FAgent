@@ -36,6 +36,7 @@ impl Txn<'_> {
         for note in notes {
             self.store.put_note(&note, None);
             self.touch_note(&note, true);
+            self.cascaded.insert(note);
         }
         let parent = self.store.slot(root).parent;
         self.store.unlink(parent, root);
