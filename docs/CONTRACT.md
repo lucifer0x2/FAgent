@@ -171,8 +171,10 @@ representation schema 1.
 
 Components are authored `frame` nodes with `props.component:{name}`. An authored
 `instance` is a leaf with `componentId`, optional sizing/position/name/visibility,
-and flat descendant-ID `overrides` (`text`, `fill`, `visible`, `styleId`, `assetId`,
-`name` only). Storage expands these references before resolution/layout; the engine
+root paint keys (`INSTANCE_KEYS`, including `states` and `clip`) and flat
+descendant-ID `overrides` limited to `OVERRIDE_KEYS` (paint, text, visibility,
+`states`, `clip` and text paint keys; no layout, sizing or font keys). The lists are
+in [Components and instances](COMPONENTS.md). Storage expands these references before resolution/layout; the engine
 and renderer receive ordinary frames and stable virtual children
 `<instanceId>/<masterChildId>`. Virtual children are read-only. Snapshot and bundle
 data always retain authored references, never the expanded tree.
@@ -193,8 +195,8 @@ Cycles, nesting beyond 8 levels and an expanded project above 200,000 nodes fail
 before commit. `COMPONENT_IN_USE` returns `count` and at most 20 `instanceIds`;
 virtual mutations return `INSTANCE_CHILD_READONLY`. Component subtrees cannot use
 links, flow starts or animations. Master updates invalidate scenes at the new revision.
-Expansion retains master-root and descendant interaction states. The instance
-override whitelist does not include states; opt-in `resolvedStates` also applies
+Expansion retains master-root and descendant interaction states; an instance and its
+overrides merge `states` per state. Opt-in `resolvedStates` also applies
 to reference component definitions. See [Components and instances](COMPONENTS.md).
 
 ### Hover animation sources

@@ -96,7 +96,7 @@ fn build() -> Vec<Tool> {
         ),
     );
     let tree = json!({"projectId":id(),"nodeId":node_id(),"frameId":id(),"depth":{"type":"integer","minimum":0,"maximum":8},"limit":count(200),"budget":{"type":"integer","minimum":1024,"maximum":65536},"properties":{"type":"array","maxItems":50,"items":text(64)},"viewport":viewport(),"theme":text(64),"cursor":text(1024),"revision":{"type":"integer","minimum":0}});
-    const TEXT_ESCAPED: &str = "Icon/private-use text adds textEscaped.";
+    const TEXT_ESCAPED: &str = "Icon glyphs add textEscaped.";
     // Each read says what it is for, so a caller can tell the three scopes apart without trying them.
     const CAPS: &str = " depth (0–8) keeps nodes at most that many levels below the scope root, which is level 0 (project scope: pages are 0, their root frames 1); a node whose children were cut carries omittedChildren. Omitted depth reads the whole scope. One consistent revision, at most 200 nodes and 64 KiB per page; truncation is explicit.";
     for (name, required, purpose) in [
@@ -169,7 +169,7 @@ fn build() -> Vec<Tool> {
     );
     add(
         "get_edit_context",
-        "Read a page edit guard and transitive dependency keys at one authoritative revision. Read authored data at this same revision, or use the revision of an existing authored read directly with pageIds in apply_batch/apply_batch_file. Never replace a stale design read's revision with a newer guard. Storage derives dependencies; conflicts require rereading and rebasing with a new key. Also returns noteCount and noteLimit (the project's notes and the server's cap).".into(),
+        "Read a page edit guard and transitive dependency keys at one authoritative revision. Read authored data at this same revision, or use the revision of an existing authored read directly with pageIds in apply_batch/apply_batch_file. Never replace a stale design read's revision with a newer guard. Storage derives dependencies; conflicts require rereading and rebasing with a new key. Returns noteCount/noteLimit.".into(),
         object(json!({"projectId":id(),"pageIds":{"type":"array","minItems":1,"maxItems":100,"uniqueItems":true,"items":id()}}), &["projectId","pageIds"]),
     );
     add(

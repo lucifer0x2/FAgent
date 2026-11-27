@@ -64,7 +64,7 @@ pub fn schema() -> Value {
         .iter_mut()
         .find(|v| v["properties"]["op"]["const"] == "delete_subtree")
     {
-        delete["description"] = json!("Deletes the node, its descendants and the notes anchored to them; the result lists those notes in deletedNoteIds.");
+        delete["description"] = json!("Also deletes notes on these nodes (deletedNoteIds).");
     }
     json!({"oneOf":variants})
 }
