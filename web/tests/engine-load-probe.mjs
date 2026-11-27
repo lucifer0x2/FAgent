@@ -1,11 +1,18 @@
 // Probes and statistics for engine-load.mjs. LOAD_PROBE runs in the page before any app
 // code (init script): it wraps Worker to timestamp the engine protocol on the page clock.
-// ENGINE_TIMES is appended to the engine's wasm-bindgen glue in the worker and totals the
-// time of every Engine method.
+// ENGINE_TIMES is appended to the engine's wasm-bindgen glue in the worker: it totals the
+// time of every Engine method and logs the calls that order a load (frame computations,
+// commits, draws, cameras), which the runner moves onto the page clock.
 
 /** Page init script: records engine messages as [type, ms, ...] in `window.__load.events`. */
 export const LOAD_PROBE = () => {
   const events = [];
+  // Start of the first `/snapshot` request (Resource Timing, page clock).
+  new PerformanceObserver((list) => {
+    for (const entry of list.getEntries())
+      if (!events.some((e) => e[0] === "snapshot") && new URL(entry.name).pathname.endsWith("/snapshot"))
+        events.push(["snapshot", entry.startTime]);
+  }).observe({ type: "resource", buffered: true });
   const load = {
     events,
     /** The latest sync (of `expected` frames when given) is synced and drawn after. */
@@ -44,10 +51,24 @@ export const LOAD_PROBE = () => {
   };
 };
 
-/** Appended to the glue module: wraps each Engine method with a timer (worker global). */
+/**
+ * Appended to the glue module: wraps each Engine method with a timer (worker globals).
+ * `__engineLog` holds [name, start, end, detail] (worker clock) for `compute` (frame id),
+ * `commit` (frame id when committed, else null), `render` (whether it returned),
+ * `set_camera`, `load_font` and `add_image` (resource id).
+ */
 export const ENGINE_TIMES = `
 ;{
   const times = (globalThis.__engineTimes = {});
+  const log = (globalThis.__engineLog = []);
+  const detail = {
+    compute: (args) => args[1],
+    commit: (args, result, ok) => (ok && result ? args[0] : null),
+    render: (args, result, ok) => ok,
+    set_camera: () => null,
+    load_font: (args) => args[0],
+    add_image: (args) => args[0],
+  };
   const proto = Engine.prototype;
   for (const name of Object.getOwnPropertyNames(proto)) {
     const d = Object.getOwnPropertyDescriptor(proto, name);
@@ -55,14 +76,20 @@ export const ENGINE_TIMES = `
     const original = d.value;
     proto[name] = function (...args) {
       const start = performance.now();
+      let result;
+      let ok = false;
       try {
-        return original.apply(this, args);
+        result = original.apply(this, args);
+        ok = true;
+        return result;
       } finally {
-        const ms = performance.now() - start;
+        const end = performance.now();
+        const ms = end - start;
         const t = (times[name] ??= { n: 0, ms: 0, max: 0 });
         t.n++;
         t.ms += ms;
         if (ms > t.max) t.max = ms;
+        if (detail[name]) log.push([name, start, end, detail[name](args, result, ok)]);
       }
     };
   }
@@ -76,8 +103,75 @@ export const pct = (values, p) => {
   return sorted[Math.min(sorted.length - 1, Math.floor(p * sorted.length))];
 };
 
-/** One run's marks (page clock, ms from navigation) and counts. */
-export function summarize(events, longTasks, engine) {
+/**
+ * Latency from each frame committed in the worker during the last sync to the delivered
+ * `drawn` of the first draw that started after it. Each successful `render` posts one
+ * `drawn`, so draws and page `drawn` events pair in order; if their counts differ (an image
+ * lost after its render), each draw pairs with the first `drawn` received after it ended.
+ */
+function commitLatencies(events, log, syncAt) {
+  const renders = log.filter((c) => c[0] === "render" && c[3]);
+  const drawn = events.filter((e) => e[0] === "drawn").map((e) => e[1]);
+  const delivered = (i) =>
+    renders.length === drawn.length ? drawn[i] : drawn.find((at) => at >= renders[i][2]);
+  return log
+    .filter((c) => c[0] === "commit" && c[3] != null && c[1] >= syncAt)
+    .map((commit) => {
+      const draw = renders.findIndex((r) => r[1] >= commit[2]);
+      const at = draw >= 0 ? delivered(draw) : undefined;
+      return at == null ? Infinity : at - commit[2];
+    });
+}
+
+/**
+ * Cameras sent while frames load. Each is applied by the first worker `set_camera` after it
+ * was sent; it must be drawn before another frame computation starts. A violation lists the
+ * engine calls between the camera and its draw (`late`). The camera → `drawn` latency counts
+ * only cameras drawn in order; one never drawn counts as Infinity.
+ */
+function cameraChecks(events, log, firstFrame, syncedIndex) {
+  const applied = log.filter((c) => c[0] === "set_camera");
+  const renders = log.filter((c) => c[0] === "render" && c[3]);
+  const computes = log.filter((c) => c[0] === "compute").map((c) => c[1]);
+  const latencies = [];
+  let checked = 0;
+  const late = [];
+  events.forEach((e, i) => {
+    if (e[0] !== "camera" || i <= firstFrame || i >= syncedIndex) return;
+    const set = applied.find((c) => c[1] >= e[1]);
+    if (set) {
+      checked++;
+      const next = renders.find((r) => r[1] >= set[2]);
+      const between = (start) => start >= set[2] && (!next || start < next[1]);
+      if (computes.some(between)) {
+        late.push(
+          log
+            .filter((c) => c[0] !== "render" && c[0] !== "set_camera" && between(c[1]))
+            .map((c) => (c[3] == null ? c[0] : `${c[0]}:${c[3]}`))
+            .join(" "),
+        );
+        return;
+      }
+    }
+    const drawn = events.find((d, j) => j > i && d[0] === "drawn" && d[2] === e[2]);
+    const later = events.slice(i + 1).some((d) => d[0] === "camera");
+    if (drawn) latencies.push(drawn[1] - e[1]);
+    else if (!later) latencies.push(Infinity);
+  });
+  return { latencies, checked, late };
+}
+
+const spread = (values) => ({
+  p50: round(pct(values, 0.5)),
+  p95: round(pct(values, 0.95)),
+  max: round(values.length ? Math.max(...values) : null),
+});
+
+/**
+ * One run's marks (page clock, ms from navigation) and counts. `log` is the worker's
+ * `__engineLog` already on the page clock.
+ */
+export function summarize(events, longTasks, engine, log = []) {
   const first = (type, from = 0) => events.find((e, i) => i >= from && e[0] === type);
   const at = (type, from) => round(first(type, from)?.[1]);
   const syncs = events.filter((e) => e[0] === "sync");
@@ -86,23 +180,18 @@ export function summarize(events, longTasks, engine) {
   const syncedIndex = events.findIndex((e) => e[0] === "synced" && e[2] === last?.[3]);
   const frames = events.filter((e, i) => e[0] === "frame" && i > lastIndex && i < syncedIndex);
   const firstFrame = events.findIndex((e, i) => e[0] === "frame" && i > lastIndex);
-  // Latency from each committed (not reused, not failed) frame to the next drawn image.
-  const latencies = [];
+  // Page side: a committed frame's message to the next drawn image. The worker posts that
+  // message just before the image showing the frame, so this is ~0 by design; the commit
+  // in the worker is what `commitToDrawn` measures from.
+  const notified = [];
   events.forEach((e, i) => {
     if (e[0] !== "frame" || e[3] || e[4] || i <= lastIndex) return;
     const drawn = first("drawn", i);
-    if (drawn) latencies.push(drawn[1] - e[1]);
+    if (drawn) notified.push(drawn[1] - e[1]);
   });
+  const committed = commitLatencies(events, log, last?.[1] ?? 0);
   const draws = events.filter((e, i) => e[0] === "drawn" && i > lastIndex && i <= syncedIndex);
-  // A camera sent while frames load must be drawn before the next frame, not after the load.
-  const cameraLatencies = [];
-  events.forEach((e, i) => {
-    if (e[0] !== "camera" || i <= firstFrame || i >= syncedIndex) return;
-    const drawn = events.find((d, j) => j > i && d[0] === "drawn" && d[2] === e[2]);
-    const later = events.slice(i + 1).some((d) => d[0] === "camera");
-    if (drawn) cameraLatencies.push(drawn[1] - e[1]);
-    else if (!later) cameraLatencies.push(Infinity);
-  });
+  const cameras = cameraChecks(events, log, firstFrame, syncedIndex);
   const syncAt = first("sync")?.[1] ?? 0;
   const tasks = longTasks.filter((t) => t.start >= 0);
   const engineMs = Object.fromEntries(
@@ -113,6 +202,7 @@ export function summarize(events, longTasks, engine) {
   return {
     marks: {
       worker: at("worker"),
+      snapshotRequest: at("snapshot"),
       ready: at("ready"),
       backend: at("backend"),
       sync: round(syncAt),
@@ -126,16 +216,15 @@ export function summarize(events, longTasks, engine) {
     failed: frames.filter((e) => e[3]).length,
     reused: frames.filter((e) => e[4]).length,
     drawsWhileLoading: draws.length,
-    commitToDrawn: {
-      p50: round(pct(latencies, 0.5)),
-      p95: round(pct(latencies, 0.95)),
-      max: round(latencies.length ? Math.max(...latencies) : null),
-    },
+    commitToDrawn: { count: committed.length, ...spread(committed) },
+    frameToDrawn: spread(notified),
     cameraToDrawn: {
-      count: cameraLatencies.length,
-      p50: round(pct(cameraLatencies, 0.5)),
-      max: round(cameraLatencies.length ? Math.max(...cameraLatencies) : null),
+      count: cameras.latencies.length,
+      p50: round(pct(cameras.latencies, 0.5)),
+      max: round(cameras.latencies.length ? Math.max(...cameras.latencies) : null),
     },
+    /** Cameras applied while loading, and those after which a frame computed before a draw. */
+    cameraOrder: { checked: cameras.checked, violations: cameras.late.length, late: cameras.late },
     longTasks: {
       count: tasks.length,
       totalMs: tasks.reduce((s, t) => s + t.duration, 0),
@@ -162,7 +251,10 @@ export function aggregate(runs) {
     marks,
     drawsWhileLoading: stat(runs.map((r) => r.drawsWhileLoading)),
     commitToDrawnP95: stat(runs.map((r) => r.commitToDrawn.p95)),
+    commitToDrawnMax: stat(runs.map((r) => r.commitToDrawn.max)),
+    frameToDrawnP95: stat(runs.map((r) => r.frameToDrawn.p95)),
     cameraToDrawnMax: stat(runs.map((r) => r.cameraToDrawn.max)),
+    cameraOrderViolations: runs.reduce((s, r) => s + r.cameraOrder.violations, 0),
     longTasksTotal: stat(runs.map((r) => r.longTasks.totalMs)),
     engineMsP50: engine,
   };

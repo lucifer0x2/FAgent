@@ -2,13 +2,15 @@
 // native backend (SQLite in a temp dir, loopback port) seeded through MCP with
 // engine-load-fixture.mjs, a production build of this checkout, Chromium with a real GPU,
 // 1440×900 at DPR 2, Layers closed. Each run is a new browser context (cold page, warm HTTP
-// cache off). Marks come from the page clock (navigation = 0): Worker created, `sync` sent,
-// first frame committed, first `drawn` after it, `synced`, first `drawn` after `synced`.
-// Worker-side engine method times come from wrapping the wasm-bindgen glue's
-// `Engine.prototype` through a route, so the product carries no probe.
+// cache off). Marks come from the page clock (navigation = 0): Worker created, `/snapshot`
+// request started, `sync` sent, first frame message, first `drawn` after it, `synced`, first
+// `drawn` after `synced`. Worker-side engine method times and the times of `compute`,
+// `commit`, `render` and `set_camera` come from wrapping the wasm-bindgen glue's
+// `Engine.prototype` through a route, so the product carries no probe; they are moved onto
+// the page clock through both `performance.timeOrigin`s.
 // Usage: node web/tests/engine-load.mjs [--frames 225] [--pages 10] [--runs 3]
 //   [--scopes all,pg-0] [--latency <ms>] [--channel chromium|chrome] [--dist <dir>] [--label <name>]
-//   [--interact]   (zoom while loading; reports camera → drawn latency)
+//   [--interact]   (zoom while loading; reports camera order and camera → drawn latency)
 // Writes artifacts/engine-load/summary.json (ignored); everything temporary is removed.
 import { mkdir, rm, writeFile } from "node:fs/promises";
 import { createRequire } from "node:module";
@@ -39,6 +41,21 @@ const { values: args } = parseArgs({
     interact: { type: "boolean", default: false },
   },
 });
+/** `--name` as an integer of at least `min`; anything else stops before seeding. */
+function integer(name, min) {
+  const value = Number(args[name]);
+  if (!Number.isInteger(value) || value < min)
+    throw new Error(`--${name} must be an integer ≥ ${min}, got ${JSON.stringify(args[name])}`);
+  return value;
+}
+const counts = {
+  frames: integer("frames", 1),
+  pages: integer("pages", 1),
+  runs: integer("runs", 1),
+  latency: integer("latency", 0),
+};
+if (counts.pages > counts.frames)
+  throw new Error(`--pages ${counts.pages} needs at least as many --frames (every page gets one)`);
 
 async function buildDist() {
   const require = createRequire(join(REPO, "web/package.json"));
@@ -63,7 +80,7 @@ async function run(browser, base, project, scope) {
     const response = await route.fetch();
     route.fulfill({ response, body: (await response.text()) + ENGINE_TIMES });
   });
-  const latency = Number(args.latency);
+  const latency = counts.latency;
   if (latency > 0)
     await context.route(/\/api\/v1\/(fonts|projects\/[^/]+\/(fonts|assets))\//, async (route) => {
       await new Promise((resolve) => setTimeout(resolve, latency));
@@ -83,7 +100,7 @@ async function run(browser, base, project, scope) {
   await page.goto(`${base}/?${query}`);
   if (args.interact) {
     // Zoom while frames compute: each camera must be drawn before the next frame starts,
-    // not after the load (worker message order; see cameraToDrawn).
+    // not after the load (worker call order; see cameraOrder and cameraToDrawn).
     await page.waitForFunction(() => window.__load.events.some((e) => e[0] === "frame"));
     const box = await page.locator(".canvas-host").boundingBox();
     await page.mouse.move(box.x + box.width / 2, box.y + box.height / 2);
@@ -106,13 +123,25 @@ async function run(browser, base, project, scope) {
   }
   // Let the final draw land and the main thread settle.
   await page.waitForTimeout(400);
-  const events = await page.evaluate(() => window.__load.events);
+  const { events, origin } = await page.evaluate(() => ({
+    events: window.__load.events,
+    origin: performance.timeOrigin,
+  }));
   const longTasks = (await page.evaluate(() => window.__longTasks)) ?? [];
   const worker = page.workers().find((w) => w.url().includes("engine"));
-  const engine = worker ? await worker.evaluate(() => globalThis.__engineTimes ?? null) : null;
+  const engine = worker
+    ? await worker.evaluate(() => ({
+        times: globalThis.__engineTimes ?? null,
+        log: globalThis.__engineLog ?? [],
+        origin: performance.timeOrigin,
+      }))
+    : null;
   const status = await page.evaluate(() => window.fagentEngine?.status());
   await context.close();
-  return { ...summarize(events, longTasks, engine), backend: status?.backend, errors };
+  // Worker clock → page clock: both count from their own time origin.
+  const shift = engine ? engine.origin - origin : 0;
+  const log = (engine?.log ?? []).map(([name, start, end, arg]) => [name, start + shift, end + shift, arg]);
+  return { ...summarize(events, longTasks, engine?.times, log), backend: status?.backend, errors };
 }
 
 await mkdir(OUT, { recursive: true });
@@ -121,8 +150,8 @@ let viewer, browser;
 try {
   const started = Date.now();
   const project = await seedLargeProject(backend.base, new URL("../../", import.meta.url), {
-    frames: Number(args.frames),
-    pages: Number(args.pages),
+    frames: counts.frames,
+    pages: counts.pages,
   });
   console.error(`seeded ${project.nodes} nodes in ${Date.now() - started} ms`);
   const dist = args.dist ?? (await buildDist());
@@ -133,7 +162,7 @@ try {
   const results = {};
   for (const scope of scopes) {
     const runs = [];
-    for (let i = 0; i < Number(args.runs); i++) {
+    for (let i = 0; i < counts.runs; i++) {
       const result = await run(browser, viewer.url, project, scope);
       console.error(`${scope} run ${i + 1}: synced ${result.marks.synced} ms, drawn ${result.marks.lastDrawn} ms`);
       runs.push(result);
@@ -145,7 +174,7 @@ try {
     browser: `${args.channel} ${browser.version()}`,
     dpr: 2,
     viewport: "1440x900",
-    latencyMs: Number(args.latency),
+    latencyMs: counts.latency,
     results,
   };
   const file = args.label ? `summary-${args.label}.json` : "summary.json";
@@ -158,7 +187,9 @@ try {
         p50: Object.fromEntries(Object.entries(r.marks).map(([k, v]) => [k, v?.p50 ?? null])),
         draws: r.drawsWhileLoading?.p50,
         commitToDrawnP95: r.commitToDrawnP95?.p50,
+        commitToDrawnMax: r.commitToDrawnMax?.max,
         cameraToDrawnMax: r.cameraToDrawnMax?.max,
+        cameraOrderViolations: r.cameraOrderViolations,
         longTasksMs: r.longTasksTotal?.p50,
         engineMs: r.engineMsP50,
       }),

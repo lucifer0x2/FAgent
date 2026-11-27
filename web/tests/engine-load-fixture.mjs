@@ -119,17 +119,28 @@ function screen(page, index, rows) {
   return ops;
 }
 
-/** Frame counts per page summing to `frames`, uneven like a real project. */
+/**
+ * Frame counts per page summing to `frames`, uneven like a real project; every page has at
+ * least one frame, so `pages` must not exceed `frames` (both positive integers).
+ */
 export function pageSizes(frames, pages) {
+  for (const [name, value] of Object.entries({ frames, pages }))
+    if (!Number.isInteger(value) || value < 1)
+      throw new Error(`${name} must be a positive integer, got ${value}`);
+  if (pages > frames) throw new Error(`${pages} pages need at least ${pages} frames, got ${frames}`);
   const weights = Array.from({ length: pages }, (_, i) => 1 + ((i * 7) % 5));
   const total = weights.reduce((a, b) => a + b, 0);
   const sizes = weights.map((w) => Math.max(1, Math.floor((w / total) * frames)));
-  for (let i = 0; sizes.reduce((a, b) => a + b, 0) < frames; i++) sizes[i % pages]++;
+  const sum = () => sizes.reduce((a, b) => a + b, 0);
+  for (let i = 0; sum() < frames; i++) sizes[i % pages]++;
+  // Raising empty pages to one frame can overshoot: take the excess from the largest pages.
+  while (sum() > frames) sizes[sizes.indexOf(Math.max(...sizes))]--;
   return sizes;
 }
 
-/** Creates the project through MCP; resolves with its id, revision and counts. */
+/** Creates the project through MCP; resolves with its id, revision and the generated counts. */
 export async function seedLargeProject(base, root, { frames = 225, pages = 10 } = {}) {
+  const sizes = pageSizes(frames, pages);
   const mcp = await connectMcp(base);
   try {
     const { projectId } = await mcp.call("create_project", { slug: "engine-load", name: "Engine load fixture" });
@@ -149,7 +160,6 @@ export async function seedLargeProject(base, root, { frames = 225, pages = 10 } 
     revision = image.committedRevision;
     const ops = components(image.asset.id);
     let instances = ops.filter((op) => op.kind === "instance").length;
-    const sizes = pageSizes(frames, pages);
     sizes.forEach((count, p) => {
       const page = `pg-${p}`;
       ops.push(node(page, "page", null, { name: `Page ${p + 1}` }));
@@ -166,10 +176,12 @@ export async function seedLargeProject(base, root, { frames = 225, pages = 10 } 
       });
       revision = result.committedRevision;
     }
+    // Counted from the generated operations, so the benchmark waits for what exists.
+    const screens = ops.filter((op) => op.kind === "frame" && /^pg-\d+$/.test(op.parentId)).length;
     return {
-      projectId, revision, nodes: ops.length, instances, frames, pages: sizes.length + 1,
+      projectId, revision, nodes: ops.length, instances, frames: screens, pages: sizes.length + 1,
       // Every root frame, the component masters included (the All pages board shows them).
-      rootFrames: frames + ops.filter((op) => op.parentId === "components").length,
+      rootFrames: screens + ops.filter((op) => op.parentId === "components").length,
       pageIds: sizes.map((_, p) => `pg-${p}`), fonts: FONTS.length + 1,
     };
   } finally {
