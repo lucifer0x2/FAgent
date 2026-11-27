@@ -10,7 +10,7 @@ use sha2::{Digest, Sha256};
 /// entry list the offset indexes. `revision` is bound through the snapshot revision instead.
 const UNBOUND: [&str; 5] = ["cursor", "properties", "budget", "limit", "revision"];
 
-/// The cursor scope of a snapshot read: a hash of everything bound, followed by the revision
+/// The cursor scope of a snapshot read: a 16-hex-digit hash of everything bound, followed by the revision
 /// and a short digest per bound field (`<hash>.<revision>.<field>:<digest>,…`), so a mismatch
 /// can name the changed parameter instead of a generic `INVALID_CURSOR`.
 pub fn scope(s: &Snapshot, tool: &str, req: &ReadRequest) -> Result<(String, usize)> {
@@ -30,7 +30,8 @@ pub fn scope(s: &Snapshot, tool: &str, req: &ReadRequest) -> Result<(String, usi
         tool,
         query
     ]))?);
-    let scope = format!("{hash:x}.{}.{}", s.revision, digests.join(","));
+    let hash = format!("{hash:x}");
+    let scope = format!("{}.{}.{}", &hash[..16], s.revision, digests.join(","));
     let offset = offset(&scope, req.cursor.as_deref())?;
     Ok((scope, offset))
 }
