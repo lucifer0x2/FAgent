@@ -26,6 +26,9 @@ pub struct Delta {
     /// Node and note ids created and deleted within the batch: no row changes, but
     /// they count as changed ids. Sorted.
     pub transient: Vec<String>,
+    /// Notes removed with their anchor node by `delete_subtree` and absent after the
+    /// batch (`BatchResult::deleted_note_ids`); also listed in `changed_ids`. Sorted.
+    pub deleted_with_nodes: Vec<String>,
 }
 
 impl Delta {
@@ -69,7 +72,12 @@ pub(super) fn build(
     notes: HashMap<String, bool>,
     tokens: BTreeSet<String>,
     styles: BTreeSet<String>,
+    cascaded: BTreeSet<String>,
 ) -> Delta {
+    let deleted_with_nodes = cascaded
+        .into_iter()
+        .filter(|id| !store.res.notes.contains_key(id))
+        .collect();
     let mut transient = Vec::new();
     let nodes = rows(nodes, |id| store.contains(id), &mut transient);
     let notes = rows(notes, |id| store.res.notes.contains_key(id), &mut transient);
@@ -81,5 +89,6 @@ pub(super) fn build(
         tokens: tokens.into_iter().collect(),
         styles: styles.into_iter().collect(),
         transient,
+        deleted_with_nodes,
     }
 }

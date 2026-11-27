@@ -49,7 +49,7 @@ Note limits can be raised, never lowered, through the environment; an empty vari
 | `FAGENT_MAX_NOTE_REPLIES` | Replies per note | 100 | 1000 |
 | `FAGENT_MAX_NOTE_AUTHOR` | Characters of one author | 64 | 256 |
 
-The `apply_batch` schema publishes the text and author limits in use, and project bundles are checked against the same note count. A server with lower limits (the variables removed again, or a rollback to an older release) still admits and serves a stored project over them, as node memory does for any invalid stored data; it judges a batch that writes such a note, or raises the note count, by its own limits and rejects bundles over them.
+The `apply_batch` schema publishes the text and author limits in use, `get_edit_context` returns the project's `noteCount` and the `noteLimit` in use, and project bundles are checked against the same note count. A server with lower limits (the variables removed again, or a rollback to an older release) still admits and serves a stored project over them, as node memory does for any invalid stored data; it judges a batch that writes such a note, or raises the note count, by its own limits and rejects bundles over them.
 
 `--host` takes `127.0.0.1` (default) or `0.0.0.0`, which listens on every interface for a container whose port is published on host loopback only; Host/Origin checks are unchanged, and worker callbacks and `imageUrl` still use `http://127.0.0.1:<port>`, so no other address is accepted. See "Docker" in `README.md`.
 
@@ -360,7 +360,17 @@ the file, then call again without `dryRun`. Storage-level `read_batch_file_opera
 JSON-only. Both engines read the same inbox: SQLite under its data root, PostgreSQL under
 `--data-root` / `FAGENT_DATA_ROOT` (`Storage::with_inbox_root`), with identical request
 checks, containment, cap and parsing; only a `Storage` built without an inbox root returns
-`STAGING_UNSUPPORTED`.
+`STAGING_UNSUPPORTED`. The server binary always has one: PostgreSQL, like SQLite, refuses to
+start without a data root and prints the inbox location at startup. Each `STAGING_UNSUPPORTED`
+message names `--data-root` / `FAGENT_DATA_ROOT`, and each `PATH_REJECTED` inbox message says
+to copy the file into `inboxDir` from `list_projects`.
+
+Image assets record their natural `width` and `height` (PNG, JPEG and WebP `VP8`, `VP8L` and
+`VP8X` headers, parsed by `fagent_storage::image_size`); an import over 40 million pixels fails
+at `bytes`. A JPEG or WebP whose header gives no size is still accepted, without one. Assets
+imported before JPEG and WebP sizes were recorded keep `null` in storage and read with the size
+from their binary in `list_assets`, snapshots and asset reads (no migration); old bundles with
+those `null` sizes still import.
 
 `import_assets {projectId, expectedRevision, idempotencyKey, items:[…]}` imports 1–50 assets
 (10 MiB each, 64 MiB in total) in one call and commits them atomically as **one** revision.

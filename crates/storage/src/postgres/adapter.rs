@@ -220,7 +220,10 @@ impl StorageBackend for PostgresBackend {
         self.project_meta(project)?;
         Err(StorageError::new(
             "STAGING_UNSUPPORTED",
-            "This storage backend does not provide a staged operations inbox",
+            &format!(
+                "This storage backend does not provide a staged operations inbox; {}",
+                crate::inbox::NEEDS_DATA_ROOT
+            ),
         ))
     }
 }

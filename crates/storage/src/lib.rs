@@ -20,6 +20,8 @@ mod bundle_import;
 mod bundle_validation;
 mod db;
 mod fonts;
+mod image_size;
+pub use image_size::image_size;
 mod inbox;
 mod memory;
 mod revision_indexes;

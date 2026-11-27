@@ -27,6 +27,8 @@ pub(crate) struct Txn<'a> {
     notes: HashMap<String, bool>,
     tokens: BTreeSet<String>,
     styles: BTreeSet<String>,
+    /// Notes removed with their anchor node by `delete_subtree`.
+    cascaded: BTreeSet<String>,
     /// Siblings renumbered by placements; touched (as existing) when the batch ends.
     renumbered: Vec<Key>,
     max_nodes: usize,
@@ -42,6 +44,7 @@ impl<'a> Txn<'a> {
             notes: HashMap::new(),
             tokens: BTreeSet::new(),
             styles: BTreeSet::new(),
+            cascaded: BTreeSet::new(),
             renumbered: Vec::new(),
             max_nodes,
             rev,
@@ -118,6 +121,7 @@ impl<'a> Txn<'a> {
             std::mem::take(&mut self.notes),
             std::mem::take(&mut self.tokens),
             std::mem::take(&mut self.styles),
+            std::mem::take(&mut self.cascaded),
         )
     }
 }

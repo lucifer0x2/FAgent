@@ -170,6 +170,7 @@ fn preview_once(
         dry_run: true,
         base_revision: revision,
         changed_ids: prepared.changed_ids().to_vec(),
+        deleted_note_ids: prepared.deleted_note_ids().to_vec(),
         diagnostics: vec![],
     }))
 }

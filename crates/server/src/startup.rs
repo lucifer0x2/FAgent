@@ -2,13 +2,15 @@ mod artifacts;
 mod note_limits;
 mod options;
 mod postgres_env;
+mod storage;
 
 use fagent_server::{PublicViewer, RenderBackend};
-use fagent_storage::{NoteLimits, PostgresBackend, PostgresConfig, Storage, Store};
+use fagent_storage::NoteLimits;
 use options::{
     bind_host, env_port, live_updates, render_backend, switch, trusted_proxy, viewer_overscan,
 };
 use std::{env, error::Error, net::Ipv4Addr, path::PathBuf};
+pub use storage::StorageOptions;
 
 pub const HELP: &str =
     "fagent-server [--data-root DIR] [--port NUMBER] [--workspace DIR] [--host 127.0.0.1|0.0.0.0]
@@ -20,8 +22,8 @@ unless the binary was built with vello). --render-backend overrides RENDER_BACKE
 needs the Node worker runtime (worker/, renderer/dist, layout-step) in the workspace; a build
 made with FAGENT_RENDER_BACKEND=vello does not package it, and starting it with chromium fails.
 DATABASE_PROVIDER defaults to sqlite. Use postgresql with DATABASE_URL to enable PostgreSQL.
-PostgreSQL uses the data root only to read import_asset files from <data-root>/<slug>/inbox;
-it creates nothing there.
+PostgreSQL needs a data root too (--data-root, FAGENT_DATA_ROOT or ~/.fagent): it reads
+import_asset and apply_batch_file inputs from <data-root>/<slug>/inbox and creates nothing there.
 Optional PostgreSQL limits: DATABASE_POOL_SIZE (1-32, default 4) and, in milliseconds,
 DATABASE_CONNECT_TIMEOUT_MS (3000), DATABASE_STATEMENT_TIMEOUT_MS (15000),
 DATABASE_LOCK_TIMEOUT_MS (3000), DATABASE_OPERATION_TIMEOUT_MS (30000).
@@ -181,49 +183,5 @@ impl Startup {
             viewer_overscan,
             note_limits,
         }))
-    }
-}
-
-pub enum StorageOptions {
-    Sqlite(PathBuf),
-    /// The optional root holds only filesystem inboxes for asset paths and batch files.
-    Postgres(PostgresConfig, Option<PathBuf>),
-}
-
-impl StorageOptions {
-    fn from_env(data_root: Option<PathBuf>) -> Result<Self, Box<dyn Error>> {
-        let data_root = data_root
-            .or_else(|| env::var_os("HOME").map(|home| PathBuf::from(home).join(".fagent")));
-        let provider = env::var_os("DATABASE_PROVIDER");
-        match provider.as_deref() {
-            Some(value) if value == "postgresql" => {
-                let url = env::var("DATABASE_URL")
-                    .ok()
-                    .filter(|url| !url.trim().is_empty())
-                    .ok_or("DATABASE_URL must be set to a nonempty value for PostgreSQL")?;
-                let config = postgres_env::config(url, |name| env::var_os(name))?;
-                Ok(Self::Postgres(config, data_root))
-            }
-            Some(value) if value != "sqlite" => {
-                Err("DATABASE_PROVIDER must be sqlite or postgresql".into())
-            }
-            _ => Ok(data_root.map(Self::Sqlite).ok_or("Data root is required")?),
-        }
-    }
-
-    pub fn open(self) -> Result<Storage, Box<dyn Error>> {
-        match self {
-            Self::Sqlite(root) => Ok(Store::open(root)?.into()),
-            Self::Postgres(config, inbox_root) => {
-                let backend = PostgresBackend::with_config(config).map_err(|_| {
-                    "PostgreSQL startup failed. Check DATABASE_URL and database access"
-                })?;
-                let storage = Storage::new(backend);
-                Ok(match inbox_root {
-                    Some(root) => storage.with_inbox_root(root),
-                    None => storage,
-                })
-            }
-        }
     }
 }

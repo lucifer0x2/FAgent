@@ -138,7 +138,8 @@ const LIMITS: [&str; 5] = [
     "DATABASE_OPERATION_TIMEOUT_MS",
 ];
 
-/// A PostgreSQL URL whose port was just released, so connecting is refused at once.
+/// A PostgreSQL URL whose port was just released, so connecting is refused at once. The data
+/// root only names the inbox location; PostgreSQL creates nothing there.
 fn refused_postgres() -> Command {
     let port = std::net::TcpListener::bind("127.0.0.1:0")
         .unwrap()
@@ -152,8 +153,26 @@ fn refused_postgres() -> Command {
             "DATABASE_URL",
             format!("postgresql://user:{SECRET}@127.0.0.1:{port}/db?sslmode=disable"),
         )
+        .env(
+            "FAGENT_DATA_ROOT",
+            std::path::Path::new(env!("CARGO_TARGET_TMPDIR")).join("refused-postgres-inbox"),
+        )
         .env("PORT", "0");
     command
+}
+
+/// PostgreSQL reads batch and import files from `<data-root>/<slug>/inbox`, so it needs a
+/// data root exactly like SQLite, checked before any connection attempt.
+#[test]
+fn postgres_without_a_data_root_fails_like_sqlite() {
+    let mut command = refused_postgres();
+    command.env_remove("FAGENT_DATA_ROOT");
+    let output = command.output().unwrap();
+    assert!(!String::from_utf8_lossy(&output.stderr).contains("PostgreSQL startup failed"));
+    assert_failure(
+        output,
+        "Data root is required: pass --data-root DIR or set FAGENT_DATA_ROOT",
+    );
 }
 
 #[test]

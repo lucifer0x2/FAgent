@@ -44,6 +44,7 @@ impl<'a> FontReferences<'a> {
             assets: BTreeMap::new(),
             notes: BTreeMap::new(),
             deleted: BTreeSet::new(),
+            cascaded_notes: BTreeSet::new(),
         };
         let themes = candidate.validate_tokens()?;
         Ok(Self {

@@ -11,7 +11,7 @@ use super::{id, object, text};
 use fagent_storage::MAX_IMPORT_ITEMS;
 use serde_json::{json, Map, Value};
 
-pub const DESCRIPTION: &str = "Import one asset (max 10 MiB) from one source: path (a file in inboxDir; preferred, keeps bytes out of the conversation), base64, or sourceProjectId plus assetId or fontId to copy it (fontId keeps its registration; no mediaType). No URLs. Returns asset and commit fields like apply_batch.";
+pub const DESCRIPTION: &str = "Import one asset (max 10 MiB) from one source: path (a file in inboxDir; preferred, keeps bytes out of the conversation), base64, or sourceProjectId plus assetId or fontId to copy it (fontId keeps its registration; no mediaType). No URLs. PNG, JPEG and WebP record width and height (max 40 megapixels). Returns asset and commit fields like apply_batch.";
 pub const MANY_DESCRIPTION: &str = "Import 1–50 assets (64 MiB total) as one atomic commit and revision. Each item is one import_asset source (inboxDir path preferred) with mediaType/font. A bad item fails all, naming items[i]. Returns items [{asset,font?}] and commit fields.";
 const REQUIRED: [&str; 3] = ["projectId", "expectedRevision", "idempotencyKey"];
 

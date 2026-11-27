@@ -44,7 +44,8 @@ Numeric dimensions/positions <= 100,000 absolute; font size/line height 1–10,0
 text <=64 KiB. Text requires text/fontId/fontSize/lineHeight, authored or style.
 
 Caps: 500 ops and 2 MiB canonical JSON per batch, 20,000 nodes per project,
-128 ancestor depth, 10 MiB per asset, PNG pixel budget 40 million. These storage
+128 ancestor depth, 10 MiB per asset, image pixel budget 40 million (PNG, and JPEG/WebP
+whose header gives a size). These storage
 caps are distinct from the renderer's per-frame 2,048-node/16-million-pixel caps.
 IDs/idempotency keys are 1–128 ASCII letters/digits/underscore/hyphen.
 

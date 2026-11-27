@@ -36,7 +36,10 @@ impl ProjectHandle {
         let (root, project) = self.inbox(Purpose::Asset)?.ok_or_else(|| {
             StorageError::new(
                 "STAGING_UNSUPPORTED",
-                "This server has no filesystem inbox; send base64",
+                &format!(
+                    "This server has no filesystem inbox; send base64, or {}",
+                    inbox::NEEDS_DATA_ROOT
+                ),
             )
         })?;
         inbox::read(&root, &project, path, Purpose::Asset)

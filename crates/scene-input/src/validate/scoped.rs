@@ -34,6 +34,7 @@ impl ScopedResources {
             fonts: by_id(&snapshot.fonts, |f| &f.id),
             notes: BTreeMap::new(),
             deleted: Default::default(),
+            cascaded_notes: Default::default(),
         };
         let themes = candidate.validate_tokens()?;
         Ok(Self { candidate, themes })

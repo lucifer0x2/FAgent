@@ -89,6 +89,10 @@ pub struct BatchResult {
     pub project_id: String,
     pub committed_revision: u64,
     pub changed_ids: Vec<String>,
+    /// Notes removed because the batch deleted their anchor node (also in `changed_ids`),
+    /// sorted; omitted when none.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub deleted_note_ids: Vec<String>,
     pub render_status: String,
     pub replayed: bool,
     /// Writes of commits after `expectedRevision` that this batch overwrote (last

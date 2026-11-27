@@ -13,7 +13,7 @@ attr  := key=value   value: number | fill | hug | 50% | #hex | $token | a,b,c
                             | "json string" | {json} | [json]   (no spaces outside quotes)
 flag  := row | col | free | wrap | clip (clip=true)
 @token id value [type=] [name=] {theme=value}   @style id [name=] {attr}
-@set id {attr}   @del id   @move id parentId [index]   @order id index
+@set id {attr}   @del id (with its notes)   @move id parentId [index]   @order id index
 @note nodeId "text" [id=] [author=]   @reply noteId "text" [author=]   @resolve noteId
 @note-set noteId ["text"] [resolved=] [node=]   @note-del noteId
 @in parentId   (indented new nodes with #id under an existing node)
