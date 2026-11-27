@@ -125,3 +125,12 @@ Append-only. Rules for entries:
 - Pre-merge check: "PR scope" lines in tasks 36, 37 and 42 (one PR at the user's request, deferrals listed); the PR description must still name Tasks 36, 37 and 42 (no GitHub CLI on this machine).
 - Verified: web tests 161 + 71, typecheck, `test:engine-cache`, `test:engine`, `test:engine-board --strict` (installed Chrome, rebuilt engine module), `cargo test`/fmt/clippy for `fagent-engine-wasm` (wasm32 clippy: older warnings only), `engine-load.mjs` smoke runs (20 frames, two scopes: cold, `--warm --edit 1`, `--warm --edit-shared`). New tests fail on the previous code.
 - Committed in four pieces and pushed to PR #8 at the user's request. Open: the GitHub review threads are not answered; the PR description does not name Task 42 yet.
+
+### Agent feedback triage (Tasks 43–46) — 2026-11-27
+
+- User request: turn the maintainer's private agent-feedback log (52 items) into a fix plan, then into one task per phase for other sessions. Read-only trace against `main` at `7d71753`, whose server crates equal the deployed build.
+- Packaged [Task 43](../../tasks/43-feedback-phase1-small-fixes.md) (small fixes; four slices with disjoint files), [Task 44](../../tasks/44-feedback-phase2-instance-overrides.md) (deeper instance overrides, context size; after 43 slice B), [Task 45](../../tasks/45-feedback-phase3-semantic-changes.md) (behavior changes waiting for user decisions) and [Task 46](../../tasks/46-feedback-phase4-feature-backlog.md) (feature backlog index). Items are named `FB-n` after the log's numbering; examples are synthetic.
+- Already fixed on `main`: FB-3, FB-4, FB-6, FB-7, FB-9 (b, c), FB-11, FB-20, most of FB-8. Not reproduced from code: FB-1, FB-27 (Task 43 reproduces them first).
+- Supersedes the open layout and instance triage in "Agent feedback: known limitations — 2026-11-17" (its items are in Tasks 43–46).
+- Replaced a private task name in Task 39 with a generic description.
+- Open: nothing assigned; branch `fix/agent-feedback` holds the task files.

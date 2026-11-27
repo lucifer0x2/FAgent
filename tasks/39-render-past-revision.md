@@ -9,7 +9,7 @@
 
 `render_frame` accepts `revision`, but `jobs/input.rs::check_request` only accepts the snapshot's current revision; an older revision returns `REVISION_UNAVAILABLE`. Storage keeps only the current state (`nodes`, `tokens`, `styles`, `assets`, `fonts`) and a forward-only log `commits(ops_json, summary_json)`; there are no before-images or milestone snapshots. History can be truncated (reading missing history returns `RESET_REQUIRED`).
 
-Consequence for workers: to get a "before" image to compare with "after", every frame that will be edited must be rendered **before** the first write. On a U-forum-width-2 sized task, that takes the first ~8 minutes (20 images) and cannot be parallelized or deferred.
+Consequence for workers: to get a "before" image to compare with "after", every frame that will be edited must be rendered **before** the first write. On a 20-frame redesign task, that takes the first ~8 minutes (20 images) and cannot be parallelized or deferred.
 
 ## Approach (choose when assigned)
 
