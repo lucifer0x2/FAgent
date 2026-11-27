@@ -23,6 +23,10 @@ struct Request {
     /// Omitted means no byte cap, the v1 behaviour; the schema bounds an explicit value.
     budget: Option<usize>,
     cursor: Option<String>,
+    /// First measured overflow item of this page (0-based), default 0.
+    diagnostics_offset: Option<usize>,
+    /// Overflow items per page, 1–500, default 12 (what a render record shows).
+    diagnostics_limit: Option<usize>,
 }
 
 pub(crate) async fn inspect(state: &AppState, args: Value) -> Result<Value> {
@@ -44,16 +48,14 @@ pub(crate) async fn inspect(state: &AppState, args: Value) -> Result<Value> {
     }
     let fields = fields(req.fields.as_deref())?;
     // The job and its scene are immutable, so the cursor binds the job, not a revision:
-    // later commits do not invalidate it; eviction of the job ends the read.
+    // later commits do not invalidate it; eviction of the job ends the read. fields, limit and
+    // budget shape each page, not the node list, so they may change between pages (FB-38).
     let identity = json!([
         "inspect_layout",
         req.project_id,
         req.job_id,
         req.scene_key,
-        req.node_ids,
-        fields,
-        limit,
-        req.budget
+        req.node_ids
     ]);
     let (scope, offset) = pagination::scope_of(&identity, req.cursor.as_deref())?;
     let wanted: Option<HashSet<&str>> = req
@@ -71,7 +73,22 @@ pub(crate) async fn inspect(state: &AppState, args: Value) -> Result<Value> {
         })
         .map(|n| project(n, &fields))
         .collect();
-    let mut diagnostics: Vec<_> = job["diagnostics"]
+    let diagnostics_limit = req
+        .diagnostics_limit
+        .unwrap_or(crate::text_diagnostics::REPORTED);
+    if diagnostics_limit == 0 || diagnostics_limit > crate::text_diagnostics::MAX_PAGE {
+        return Err(
+            ApiError::invalid("inspect_layout diagnosticsLimit must be 1–500")
+                .with_detail("field", json!("diagnosticsLimit")),
+        );
+    }
+    // The scene stores every overflow item; the record shows only the first few.
+    let stored = if job["scene"]["diagnostics"].is_array() {
+        &job["scene"]["diagnostics"]
+    } else {
+        &job["diagnostics"]
+    };
+    let mut diagnostics: Vec<_> = stored
         .as_array()
         .into_iter()
         .flatten()
@@ -82,12 +99,20 @@ pub(crate) async fn inspect(state: &AppState, args: Value) -> Result<Value> {
         })
         .cloned()
         .collect();
+    let diagnostics_page = crate::text_diagnostics::page_overflow(
+        &mut diagnostics,
+        req.diagnostics_offset.unwrap_or(0),
+        diagnostics_limit,
+    );
     // Measured overflow advisories never make an explicitly budgeted page fail on their own.
     if let Some(budget) = req.budget {
         let allowance = budget / crate::text_diagnostics::BUDGET_SHARE;
         crate::text_diagnostics::fit_in_place(&mut diagnostics, allowance);
     }
-    let response = json!({"schemaVersion":1,"projectId":job["projectId"],"revision":job["revision"],"sceneKey":job["sceneKey"],"status":job["status"],"nodes":[],"diagnostics":diagnostics});
+    let mut response = json!({"schemaVersion":1,"projectId":job["projectId"],"revision":job["revision"],"sceneKey":job["sceneKey"],"status":job["status"],"nodes":[],"diagnostics":diagnostics});
+    if let Some(meta) = diagnostics_page {
+        response["diagnosticsPage"] = meta;
+    }
     let entries = entries.into_iter().map(|n| ("nodes".into(), n)).collect();
     let budget = req.budget.unwrap_or(usize::MAX);
     let mut page = pagination::page(response, entries, offset, limit, budget, &scope)?;

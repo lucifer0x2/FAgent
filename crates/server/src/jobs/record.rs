@@ -37,7 +37,8 @@ impl Jobs {
                 entry.value["status"] = json!("ready");
                 entry.value["scene"] = computed["scene"].clone();
                 entry.value["provenance"] = computed["scene"]["provenance"].clone();
-                entry.value["diagnostics"] = computed["scene"]["diagnostics"].clone();
+                entry.value["diagnostics"] =
+                    crate::text_diagnostics::reported(&computed["scene"]["diagnostics"]);
                 entry.value["readiness"] = computed["readiness"].clone();
                 match rendered {
                     Ok(Rendered::Frame(png)) => {

@@ -5,9 +5,11 @@ mod intent;
 mod overflow;
 #[cfg(test)]
 mod overflow_rounding_tests;
+mod report;
 #[cfg(test)]
 mod tests;
 pub(crate) use budget::{fit, fit_in_place, is_overflow, BUDGET_SHARE};
 pub(crate) use fragmentation::{authored, authored_scoped};
 pub(crate) use intent::overflow_ids;
 pub(crate) use overflow::append;
+pub(crate) use report::{page as page_overflow, reported, MAX_PAGE, REPORTED};

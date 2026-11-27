@@ -1,7 +1,8 @@
 use super::*;
 use crate::text_diagnostics::append;
 
-/// One job's real overflow diagnostics: `nodes` overflowing labels with two lines each.
+/// One job record's overflow diagnostics (what context reads compact): `nodes` overflowing
+/// labels with two lines each, the first 12 shown as a render record shows them.
 fn job(key: &str, nodes: usize) -> Vec<Value> {
     let mut scene = json!({"diagnostics":[],"provenance":{"sourceSceneKey":key,"viewport":{"width":800,"height":720},
         "fontManifestHash":"f".repeat(64),"assetManifestHash":"a".repeat(64),"theme":"default","state":"default"},
@@ -13,7 +14,10 @@ fn job(key: &str, nodes: usize) -> Vec<Value> {
             "fontId":"font","bounds":{"x":10,"y":10,"width":20,"height":10},"lines":[line.clone(),line]}));
     }
     append(&mut scene, &[]);
-    scene["diagnostics"].as_array().unwrap().clone()
+    crate::text_diagnostics::reported(&scene["diagnostics"])
+        .as_array()
+        .unwrap()
+        .clone()
 }
 
 fn len(issues: &[Value]) -> usize {
