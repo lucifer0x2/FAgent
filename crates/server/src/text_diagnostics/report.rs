@@ -68,7 +68,8 @@ pub(crate) fn items(diagnostics: &[Value]) -> usize {
 
 /// Page metadata once a byte budget kept the first `kept` of the `shown` items of a page:
 /// `nextOffset` resumes after the last item kept, so a client following it sees every item.
-/// A budget that keeps none leaves the metadata as is; its summary says how to read them.
+/// A budget that keeps none of them stays at `offset` and sets `budgetTooSmall`: the client
+/// must raise the budget, since following the page would otherwise skip what it dropped.
 pub(crate) fn resume(
     meta: Option<Value>,
     offset: usize,
@@ -76,11 +77,14 @@ pub(crate) fn resume(
     shown: usize,
     kept: usize,
 ) -> Option<Value> {
-    if kept == 0 || kept >= shown {
+    if kept >= shown {
         return meta;
     }
     let mut meta = meta.unwrap_or_else(|| json!({"offset":offset,"limit":limit,"total":shown}));
     meta["nextOffset"] = json!(offset + kept);
+    if kept == 0 {
+        meta["budgetTooSmall"] = json!(true);
+    }
     Some(meta)
 }
 
@@ -133,6 +137,23 @@ mod tests {
         let mut whole = job(3).as_array().unwrap().clone();
         assert_eq!(page(&mut whole, 0, 12), None);
         assert_eq!(whole.len(), 5);
+    }
+
+    /// A budget that keeps no item of a page does not advance past them.
+    #[test]
+    fn a_budget_that_keeps_no_item_stays_at_the_offset() {
+        let mut list = job(20).as_array().unwrap().clone();
+        let meta = page(&mut list, 0, 12);
+        let meta = resume(meta, 0, 12, 12, 0).unwrap();
+        assert_eq!(meta["nextOffset"], 0);
+        assert_eq!(meta["budgetTooSmall"], true);
+        let meta = resume(None, 4, 12, 3, 0).unwrap();
+        assert_eq!(
+            meta,
+            json!({"offset":4,"limit":12,"total":3,"nextOffset":4,"budgetTooSmall":true})
+        );
+        // Nothing shown, nothing to resume.
+        assert_eq!(resume(None, 0, 12, 0, 0), None);
     }
 
     #[test]

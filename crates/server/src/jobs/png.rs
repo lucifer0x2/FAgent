@@ -10,7 +10,7 @@ const MAX_SCALE: f64 = 4.0;
 
 /// Device pixels of a `width`×`height` CSS-pixel surface at `scale`, rounded up per side as
 /// the paint backends allocate it.
-fn pixels(width: f64, height: f64, scale: f64) -> f64 {
+pub fn pixels(width: f64, height: f64, scale: f64) -> f64 {
     (width * scale).ceil() * (height * scale).ceil()
 }
 
@@ -42,10 +42,10 @@ pub fn pixel_budget(width: f64, height: f64, scale: f64) -> ApiError {
         .with_detail("maxScale", json!(max))
 }
 
-/// `Err(PIXEL_BUDGET)` when the surface area exceeds the budget (`check_viewport`'s rule,
-/// unrounded, so nothing a request check accepts fails here).
+/// `Err(PIXEL_BUDGET)` when the surface, rounded up to whole device pixels as the paint
+/// backends allocate it, exceeds the budget (the same rule as the request check).
 pub fn check_pixels(width: f64, height: f64, scale: f64) -> Result<()> {
-    if width * height * scale * scale > MAX_PIXELS {
+    if pixels(width, height, scale) > MAX_PIXELS {
         return Err(pixel_budget(width, height, scale));
     }
     Ok(())
@@ -83,7 +83,8 @@ pub fn hug_budget(error: ApiError, viewport_width: Option<f64>) -> ApiError {
     let Some(width) = viewport_width.filter(|w| *w > 0.0) else {
         return error;
     };
-    let max_height = (MAX_PIXELS / width).floor();
+    // The paint budget counts the width rounded up to whole pixels.
+    let max_height = (MAX_PIXELS / width.ceil()).floor();
     let message = format!(
         "The hug root grew taller than {} px, the most the {} pixel budget allows at width {width}; give the root a fixed height or render a narrower viewport",
         group(max_height),

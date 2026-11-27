@@ -77,6 +77,14 @@ fn bare_clip_is_clip_true() {
         ops("@set x clip"),
         vec![json!({"op":"update_node","id":"x","props":{"clip":true}})]
     );
+    // On @token a bare flag is not a theme name.
+    let e = error("@token x #fff clip");
+    assert!(
+        e.message.starts_with("@token takes theme=value"),
+        "{}",
+        e.message
+    );
+    assert_eq!(e.column, 15);
 }
 
 #[test]

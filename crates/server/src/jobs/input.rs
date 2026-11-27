@@ -46,15 +46,16 @@ pub fn check_request(snapshot: &Snapshot, request: &SceneRequest) -> Result<()> 
         ));
     }
     let (width, height, scale) = (request.width, request.height, request.scale);
-    // Only the area is over budget: say by how much and which scale fits. This is
-    // check_viewport's area rule, so nothing it accepts is rejected here.
+    // Only the area is over budget: say by how much and which scale fits. Each side is
+    // rounded up to whole device pixels as the paint backends allocate it, so a surface
+    // admitted here cannot fail the paint budget later.
     let sane = [width, height]
         .iter()
         .all(|v| v.is_finite() && *v > 0.0 && *v <= 100_000.0)
         && scale.is_finite()
         && scale > 0.0
         && scale <= 4.0;
-    if sane && width * height * scale * scale > super::png::MAX_PIXELS {
+    if sane && super::png::pixels(width, height, scale) > super::png::MAX_PIXELS {
         return Err(super::png::pixel_budget(width, height, scale));
     }
     check_viewport(width, height, scale)?;

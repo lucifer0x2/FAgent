@@ -36,7 +36,9 @@ const DIGEST: usize = 6;
 
 /// The cursor scope of a snapshot read: the revision, then for each bound field its code and
 /// the first six hex digits of its JSON's SHA-256 (`<revision>.t1a2b3cp4d5e6f…`), so a mismatch
-/// names the changed parameter instead of a generic `INVALID_CURSOR`.
+/// names the changed parameter instead of a generic `INVALID_CURSOR`. Six digits can collide
+/// (two `nameContains` values may share them), so the scope ends with `~` and a 128-bit digest
+/// of every bound field together: any changed value changes the scope.
 pub fn scope(s: &Snapshot, tool: &str, req: &ReadRequest) -> Result<(String, usize)> {
     if let Some(requested) = req.revision.filter(|r| *r != s.revision) {
         return Err(super::revision_unavailable(requested, s.revision));
@@ -46,6 +48,8 @@ pub fn scope(s: &Snapshot, tool: &str, req: &ReadRequest) -> Result<(String, usi
     fields.retain(|key, value| !UNBOUND.contains(&key.as_str()) && !value.is_null());
     fields.insert("tool".into(), json!(tool));
     let mut scope = format!("{}.", s.revision);
+    let whole = Sha256::digest(serde_json::to_vec(&query)?);
+    let fields = query.as_object_mut().unwrap();
     for (name, code) in CODES {
         if let Some(value) = fields.remove(name) {
             scope.push(code);
@@ -57,6 +61,8 @@ pub fn scope(s: &Snapshot, tool: &str, req: &ReadRequest) -> Result<(String, usi
         scope.push('?');
         scope.push_str(&digest(&query)?);
     }
+    scope.push('~');
+    scope.push_str(&URL_SAFE_NO_PAD.encode(&whole[..16]));
     let offset = offset(&scope, req.cursor.as_deref())?;
     Ok((scope, offset))
 }
@@ -67,6 +73,7 @@ fn digest(value: &Value) -> Result<String> {
 }
 /// A scope from [`scope`]: its revision and per-field digests, or `None` for another format.
 fn parts(scope: &str) -> Option<(u64, Vec<(&str, &str)>)> {
+    let (scope, _whole) = scope.split_once('~')?;
     let (revision, fields) = scope.split_once('.')?;
     let mut list = Vec::new();
     let mut rest = fields;

@@ -384,7 +384,9 @@ items are published as a flat object and validated strictly per item. Any invali
 the whole call and nothing is written: the error's `field` and message name `items[<i>]`. A
 font ID may be registered by one item only; identical bytes in two items share one asset. The
 result has the commit fields at the top level (`projectId`, `committedRevision`, `changedIds`,
-`replayed`, …) and `items: [{asset, font?}]` in request order. `expectedRevision` must be
+`replayed`, …; `apply_batch` and `import_asset` share them, and a batch may add the optional
+`deletedNoteIds`: sorted, omitted when empty, listing the notes removed with deleted nodes,
+except notes recreated later in the same batch) and `items: [{asset, font?}]` in request order. `expectedRevision` must be
 current, as for `import_asset`; replay hashes the media types, content hashes and fonts in
 order, never sources or paths. A one-item call is the same canonical request as
 `import_asset`. History stores one internal `import_asset` entry per item, which bundle
@@ -413,7 +415,7 @@ Bounded wait on a poll: `waitMs` (integer 0–10,000, default 0) is accepted onl
 | `limit` | 1–200 nodes per page, default 200. |
 | `budget` | 1,024–65,536 bytes of `structuredContent` per page. **Omitted means no byte cap**, which is the v1 behaviour. A single node larger than the budget returns `CONTEXT_ITEM_TOO_LARGE`. |
 | `cursor` | `nextCursor` of the previous page; repeat `nodeIds` unchanged (`fields`, `limit` and `budget` may change). |
-| `diagnosticsOffset`, `diagnosticsLimit` | Page of the measured `TEXT_CONTENT_OUTSIDE_BOX` items: 0–500 (default 0) and 1–500 (default 12, what the render record shows). Applied after the `nodeIds` filter; other diagnostics and the summary are always included. `diagnosticsPage {offset, limit, total, nextOffset}` is added when the items do not all fit on this page. Not part of the node cursor. |
+| `diagnosticsOffset`, `diagnosticsLimit` | Page of the measured `TEXT_CONTENT_OUTSIDE_BOX` items: 0–500 (default 0) and 1–500 (default 12, what the render record shows). Applied after the `nodeIds` filter; other diagnostics and the summary are always included. `diagnosticsPage {offset, limit, total, nextOffset}` is added when the items do not all fit on this page; when `budget` keeps none of the page's items, `nextOffset` stays at `offset` and `budgetTooSmall: true` says to retry with a larger budget. Not part of the node cursor. |
 
 Response: `schemaVersion, projectId, revision, sceneKey, status, nodes[{id, bounds?, lines?}],
 diagnostics, truncated`, plus `nextCursor` **only when `truncated` is true**. Nodes are in
@@ -686,6 +688,8 @@ and not recreated are removed (an emptied `links` key is dropped) and their
 sources join `changedIds`, so `get_changes` reports them under `nodes`. Deleting
 and recreating a frame ID in one batch keeps links. A `to` that never existed
 still fails; committed snapshots and bundles never hold dangling links.
+`delete_subtree` also deletes the notes on the deleted nodes and returns them in
+`deletedNoteIds` in the batch result and the dry run.
 
 `get_design_context` adds `navigation` on the first page when the frame has any
 outgoing link in its subtree, any incoming link or a `flowStart`:

@@ -132,7 +132,8 @@ Versioned backup/export/import/restore are public **storage APIs**, documented i
 
 `apply_batch` and `import_asset` answer with the same top-level commit fields:
 `projectId`, `committedRevision`, `changedIds`, `renderStatus` and `replayed`; a batch that
-deletes noted nodes adds `deletedNoteIds`.
+deletes noted nodes adds the optional `deletedNoteIds` (sorted, omitted when empty; notes
+recreated later in the same batch are excluded).
 `import_asset` adds `asset` (the stored metadata) and still repeats the commit
 fields under `result`, the earlier nested shape, so existing clients keep working.
 Read `committedRevision` at the top level for the next `expectedRevision`

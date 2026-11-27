@@ -118,3 +118,30 @@ fn server_keeps_revision_and_state_validation_order() {
         "Unknown interaction state"
     );
 }
+
+/// Admission rounds each side up to whole device pixels, as the paint backends allocate it.
+#[test]
+fn admission_checks_use_the_rounded_up_surface() {
+    use super::super::png::{check_pixels, hug_budget};
+    let (width, height) = (3999.1, 4000.9);
+    assert!(width * height <= 16_000_000.0);
+    let error = check_request(&snapshot(), &request(width, height, 1.0)).unwrap_err();
+    assert_eq!(error.0.code, "PIXEL_BUDGET");
+    assert_eq!(error.value()["error"]["requestedPixels"], 16_004_000);
+    assert_eq!(
+        check_pixels(width, height, 1.0).unwrap_err().0.code,
+        "PIXEL_BUDGET"
+    );
+    // The hug-root height reported for a fractional width fits the paint budget.
+    let layout = || {
+        crate::error::ApiError::new(
+            "LAYOUT_INVALID",
+            "Hug root height exceeds the viewport budget",
+        )
+    };
+    for (width, expected) in [(1000.5, 15_984), (1000.0, 16_000)] {
+        let error = hug_budget(layout(), Some(width));
+        assert_eq!(error.value()["error"]["maxHeight"], expected);
+        assert!(check_pixels(width, expected as f64, 1.0).is_ok());
+    }
+}

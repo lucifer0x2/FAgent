@@ -198,3 +198,31 @@ fn unbudgeted_page_is_a_count_slice() {
     let past = page(response, entries, 24, 5, usize::MAX, "s");
     assert_eq!(past.unwrap_err().0.code, "INVALID_CURSOR");
 }
+
+/// Two `nameContains` values whose six-digit field digests collide still get different scopes,
+/// so a cursor from one filter cannot skip matches of the other.
+#[test]
+fn colliding_field_digests_do_not_share_a_scope() {
+    let (a, b) = (json!("filter-00000996"), json!("filter-00002186"));
+    assert_eq!(digest(&a).unwrap(), digest(&b).unwrap());
+    let snapshot: Snapshot = serde_json::from_value(json!({
+        "schemaVersion":4,"projectId":"project","slug":"test","name":"Test","revision":7,
+        "nodes":[],"tokens":[],"styles":[],"assets":[],"fonts":[],
+        "retention":{"oldestCommitRevision":0,"idempotencyPolicy":"bounded"}
+    }))
+    .unwrap();
+    let request = |name: &Value, cursor: Option<String>| -> ReadRequest {
+        serde_json::from_value(json!({"projectId":"project","nameContains":name,"cursor":cursor}))
+            .unwrap()
+    };
+    let (first, _) = scope(&snapshot, "find_nodes", &request(&a, None)).unwrap();
+    let (second, _) = scope(&snapshot, "find_nodes", &request(&b, None)).unwrap();
+    assert_ne!(first, second);
+    let error = scope(
+        &snapshot,
+        "find_nodes",
+        &request(&b, Some(cursor(&first, 1))),
+    )
+    .unwrap_err();
+    assert_eq!(error.0.code, "INVALID_CURSOR");
+}

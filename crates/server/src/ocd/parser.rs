@@ -115,6 +115,13 @@ pub fn statement(line: Line) -> Result<Stmt> {
             return Err(at.error(format!("@{name} needs {min} argument(s): {usage}")));
         }
         let positional = rest[..count].to_vec();
+        // A bare `clip` is a node prop; on @token it would become a theme named `clip`.
+        if let Some(bare) = rest[count..]
+            .iter()
+            .find(|t| name == "token" && t.text == "clip")
+        {
+            return Err(bare.error("@token takes theme=value, type= and name="));
+        }
         let parts = parts(rest[count..].to_vec(), true)?;
         return Ok(Stmt::Directive(DirectiveStmt {
             name: head.slice(1, None),

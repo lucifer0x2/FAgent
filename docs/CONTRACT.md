@@ -128,7 +128,7 @@ must report missing/moved IDs rather than silently substituting a different node
 
 ## MCP/domain
 
-MCP Streamable HTTP `/mcp`, versioned typed schemas and bounded results. Public storage/layout types remain authoritative for exact Rust signatures. Domain operations are ordered: `create_node`, `update_node`, `reparent_node`, `reorder_node`, `delete_subtree`, `upsert_token`, `upsert_style`. Resource imports use bounded bytes, never arbitrary filesystem paths. See worker reports for validation and limits.
+MCP Streamable HTTP `/mcp`, versioned typed schemas and bounded results. Public storage/layout types remain authoritative for exact Rust signatures. Domain operations are ordered: `create_node`, `update_node`, `reparent_node`, `reorder_node`, `delete_subtree`, `upsert_token`, `upsert_style`. Resource imports use bounded bytes, never arbitrary filesystem paths. Mutation result shapes (commit fields and the optional `deletedNoteIds`) are defined in [`SERVER.md`](SERVER.md) and [`SERVER-OPERATIONS.md`](SERVER-OPERATIONS.md). See worker reports for validation and limits.
 
 `apply_batch` / `apply_batch_file` commit in writer order with last-writer-wins per
 top-level props key and `(parentId, position)` (Task28 I3): `expectedRevision` is
