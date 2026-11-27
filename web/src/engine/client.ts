@@ -258,8 +258,11 @@ export class EngineClient {
     });
   }
 
-  /** Computes `frames` at the snapshot's revision; returns the generation of its events. */
-  sync(snapshot: Snapshot, frames: FrameRequest[], bypass: boolean) {
+  /**
+   * Computes `frames` at the snapshot's revision; returns the generation of its events.
+   * `etag`: the strong ETag the server sent with this snapshot (scene cache key).
+   */
+  sync(snapshot: Snapshot, frames: FrameRequest[], bypass: boolean, etag?: string | null) {
     const generation = ++this.generation;
     const held =
       this.sent?.projectId === snapshot.projectId &&
@@ -273,6 +276,7 @@ export class EngineClient {
       ...(held ? {} : { snapshot }),
       frames,
       bypass,
+      ...(etag ? { etag } : {}),
     });
     this.sent = { projectId: snapshot.projectId, revision: snapshot.revision };
     return generation;

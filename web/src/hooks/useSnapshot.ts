@@ -57,6 +57,18 @@ export function useSnapshot(
   };
 }
 
+/**
+ * The strong ETag the server sent with exactly this accepted snapshot object in this session
+ * (read-only; null when there is none or `snapshot` is not the accepted one).
+ */
+export function useSnapshotEtag(snapshot: Snapshot | null): string | null {
+  const { data } = useSWR<AcceptedSnapshot>(
+    snapshot ? snapshotKey(snapshot.projectId, snapshot.revision) : null,
+    null,
+  );
+  return data && data.snapshot === snapshot ? data.etag : null;
+}
+
 /** A 304 is an accepted validation too, even though the snapshot identity stays stable. */
 export function useAcceptedSnapshot(
   snapshot: Snapshot | null,

@@ -435,6 +435,8 @@ export function engineRuntime(deps: RuntimeDeps) {
                 /** `[startMs, drawMs]` of recent renders, worker clock. */
                 renders: timings,
                 now: deps.now(),
+                /** Persistent scene cache counters (Task 42), when the worker has one. */
+                ...(deps.cache ? { cache: deps.cache.stats() } : {}),
               }
             : null,
         });

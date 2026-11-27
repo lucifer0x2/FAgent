@@ -34,6 +34,10 @@ export function progressGap(lastDrawMs: number) {
 export class FramePacer {
   private held: WorkerMessage[] = [];
   private first = false;
+  /** A computed (not restored) frame is held since this sync started. */
+  private computed = false;
+  /** When the held frames started waiting. */
+  private heldAt = -Infinity;
   private releasedAt = -Infinity;
   private drawMs = 0;
   private now: () => number;
@@ -44,12 +48,19 @@ export class FramePacer {
     this.post = post;
   }
 
-  /** A new sync: its first committed frame is shown without waiting for the gap. */
+  /**
+   * A new sync: its first computed frame is shown without waiting for the gap. Frames
+   * restored from the scene cache arrive a few hundred per second, so they wait for the gap
+   * (from the first of them) or the end of the sync: a warm load draws once or twice.
+   */
   startSync() {
     this.first = true;
+    this.computed = false;
   }
 
   hold(message: WorkerMessage) {
+    if (!this.held.length) this.heldAt = this.now();
+    if (!(message.type === "frame" && message.restored)) this.computed = true;
     this.held.push(message);
   }
 
@@ -57,12 +68,12 @@ export class FramePacer {
     return this.held.length > 0;
   }
 
-  /** Held frames should be shown now: the first of a sync, or the gap has passed. */
+  /** Held frames should be shown now: the first computed of a sync, or the gap has passed. */
   due() {
-    return (
-      this.held.length > 0 &&
-      (this.first || this.now() - this.releasedAt >= progressGap(this.drawMs))
-    );
+    if (!this.held.length) return false;
+    const gap = progressGap(this.drawMs);
+    if (this.first) return this.computed || this.now() - this.heldAt >= gap;
+    return this.now() - this.releasedAt >= gap;
   }
 
   /** Duration of the last draw, which sets the gap. */
