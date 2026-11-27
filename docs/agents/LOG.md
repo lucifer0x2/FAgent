@@ -142,3 +142,4 @@ Append-only. Rules for entries:
 - Decisions: every `free` container is `Position::Relative` (no golden moved); `render_frame` over area returns `PIXEL_BUDGET`; new cursor format; discovery-workflow budget raised to 105,000 B (user); new tool texts trimmed to keep `tools/list` within 32 KiB.
 - Verified: crate tests show only the 41 failures already on `main` (Chromium worker, prerender note test, two `startup_env` PostgreSQL tests); clippy, fmt, public-content check; PostgreSQL ignored tests through `scripts/task19-check.sh`.
 - Open: Chromium-path checks not run end to end (no worker in tests); font override keys deferred; Tasks 44 and 45 can start (44 depends on slice B, now merged here).
+- Self-review: fixed `inspect_layout` overflow paging (a huge `diagnosticsOffset` overflowed; a byte budget made `nextOffset` skip dropped items); other review findings checked and left as designed.
