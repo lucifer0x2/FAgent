@@ -294,3 +294,5 @@ fn each_revision_is_resolved_once_and_never_reused_for_the_next() {
     assert_eq!(next.revision, 4);
     assert_ne!(next.source_scene_key, a.source_scene_key);
 }
+
+mod records;

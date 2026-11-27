@@ -1,7 +1,12 @@
 //! Engine state that does not depend on a GPU: the accepted snapshot (parsed once per
 //! revision), verified font bytes, computed frame scenes (never serialized back to the
 //! page) and their board placement. Hit testing and bounds read the same scenes.
+//!
+//! A committed frame can be written as a persistent record (`export_record`) for the
+//! Worker's own store, and a record staged again on a later load (`import_record`) exactly
+//! as `compute` would stage it; records go to that store, never to the page.
 use crate::frame::{Frame, NodeBounds, Placement, Summary};
+use crate::record::{self, Expected};
 use fagent_paint_vello::{Image, Resources};
 use fagent_scene_wasm::{ResolvedNodes, SceneEngine, SceneOptions, Snapshot, StorageError};
 use std::cell::OnceCell;
@@ -173,7 +178,87 @@ impl Model {
         for manifest in &scene.fonts {
             self.bind_paint_font(manifest)?;
         }
-        let frame = Frame::new(scene, diagnostics, digest.to_owned());
+        let frame = Frame::new(scene, diagnostics, digest.to_owned(), [width, height]);
+        let summary = frame.summary.clone();
+        self.staged.insert(frame_id.to_owned(), frame);
+        Ok(summary)
+    }
+
+    /// Whether the shown frame `frame_id` has content `digest` (`reuse` would succeed).
+    pub fn shows(&self, frame_id: &str, digest: &str) -> bool {
+        self.frames
+            .get(frame_id)
+            .is_some_and(|f| !digest.is_empty() && f.digest == digest)
+    }
+
+    /// The persistent record of the shown frame `frame_id`, when it still has `digest`.
+    pub fn export_record(&self, frame_id: &str, digest: &str) -> Result<Vec<u8>> {
+        match self.frames.get(frame_id) {
+            Some(frame) if frame.digest == digest => record::encode(frame),
+            _ => Err(StorageError::new(
+                "RECORD_UNAVAILABLE",
+                "The engine no longer shows this frame content",
+            )),
+        }
+    }
+
+    /// `[{id, hash}]` of the fonts the shown frame draws with (stored beside its record, so
+    /// a later load fetches them before `import_record`).
+    pub fn record_fonts(&self, frame_id: &str) -> Vec<(String, String)> {
+        self.frames.get(frame_id).map_or_else(Vec::new, |f| {
+            f.scene
+                .fonts
+                .iter()
+                .map(|font| (font.id.clone(), font.hash.clone()))
+                .collect()
+        })
+    }
+
+    /// Stages a record exactly as `compute` would stage the frame at `revision`, and
+    /// returns its summary. The record must answer this project, frame, viewport and digest;
+    /// every font it draws with must be loaded (a missing one is an error, never a frame
+    /// drawn without its text). Like `reuse`, the frame keeps its computing provenance
+    /// (`sourceSceneKey`) and answers `revision`.
+    pub fn import_record(
+        &mut self,
+        bytes: &[u8],
+        revision: u64,
+        frame_id: &str,
+        width: f64,
+        height: f64,
+        digest: &str,
+    ) -> Result<Summary> {
+        let accepted = self.accepted(revision)?;
+        let expected = Expected {
+            project_id: &accepted.project_id,
+            frame_id,
+            width,
+            height,
+            digest,
+        };
+        let record = record::decode(bytes, &expected)?;
+        if let Some(font) = record
+            .scene
+            .fonts
+            .iter()
+            .find(|font| !self.has_font(&font.id, &font.hash))
+        {
+            return Err(StorageError::new(
+                "FONT_MISSING",
+                &format!("Font {} is not loaded for this frame record", font.id),
+            ));
+        }
+        for manifest in &record.scene.fonts {
+            self.bind_paint_font(manifest)?;
+        }
+        let mut frame = Frame::new(
+            record.scene,
+            record.diagnostics,
+            record.digest,
+            [width, height],
+        );
+        frame.revision = revision;
+        frame.summary.revision = revision;
         let summary = frame.summary.clone();
         self.staged.insert(frame_id.to_owned(), frame);
         Ok(summary)
@@ -191,7 +276,11 @@ impl Model {
             .iter()
             .map(|d| serde_json::Value::String(d.clone()))
             .collect();
-        let frame = Frame::new(scene, diagnostics, String::new());
+        let request = [
+            scene.provenance.viewport.width,
+            scene.provenance.viewport.height,
+        ];
+        let frame = Frame::new(scene, diagnostics, String::new(), request);
         let summary = frame.summary.clone();
         self.staged.insert(summary.frame_id.clone(), frame);
         Ok(summary)

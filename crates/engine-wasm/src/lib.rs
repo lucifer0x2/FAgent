@@ -6,9 +6,11 @@
 mod draw;
 mod frame;
 mod model;
+mod record;
 #[cfg(target_arch = "wasm32")]
 mod web;
 
 pub use draw::{draw, DrawStats, View};
 pub use frame::{AssetRef, NodeBounds, Placement, Summary};
 pub use model::{Model, Result};
+pub use record::RECORD_FORMAT;
