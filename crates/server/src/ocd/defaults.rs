@@ -1,4 +1,5 @@
-//! Size defaults written for a text node. They never defeat the parent's layout: a cross-axis
+//! Size defaults written by the compiler: `height:"hug"` for a stacking root frame without a
+//! height (`root_hugs`), and a text node's sizes. Text sizes never defeat the parent's layout: a cross-axis
 //! size under `align=stretch` would stop the stretch, `fill` under `center`/`end` would pin
 //! the text to the start, and under `@in` the existing parent's layout is unknown. A parent
 //! with `layout.breakpoints` has one layout per rule; an axis gets a default only when every
@@ -72,6 +73,20 @@ impl Rule {
             _ => (Some("hug"), Some("hug")),
         }
     }
+}
+
+/// Whether a root frame (a frame directly under a page) written without a height hugs its
+/// content: storage accepts `height:"hug"` only when the base layout and every breakpoint
+/// stack (row or column), since free children never size their parent. `false` for a
+/// `free` or layout-less root, which needs a number.
+pub fn root_hugs(props: &Map<String, Value>) -> bool {
+    let Some(rules) = rules(props.get("layout")) else {
+        // A malformed breakpoint fails in storage with its own error.
+        return true;
+    };
+    rules
+        .iter()
+        .all(|rule| matches!(rule.mode.as_deref(), Some("row" | "column")))
 }
 
 /// `(width, height)` for a text child; `None` writes nothing (an unset text size is its

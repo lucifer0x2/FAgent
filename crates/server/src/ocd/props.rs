@@ -107,7 +107,10 @@ fn attr(props: &mut Map<String, Value>, key: &Token, raw: &Token, target: Target
                 .as_object_mut()
                 .ok_or_else(|| raw.error("overrides must be an object"))?
                 .extend(object),
-            _ => return Err(raw.error("overrides takes a {json} object")),
+            Value::Null => {
+                props.insert("overrides".into(), Value::Null);
+            }
+            _ => return Err(raw.error("overrides takes a {json} object or null")),
         }
     } else {
         let value = match is_literal(effective) {
@@ -133,12 +136,20 @@ fn descendant_prop(
     attr(override_entry(props, id), &prop, raw, Target::Node)
 }
 
-/// `ph="x"` on `use` sets the descendant's text; `ph={json}` merges a whole override object.
+/// `ph="x"` on `use` and `@set` sets the descendant's text; `ph={json}` merges a whole
+/// override object; `ph=null` (`@set` only) removes the descendant's override.
 fn descendant_value(props: &mut Map<String, Value>, key: &Token, raw: &Token) -> Result<()> {
     let descendant = value::id(key)?;
     let entry = match value::literal(raw)? {
         Value::Object(object) if raw.text.starts_with('{') => object,
         text @ Value::String(_) => Map::from_iter([("text".into(), text)]),
+        Value::Null => {
+            let overrides = props.entry("overrides").or_insert_with(|| json!({}));
+            if let Some(overrides) = overrides.as_object_mut() {
+                overrides.insert(descendant, Value::Null);
+            }
+            return Ok(());
+        }
         _ => return Err(raw.error("A descendant override takes \"text\" or a {json} object")),
     };
     override_entry(props, descendant).extend(entry);
@@ -159,6 +170,7 @@ fn stroke(raw: &Token) -> Result<Value> {
             Value::Object(stroke)
         }
         Value::Array(_) => return Err(raw.error("stroke takes color[,width[,align]]")),
+        Value::Null => Value::Null,
         color => json!({ "color": color }),
     })
 }

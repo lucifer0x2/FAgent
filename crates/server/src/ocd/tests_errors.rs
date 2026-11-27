@@ -22,10 +22,12 @@ fn unknown_key_reports_its_column_and_a_suggestion() {
         (e.line, e.column, e.suggestion.as_deref()),
         (2, 11, Some("p"))
     );
-    let e = error("@set a radus=4");
+    // A descendant's misspelled prop fails here. A bare unknown key on `@set` names an
+    // instance descendant (FB-17) and fails in storage instead (tests/ocd_feedback.rs).
+    let e = error("@set a ph.opacty=4");
     assert_eq!(
         (e.line, e.column, e.suggestion.as_deref()),
-        (1, 8, Some("radius"))
+        (1, 11, Some("opacity"))
     );
     // Columns count characters, not UTF-8 bytes.
     let e = error("page#p\n  text \"Ölçü\" x=1\n");

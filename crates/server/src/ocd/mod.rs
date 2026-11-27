@@ -87,6 +87,8 @@ mod tests_edits;
 #[cfg(test)]
 mod tests_errors;
 #[cfg(test)]
+mod tests_feedback;
+#[cfg(test)]
 mod tests_rules;
 #[cfg(test)]
 mod tests_set;

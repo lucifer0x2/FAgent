@@ -23,6 +23,8 @@ pub struct Open {
     /// The `@in` line: its children name their own IDs, and it must have at least one.
     pub within: Option<super::lexer::Token>,
     pub comp: bool,
+    /// A page line: frames directly under it are root frames.
+    pub page: bool,
 }
 
 /// What the compiler knows across lines: used IDs (with their line), descendants of each
@@ -87,6 +89,7 @@ pub fn create(node: NodeStmt, stack: &mut Vec<Open>, batch: &mut Batch) -> Resul
             id
         }
     };
+    let under_page = stack.last().is_some_and(|open| open.page);
     let text_size = match stack.last_mut() {
         Some(open) => {
             open.children += 1;
@@ -118,6 +121,12 @@ pub fn create(node: NodeStmt, stack: &mut Vec<Open>, batch: &mut Batch) -> Resul
             let name = component_name.unwrap_or_else(|| id.clone());
             props.entry("component").or_insert(json!({ "name": name }));
         }
+        Kind::Frame if under_page && !props.contains_key("height") => {
+            if !defaults::root_hugs(&props) {
+                return Err(head.error("root frames need h=<n>, or h=hug with row/col"));
+            }
+            props.insert("height".into(), json!("hug"));
+        }
         _ => {}
     }
     let anchor = match (&written, stack.last()) {
@@ -132,6 +141,7 @@ pub fn create(node: NodeStmt, stack: &mut Vec<Open>, batch: &mut Batch) -> Resul
         parent: Some(Parent::of(&props)),
         within: None,
         comp: node.kind == Kind::Comp,
+        page: node.kind == Kind::Page,
     });
     let mut op = json!({"op":"create_node","id":id,"kind":kind(node.kind),
         "parentId":parent_id,"props":props});
