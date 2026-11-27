@@ -77,6 +77,8 @@ export function engineRuntime(deps: RuntimeDeps) {
   let scheduled = false;
   /** Committed frames' messages, shown progressively (`drawPacing.ts`). */
   const pacer = new FramePacer(deps.now, (message) => deps.post(message));
+  /** `synced` of a load whose last draw failed: posted after the image that shows its frames. */
+  let completion: WorkerMessage | undefined;
   let layoutSeq = 0;
   /** The page's camera (its viewport), and the overscan margin drawn around it. */
   let camera: Camera | undefined;
@@ -168,7 +170,12 @@ export function engineRuntime(deps: RuntimeDeps) {
     if (message.type === "synced") {
       // The last frames must not wait for an animation frame: a worker gets none while its
       // page is hidden or not composited (seen in an embedded browser pane).
-      if (dirty) render(true);
+      if (dirty && !render(true)) {
+        // Not drawn (no backend, a failed draw): the held frames and `synced` wait for the
+        // image the rebuilt or next backend draws, so no skeleton goes before its pixels.
+        completion = message;
+        return;
+      }
       pacer.release();
     }
     deps.post(message);
@@ -308,11 +315,14 @@ export function engineRuntime(deps: RuntimeDeps) {
     if (attached) drawAttached();
   }
 
-  /** `releaseAll`: the last image of a sync also shows every held frame. */
-  function render(releaseAll = false) {
-    if (!engine || !backend || attaching) return;
-    if (backend === "webgpu" && !engine.device_lost() && checkGpuError()) return;
-    const releasing = releaseAll || pacer.due();
+  /**
+   * `releaseAll`: the last image of a sync also shows every held frame. Returns whether an
+   * image was posted.
+   */
+  function render(releaseAll = false): boolean {
+    if (!engine || !backend || attaching) return false;
+    if (backend === "webgpu" && !engine.device_lost() && checkGpuError()) return false;
+    const releasing = releaseAll || completion !== undefined || pacer.due();
     dirty = false;
     urgent = false;
     try {
@@ -328,9 +338,13 @@ export function engineRuntime(deps: RuntimeDeps) {
         { type: "drawn", layout: layoutSeq, ...(camera ? { camera, margin } : {}), image },
         [image],
       );
+      // A load whose own last draw failed completes after the image showing its frames.
+      if (completion) deps.post(completion);
+      completion = undefined;
       // Recent draw times (encode + submit, worker thread) for diagnostics and benchmarks.
       timings.push([Math.round(start * 10) / 10, Math.round(ms * 10) / 10]);
       if (timings.length > 600) timings.splice(0, timings.length - 600);
+      return true;
     } catch (cause) {
       // Not drawn: the rebuilt device or the next backend draws it.
       dirty = true;
@@ -343,6 +357,7 @@ export function engineRuntime(deps: RuntimeDeps) {
         deps.post({ type: "fatal", error: `Engine module aborted: ${reason(cause)}` });
       } else if (backend === "webgpu" && engine.device_lost()) void recover();
       else failBackend(reason(cause));
+      return false;
     }
   }
 
@@ -354,7 +369,9 @@ export function engineRuntime(deps: RuntimeDeps) {
         await booted;
         if (!engine) return;
         // Its first committed frame is drawn at once, the next ones paced, and the last ones
-        // before `synced` is posted (`loaderPost`).
+        // before `synced` is posted (`loaderPost`). An older load's pending `synced` is for a
+        // generation the page no longer waits for.
+        completion = undefined;
         pacer.startSync();
         await loader.sync(message);
         return;

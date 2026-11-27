@@ -177,6 +177,7 @@ export class FrameLoader {
         frame.height,
       ),
     );
+    let fetchedFont = false;
     for (const font of required) {
       if (engine.has_font(font.id, font.hash)) continue;
       const manifest = manifests.fonts.find(
@@ -194,6 +195,13 @@ export class FrameLoader {
       }
       if (!current()) return;
       engine.load_font(font.id, font.hash, new Uint8Array(bytes));
+      fetchedFont = true;
+    }
+    // Page messages ran while the font was fetched: a camera or layout received then is drawn
+    // before this frame computes, as it would be between two frames.
+    if (fetchedFont) {
+      await this.deps.yieldTask();
+      if (!current()) return;
     }
     const summary = JSON.parse(
       engine.compute(

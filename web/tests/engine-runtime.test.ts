@@ -580,6 +580,46 @@ test("a camera or layout change during a load is drawn before the next frame, un
   );
 });
 
+test("a last draw that fails holds its frames and `synced` until the next backend draws them", async () => {
+  let clock = 0;
+  const { module, calls, engine } = fakeModule({
+    onCompute: () => {
+      clock += 10;
+      // The draw after the last frame fails (a WebGPU render error): WebGPU is left.
+      if (calls.includes("compute:c")) engine.simulate_gpu_fault("throw");
+    },
+  });
+  const { handle, attach, posted } = runtime(module, true, () => Promise.resolve(), () => clock);
+  await attach("webgpu");
+  await handle({ type: "layout", placements: [], seq: 1 });
+  const shown = () =>
+    posted
+      .filter((m) => ["drawn", "frame", "synced", "backend", "backend-failed"].includes(m.type))
+      .map((m) =>
+        m.type === "frame"
+          ? m.frameId
+          : m.type === "backend" || m.type === "backend-failed"
+            ? `${m.type}:${m.backend}`
+            : m.type,
+      );
+  await handle(sync(["a", "b", "c"]));
+  // b and c are committed but in no delivered image: the page keeps their skeletons.
+  assert.deepEqual(shown(), [
+    "backend:webgpu",
+    "drawn", // the layout
+    "a",
+    "drawn", // first frame
+    "backend-failed:webgpu",
+  ]);
+  await attach("webgl2");
+  assert.deepEqual(shown().slice(-5), ["backend:webgl2", "b", "c", "drawn", "synced"]);
+  assert.deepEqual(calls.filter((call) => call.startsWith("render")), [
+    "render:webgpu",
+    "render:webgpu",
+    "render:webgl2",
+  ]);
+});
+
 test("progress gap: grows with the draw time between its bounds", () => {
   assert.equal(progressGap(2), PROGRESS_DRAW_MIN_MS);
   assert.equal(progressGap(16), 160);
