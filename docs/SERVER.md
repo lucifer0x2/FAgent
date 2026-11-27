@@ -758,8 +758,9 @@ truncated, nextCursor, limits {nodes, bytes}
   same read. Changing a bound field returns `INVALID_CURSOR` with that field named in
   the message and `error.field` (`kinds`, `nodeId`, `tool`, …); a commit since the
   first page returns `INVALID_CURSOR` naming both revisions, with `currentRevision`
-  and `field:"cursor"`: restart without cursor. The cursor carries an 8-hex-digit
-  digest per bound field for this.
+  and `field:"cursor"`: restart without cursor. The cursor carries a one-letter
+  code and a six-hex-digit digest per bound field for this, and is shorter than the
+  single hash it carried before, so page boundaries under a byte budget do not move.
 - Only the latest revision can be read, rendered or exported (older revisions are not
   kept readable; Task 39). An explicit other `revision` on any read, `render_frame`,
   `export_nodes` or the scene routes returns `REVISION_UNAVAILABLE` with
