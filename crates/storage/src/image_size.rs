@@ -7,6 +7,9 @@ use std::{
     sync::{Mutex, OnceLock},
 };
 
+/// Image size by content hash; `None` when the header gives none.
+type SizeCache = HashMap<String, Option<(u32, u32)>>;
+
 /// Largest image a new import accepts, in pixels.
 pub(crate) const MAX_IMAGE_PIXELS: u64 = 40_000_000;
 
@@ -25,7 +28,7 @@ pub fn image_size(media_type: &str, bytes: &[u8]) -> Option<(u32, u32)> {
 /// Fills the size of each ready image asset stored without one. `read` returns the asset's
 /// bytes; sizes are cached by content hash, which names immutable bytes.
 pub(crate) fn fill_missing(assets: &mut [Asset], mut read: impl FnMut(&Asset) -> Option<Vec<u8>>) {
-    static SIZES: OnceLock<Mutex<HashMap<String, Option<(u32, u32)>>>> = OnceLock::new();
+    static SIZES: OnceLock<Mutex<SizeCache>> = OnceLock::new();
     for asset in assets.iter_mut().filter(|a| needs_size(a)) {
         let sizes = SIZES.get_or_init(Default::default);
         let cached = sizes
