@@ -98,7 +98,8 @@ async fn instances_states_context_keeps_master_virtual_variants_and_theme_resour
     }
     // Instance root states remain unsupported; descendant state paint accepts no shadow.
     for (props, field) in [
-        (json!({"states":{"hover":{"opacity":0.5}}}), "props.states"),
+        // Root `states` are instance keys since FB-40; root layout still is not.
+        (json!({"layout":{"mode":"row"}}), "props.layout"),
         (
             json!({"overrides":{"box":{"states":{"hover":{"shadow":[]}}}}}),
             "props.overrides.box.states.hover.shadow",
