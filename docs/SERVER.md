@@ -71,7 +71,7 @@ values are rejected. Unknown or malformed query fields return `INVALID_REQUEST`.
 Omit both `width` and `height` to use each frame's authored positive numeric size
 (fallback 800×600 per missing/non-numeric dimension; a root `height:"hug"` always
 follows its content), or supply both for a shared viewport. Existing render viewport/pixel budgets apply; theme/state are default,
-scale is one. An unavailable revision returns `REVISION_UNAVAILABLE`.
+scale is one. An unavailable revision returns `REVISION_UNAVAILABLE` with `currentRevision`, the only revision that can be rendered.
 
 All selected frame inputs validate before queue admission. If the requested queue
 or retained job capacity cannot fit the batch, admission returns retryable
@@ -333,7 +333,7 @@ nodes). Past revisions and `get_changes` read the database. A PostgreSQL identit
 asset readiness, so a binary deleted directly in the database stays "ready" for a resident
 project until it is reloaded (TTL, import, restart).
 
-Start with `create_project`, then `apply_batch`, and read `get_outline` before requesting a scoped `get_subtree` or `get_design_context`. Use `find_nodes` to locate a node by name, text, kind, ID or parent in one call; `get_outline {nodeId:<page>, depth:1}` or `find_nodes {parentId:<page>, kinds:["frame"]}` lists a page's root frames in one call. Text requires explicit font/style properties as described by storage validation; the bundled font ID is `font_bundled`. Mutations require a stable `idempotencyKey` and ordered operations; send `expectedRevision` from the read the batch is based on (see "`apply_batch` concurrency" above). Retry exactly the original body after a lost response. A changed body with the same key receives `IDEMPOTENCY_KEY_REUSED`; with `strict:true`, a stale revision with a new key receives `REVISION_CONFLICT` and `currentRevision`, plus `changedSince` (see "Changes since a revision" below). `apply_batch` takes JSON `operations`, OCD `source` (`skill://fagent/ocd.md`), or both: the compiled source runs first in the same atomic batch, within the 500-operation and 2 MiB limits, and the result lists generated node IDs as `autoIds` (`{"<line>":"<id>"}`). `update_node` sets top-level props; with `merge:true` its `props` are a JSON merge patch (RFC 7386: objects merge, `null` deletes, other values replace; an object holding `tokenId`, `styleId` or `type` replaces as one value).
+Start with `create_project`, then `apply_batch`, and read `get_outline` before requesting a scoped `get_subtree` or `get_design_context`. Use `find_nodes` to locate a node by name, text, kind, ID or parent in one call; `get_outline {nodeId:<page>, depth:1}` or `find_nodes {parentId:<page>, kinds:["frame"]}` lists a page's root frames in one call; add `properties:["x","y","width","height"]` to the outline to get those authored props on each entry as `props` (the outline carries no props without `properties`). Text requires explicit font/style properties as described by storage validation; the bundled font ID is `font_bundled`. Mutations require a stable `idempotencyKey` and ordered operations; send `expectedRevision` from the read the batch is based on (see "`apply_batch` concurrency" above). Retry exactly the original body after a lost response. A changed body with the same key receives `IDEMPOTENCY_KEY_REUSED`; with `strict:true`, a stale revision with a new key receives `REVISION_CONFLICT` and `currentRevision`, plus `changedSince` (see "Changes since a revision" below). `apply_batch` takes JSON `operations`, OCD `source` (`skill://fagent/ocd.md`), or both: the compiled source runs first in the same atomic batch, within the 500-operation and 2 MiB limits, and the result lists generated node IDs as `autoIds` (`{"<line>":"<id>"}`). `update_node` sets top-level props; with `merge:true` its `props` are a JSON merge patch (RFC 7386: objects merge, `null` deletes, other values replace; an object holding `tokenId`, `styleId` or `type` replaces as one value).
 
 ### Batch files and multi-asset imports
 
@@ -402,7 +402,8 @@ Bounded wait on a poll: `waitMs` (integer 0–10,000, default 0) is accepted onl
 | `fields` | 1–2 of `bounds`, `lines`; default both. Order and duplicates do not matter. Every node always has `id`. |
 | `limit` | 1–200 nodes per page, default 200. |
 | `budget` | 1,024–65,536 bytes of `structuredContent` per page. **Omitted means no byte cap**, which is the v1 behaviour. A single node larger than the budget returns `CONTEXT_ITEM_TOO_LARGE`. |
-| `cursor` | `nextCursor` of the previous page; repeat every other argument unchanged. |
+| `cursor` | `nextCursor` of the previous page; repeat `nodeIds` unchanged (`fields`, `limit` and `budget` may change). |
+| `diagnosticsOffset`, `diagnosticsLimit` | Page of the measured `TEXT_CONTENT_OUTSIDE_BOX` items: 0–500 (default 0) and 1–500 (default 12, what the render record shows). Applied after the `nodeIds` filter; other diagnostics and the summary are always included. `diagnosticsPage {offset, limit, total, nextOffset}` is added when the items do not all fit on this page. Not part of the node cursor. |
 
 Response: `schemaVersion, projectId, revision, sceneKey, status, nodes[{id, bounds?, lines?}],
 diagnostics, truncated`, plus `nextCursor` **only when `truncated` is true**. Nodes are in
@@ -411,8 +412,9 @@ scene order; following `nextCursor` returns every selected node exactly once.
 - A call without `fields`, `limit`, `budget` and `cursor` returns the same bytes as before
   Task07B, with one fix: a scene with more than 200 selected nodes used to return
   `truncated:true` and drop the rest; it now also returns `nextCursor`.
-- The cursor binds the tool, project, job, scene key, `nodeIds` (as given), the normalized
-  `fields` set, `limit` and `budget`; any change returns `INVALID_CURSOR`. It does not bind a
+- The cursor binds the tool, project, job, scene key and `nodeIds` (as given); a change
+  returns `INVALID_CURSOR`. `fields`, `limit` and `budget` shape each page, not the node
+  list, so a later page may change them (before FB-38 they were bound too). It does not bind a
   revision: the job's scene is immutable, so commits after the render do not invalidate it.
   If the job is evicted (32 retained records), the read fails with `JOB_NOT_FOUND` and
   must restart from a new render.
@@ -427,7 +429,8 @@ scene order; following `nextCursor` returns every selected node exactly once.
 - `exportSettings` is a node prop (every kind except page): an array of 0–8 settings. `[]` clears it (or `update_node` `merge:true` with `null` removes the key). Two settings yielding the same file name, unknown keys (`constraint` → use scale/width/height, `type` → `format`) and formats other than `png` and `svg` are rejected with `field` `exportSettings[i]…`.
 - SVG: `{format:"svg", suffix?, svgIdAttribute?}` takes no scale, width or height (rejected at `…scale` etc.: SVG is resolution-independent); the file is `<name><suffix>.svg`, `mimeType:"image/svg+xml"`, `width`/`height` the node's CSS-pixel size, no `scale`. It is built in Rust from the same subtree scene, without the worker: fills as `<rect rx>` (8-digit hex split into `fill` + `fill-opacity`), clip as `<clipPath>` (`oc-clip-N` IDs), CSS group opacity as `<g opacity>` like the renderer, images as `<image>` with the asset's original bytes in a `data:` URI (crop through a nested `viewBox` of natural pixels, read from the PNG/JPEG/WebP header). The file is self-contained: no server URL. Text stays live `<text>` per measured line with the font family/weight/size, not outlined and with no embedded font, so line widths depend on the viewer's fonts; such a file carries `diagnostics:["SVG_TEXT_NOT_OUTLINED"]`. Strokes (box `stroke`, uniform or per-side) are not drawn in SVG yet: a subtree with any stroked node exports without them and carries `SVG_STROKE_NOT_EXPORTED`; export PNG for those. Box `shadow` layers are not drawn either and carry `SVG_SHADOW_NOT_EXPORTED`. Per-corner `radius` exports as a `<path>` with CSS overlap reduction; linear/radial gradient fills export as `<linearGradient>`/`<radialGradient>` whose stops are expanded so SVG's straight-alpha interpolation matches CSS premultiplied interpolation (a stop fading to `#0000` keeps its neighbor's hue). `svgIdAttribute:true` wraps each node's elements in `<g id="<nodeId>">`. Resources are strict: a failed font or asset, or image bytes missing or no longer matching the scene's manifest hash, fail the item with `RESOURCE_NOT_READY` rather than a partial SVG. JPEG EXIF orientation is not applied.
 - The call waits up to `waitMs` (default and max 10,000) for all jobs, then returns `{projectId, revision, exports:[{nodeId, jobId, status, files?, expiresAt?, error?}]}`. A ready item lists `files[]` `{url, fileName, format, mimeType, scale, width, height, bytes}` and `expiresAt` (Unix seconds) after which its URLs stop working; no scene and no base64. A pending item: repeat the identical call, which reuses the same `jobId` while the record is retained, or poll `render_frame {jobId, waitMs}`.
-- Per-item errors leave the other nodes running: `NODE_NOT_FOUND`, `EXPORT_UNSUPPORTED` (page, or a node outside a root frame), `QUEUE_FULL` (retryable, `retryAfterMs`), and at run time `EMPTY_BOUNDS` (zero width or height), `PIXEL_BUDGET` (16M pixels per file, 48 MiB per job), `EXPORT_SCALE_RANGE`, `RESOURCE_NOT_READY`. Whole-call errors: `INVALID_REQUEST`, `VALIDATION_FAILED` (settings), `REVISION_UNAVAILABLE` (`revision` other than head), `PROJECT_NOT_FOUND`.
+- Per-item errors leave the other nodes running: `NODE_NOT_FOUND`, `EXPORT_UNSUPPORTED` (page, or a node outside a root frame), `QUEUE_FULL` (retryable, `retryAfterMs`), and at run time `EMPTY_BOUNDS` (zero width or height), `PIXEL_BUDGET` (16,000,000 pixels per file, 48 MiB per job; see "Pixel budget errors"), `EXPORT_SCALE_RANGE`, `RESOURCE_NOT_READY`. Whole-call errors: `INVALID_REQUEST`, `VALIDATION_FAILED` (settings), `REVISION_UNAVAILABLE` (`revision` other than head), `PROJECT_NOT_FOUND`.
+- Pixel budget errors: a PNG holds at most 16,000,000 device pixels (width × height × scale², each side rounded up). `render_frame` checks the requested viewport at enqueue, and every PNG paint (render or export, Chromium or native) checks the scene's surface first, so a hug root that grew past the requested viewport fails the same way. The error is `PIXEL_BUDGET` with `maxPixels`, `requestedPixels`, `maxScale` (the largest scale, in hundredths and at most 4, that fits) and a message stating the numbers; for example 1440×6000 at scale 2 gives `requestedPixels:34560000`, `maxScale:1.36`. A hug root that is already over budget at scale 1 fails in layout with `PIXEL_BUDGET`, `maxPixels` and `maxHeight` (the tallest root that fits at that width); the layout does not report the grown height. Before this, the enqueue check returned `INVALID_REQUEST` "Viewport or scale exceeds the render budget" and worker failures a generic message; render worker errors now keep the worker's own message.
 - `GET /api/v1/jobs/{job}/files/{index}` serves a file with its MIME type and `Content-Disposition: attachment; filename="<ascii>"; filename*=UTF-8''<encoded>`; `FILE_NOT_FOUND` (404) for a wrong index or a render job, `IMAGE_NOT_READY` (409) while pending or failed, `EXPORT_EXPIRED` (410) once the files expired, `JOB_NOT_FOUND` (404) for an unknown job (including any job from before a server restart); both messages say to re-run `export_nodes`. `GET /api/v1/jobs/{job}` returns the export record (`kind:"export"`, `nodeId`, `files`, `expiresAt`, `provenance`, `readiness`; no `scene`, no `imageUrl`).
 - Retention: a ready export's files move to an in-memory export store separate from the 32 retained job records, so render and prerender churn never evicts them (the job record itself may go; its URLs keep working, and a repeat call then makes a new job). Files stay 24 hours after the job finishes, within 512 MiB of export files in total: a new export first drops the oldest exports that no longer fit (the newest is always kept; one job holds at most 48 MiB). Expired files also drop their job record, so an identical call never returns a dead URL. Nothing is written to disk and a restart forgets every export. Defaults live in `ExportRetention` (`Config::export_files`); there is no environment override. The public viewer admits a file URL by its export's project as before. No filesystem path is returned or accepted.
 
@@ -461,8 +464,12 @@ an exception, including component source notes for virtual instance descendants.
 Render jobs append `TEXT_CONTENT_OUTSIDE_BOX` from immutable measured line advance
 and optional glyph `inkBounds`, including ancestor clips. Bounded examples omit
 source text. Each item names its job with `sourceSceneKey`; the job adds one
-`TEXT_OVERFLOW_SUMMARY` (`sourceSceneKey`, `reportedNodes` ≤ 12, `omittedNodes`) that
+`TEXT_OVERFLOW_SUMMARY` (`sourceSceneKey`, `reportedNodes`, `omittedNodes`) that
 carries the full scene/font/asset-manifest/viewport/theme/state `provenance` once.
+The job's scene stores every item up to 500 (the summary counts the rest as
+`omittedNodes`); the render record and context reads show the first 12 with
+`reportedNodes` ≤ 12, as before, and `inspect_layout` pages all stored items with
+`diagnosticsOffset`/`diagnosticsLimit`, its `nodeIds` filter reaching any of them.
 `Intentional overflow:`
 notes lower this advisory to informational. `inspect_layout` retains the same job
 diagnostics across pages/field filters and narrows node diagnostics for `nodeIds`
@@ -480,7 +487,8 @@ summary with the total `omittedNodes`. Compacted summaries carry
 `compaction {step, droppedNodes, retrieve}`, and `reportedNodes`/`omittedNodes`
 describe what this read shows. Compaction depends only on the jobs and the budget,
 so every page of one read carries identical advisories. Read all items with
-`inspect_layout` (no budget) for the `jobId`/`sceneKey` in `computed.viewports`.
+`inspect_layout` (no budget, paging `diagnosticsOffset`, or `diagnosticsLimit:500`) for
+the `jobId`/`sceneKey` in `computed.viewports`; `retrieve` says so.
 Other diagnostics and errors are never compacted. These checks cover semantic
 text only; general contrast, tap-target and overlap lint remain outside this slice.
 
@@ -566,7 +574,8 @@ the identical context request **without cursor** until ready. Start pagination a
 that point. Node bounds travel with each node as one indivisible page item, even
 when property filters omit all authored geometry. All pages include `truncated`
 and `nextCursor`; continuation binds revision, theme and the ordered viewports,
-along with the other query parameters. Small byte budgets may return the usual
+along with the other query parameters except `properties`, `budget` and `limit` (see
+"Read cursors" under `find_nodes`). Small byte budgets may return the usual
 `CONTEXT_ITEM_TOO_LARGE` error for metadata alone or one complete node plus bounds;
 measured overflow advisories are compacted to their budget share instead (see
 text diagnostics above), so they never cause that error on their own.
@@ -742,9 +751,28 @@ truncated, nextCursor, limits {nodes, bytes}
   as one node with `componentId` and expanded `childCount`, and list virtual nodes only
   for a virtual `nodeId` scope. `totalMatches: 0` with `skippedInstanceMatches` means the
   only matches are inside instances, not that nothing matched.
-- Cursors follow the same rule as the other reads: they bind project, revision, tool
-  and every query field; a concurrent mutation or changed query returns
-  `INVALID_CURSOR`, and an explicit unavailable revision `REVISION_UNAVAILABLE`.
+- Read cursors (`find_nodes`, `get_outline`, `get_subtree`, `get_design_context` and the
+  `list_*` tools): a cursor binds the project, the revision, the tool and every query
+  field except `properties`, `budget`, `limit` and `revision`, which change neither the
+  entry list nor its order, so a later page may change them and still continues the
+  same read. Changing a bound field returns `INVALID_CURSOR` with that field named in
+  the message and `error.field` (`kinds`, `nodeId`, `tool`, …); a commit since the
+  first page returns `INVALID_CURSOR` naming both revisions, with `currentRevision`
+  and `field:"cursor"`: restart without cursor. The cursor carries an 8-hex-digit
+  digest per bound field for this.
+- Only the latest revision can be read, rendered or exported (older revisions are not
+  kept readable; Task 39). An explicit other `revision` on any read, `render_frame`,
+  `export_nodes` or the scene routes returns `REVISION_UNAVAILABLE` with
+  `currentRevision`, `field:"revision"` and a message naming the revision to use.
+- Text that holds private-use, format (Cf) or unassigned characters, such as an
+  icon-font glyph U+E40D, is returned as raw UTF-8 like any text (a raw MCP
+  `tools/call` over HTTP shows the bytes `EE 90 8D` in both `content` and
+  `structuredContent`), but some clients display it as `""`. `find_nodes`,
+  `get_subtree` and `get_design_context` entries that show such a text (`props.text`,
+  else `textPreview`) add `textEscaped`: the same text as a JSON string body with
+  those characters (and `"`, `\`, control characters) escaped as `\uXXXX` (a
+  surrogate pair above U+FFFF). Plain text gets no `textEscaped`. Writes accept the
+  raw character or the `\uXXXX` escape, in JSON operations and OCD quoted strings.
 - Search by position or bounds is not supported. It would need a computed scene.
   Narrow by name/text/kind, then read bounds with `get_design_context` `viewports`
   or `inspect_layout` `nodeIds`. The search is a linear scan of the snapshot, with no
