@@ -102,7 +102,7 @@ impl Resolver<'_> {
             {
                 return Err(StorageError::validation(
                     "minWidth",
-                    "Wrapping row fill child requires explicit positive minWidth",
+                    "A width=fill child of a wrapping row needs a positive minWidth, the width where it wraps to the next line (for example minWidth=240)",
                 ));
             }
         }
