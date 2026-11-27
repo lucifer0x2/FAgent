@@ -43,7 +43,7 @@ pub(crate) fn reported(scene: &Value) -> Value {
 /// One page of overflow items: every other diagnostic stays, items `offset..offset+limit`
 /// remain. Returns the page metadata when the items do not all fit on this page.
 pub(crate) fn page(diagnostics: &mut Vec<Value>, offset: usize, limit: usize) -> Option<Value> {
-    let total = diagnostics.iter().filter(|d| d["code"] == ITEM).count();
+    let total = items(diagnostics);
     if offset == 0 && total <= limit {
         return None;
     }
@@ -59,6 +59,29 @@ pub(crate) fn page(diagnostics: &mut Vec<Value>, offset: usize, limit: usize) ->
     });
     let next = (end < total).then_some(end);
     Some(json!({"offset":offset,"limit":limit,"total":total,"nextOffset":next}))
+}
+
+/// Overflow items in `diagnostics`.
+pub(crate) fn items(diagnostics: &[Value]) -> usize {
+    diagnostics.iter().filter(|d| d["code"] == ITEM).count()
+}
+
+/// Page metadata once a byte budget kept the first `kept` of the `shown` items of a page:
+/// `nextOffset` resumes after the last item kept, so a client following it sees every item.
+/// A budget that keeps none leaves the metadata as is; its summary says how to read them.
+pub(crate) fn resume(
+    meta: Option<Value>,
+    offset: usize,
+    limit: usize,
+    shown: usize,
+    kept: usize,
+) -> Option<Value> {
+    if kept == 0 || kept >= shown {
+        return meta;
+    }
+    let mut meta = meta.unwrap_or_else(|| json!({"offset":offset,"limit":limit,"total":shown}));
+    meta["nextOffset"] = json!(offset + kept);
+    Some(meta)
 }
 
 #[cfg(test)]
@@ -117,6 +140,10 @@ mod tests {
         let mut list = job(3).as_array().unwrap().clone();
         let meta = page(&mut list, usize::MAX, 12).unwrap();
         assert_eq!(meta["nextOffset"], Value::Null);
-        assert_eq!(list.len(), 2, "only the other diagnostic and the summary stay");
+        assert_eq!(
+            list.len(),
+            2,
+            "only the other diagnostic and the summary stay"
+        );
     }
 }

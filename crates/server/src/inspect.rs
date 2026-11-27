@@ -99,15 +99,25 @@ pub(crate) async fn inspect(state: &AppState, args: Value) -> Result<Value> {
         })
         .cloned()
         .collect();
-    let diagnostics_page = crate::text_diagnostics::page_overflow(
+    let diagnostics_offset = req.diagnostics_offset.unwrap_or(0);
+    let mut diagnostics_page = crate::text_diagnostics::page_overflow(
         &mut diagnostics,
-        req.diagnostics_offset.unwrap_or(0),
+        diagnostics_offset,
         diagnostics_limit,
     );
     // Measured overflow advisories never make an explicitly budgeted page fail on their own.
     if let Some(budget) = req.budget {
+        let shown = crate::text_diagnostics::overflow_items(&diagnostics);
         let allowance = budget / crate::text_diagnostics::BUDGET_SHARE;
         crate::text_diagnostics::fit_in_place(&mut diagnostics, allowance);
+        let kept = crate::text_diagnostics::overflow_items(&diagnostics);
+        diagnostics_page = crate::text_diagnostics::resume(
+            diagnostics_page,
+            diagnostics_offset,
+            diagnostics_limit,
+            shown,
+            kept,
+        );
     }
     let mut response = json!({"schemaVersion":1,"projectId":job["projectId"],"revision":job["revision"],"sceneKey":job["sceneKey"],"status":job["status"],"nodes":[],"diagnostics":diagnostics});
     if let Some(meta) = diagnostics_page {

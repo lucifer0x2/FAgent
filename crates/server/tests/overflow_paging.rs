@@ -87,3 +87,41 @@ async fn every_overflowing_text_node_is_reachable_through_inspect_layout() {
     assert_eq!(items(&late), ["t17"], "{late}");
     assert!(late.get("diagnosticsPage").is_none());
 }
+
+/// A byte budget may drop items from a diagnostics page; `nextOffset` resumes after the last
+/// item kept, so a client following it still sees every item.
+#[tokio::test]
+async fn budgeted_overflow_pages_skip_no_item() {
+    let s = Server::start().await;
+    let p = s.project().await;
+    assert_eq!(s.batch(&p, 0, design()).await["committedRevision"], 1);
+    let pending = s
+        .call(
+            "render_frame",
+            json!({"projectId":p,"revision":1,"frameId":"frame","viewport":{"width":400,"height":600}}),
+        )
+        .await;
+    let job = s.wait(pending["jobId"].as_str().unwrap()).await;
+    let mut expected: Vec<_> = (0..TEXTS).map(|i| format!("t{i}")).collect();
+    expected.sort();
+    for limit in [12, 500] {
+        let (mut seen, mut offset, mut calls) = (Vec::new(), 0, 0);
+        loop {
+            let args = json!({"projectId":p,"jobId":job["jobId"],"sceneKey":job["sceneKey"],
+                "fields":["bounds"],"limit":1,"budget":8192,
+                "diagnosticsLimit":limit,"diagnosticsOffset":offset});
+            let page = s.call("inspect_layout", args).await;
+            let shown = items(&page);
+            assert!(!shown.is_empty(), "{page}");
+            seen.extend(shown);
+            calls += 1;
+            assert!(calls <= TEXTS, "no progress: {page}");
+            match page["diagnosticsPage"]["nextOffset"].as_u64() {
+                Some(next) => offset = next,
+                None => break,
+            }
+        }
+        seen.sort();
+        assert_eq!(seen, expected, "limit {limit}");
+    }
+}
