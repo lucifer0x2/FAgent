@@ -2,11 +2,14 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import { FramePacer } from "../src/engine/drawPacing.ts";
 import type { EngineApi } from "../src/engine/engineApi.ts";
-import { cachedFontBytes, FONT_ENTRIES } from "../src/engine/fontCache.ts";
+import { cachedFontBytes, FONT_BYTES, FONT_ENTRIES } from "../src/engine/fontCache.ts";
 import { FrameLoader } from "../src/engine/frameLoader.ts";
 import type { WorkerMessage } from "../src/engine/protocol.ts";
 import {
   evictions,
+  RECORD_ENTRY_BYTES,
+  validManifest,
+  type ManifestKey,
   type RecordKey,
   type RecordStore,
   type StoredManifest,
@@ -46,6 +49,10 @@ function fakeEngine(digests: Record<string, string>) {
   const staged = new Map<string, string>();
   const summary = (frameId: string, revision: number) =>
     JSON.stringify({ frameId, revision, assets: [], diagnostics: [], height: 10 });
+  const text = (value: unknown) => {
+    if (typeof value !== "string") throw new TypeError("expected a string");
+    return Boolean(value);
+  };
   const engine = {
     load_snapshot: (json: string) => calls.push(`snapshot:${JSON.parse(json).revision}`),
     frame_keys: (_revision: number, frames: string) => {
@@ -54,8 +61,9 @@ function fakeEngine(digests: Record<string, string>) {
         JSON.parse(frames).map((f: { frameId: string }) => ({ frameId: f.frameId, digest: digests[f.frameId] })),
       );
     },
-    reuse: (id: string, digest: string) => Boolean(digest) && shown.get(id) === digest,
-    shows: (id: string, digest: string) => Boolean(digest) && shown.get(id) === digest,
+    // wasm-bindgen throws for a `&str` argument that is not a string.
+    reuse: (id: string, digest: string) => text(digest) && shown.get(id) === digest,
+    shows: (id: string, digest: string) => text(digest) && shown.get(id) === digest,
     required_fonts: () => JSON.stringify([{ id: "font", hash: HASH }]),
     has_font: (id: string) => fonts.has(id),
     load_font: (id: string) => {
@@ -106,6 +114,7 @@ function fakeEngine(digests: Record<string, string>) {
 function memoryStore(
   hooks: {
     read?: (keys: RecordKey[], signal: AbortSignal) => ReturnType<RecordStore["read"]> | undefined;
+    manifest?: (key: ManifestKey, signal: AbortSignal) => Promise<StoredManifest | undefined> | undefined;
     write?: (batch: WriteBatch) => Promise<boolean> | undefined;
   } = {},
 ) {
@@ -120,8 +129,10 @@ function memoryStore(
       const found = keys.map((key) => Promise.resolve(records.get(JSON.stringify(key))));
       return { records: found, done: Promise.resolve(1) };
     },
-    async manifest(key) {
+    async manifest(key, signal) {
       calls.push("manifest");
+      const hooked = hooks.manifest?.(key, signal);
+      if (hooked) return hooked;
       return manifests.get(JSON.stringify(key));
     },
     async write(batch) {
@@ -349,6 +360,97 @@ test("a newer sync cancels the pending imports of the one it replaces", async ()
   assert.deepEqual(warm.calls.filter((c) => /^(compute|import)/.test(c)), ["import:a", "import:b"]);
 });
 
+test("a held sync with a new ETag at the same revision neither reads nor files digests under it", async () => {
+  const memory = memoryStore();
+  // The worker holds revision 3 as it arrived with ETag e1.
+  const tab = session(memory.store, { a: "da", b: "db" });
+  await tab.loader.sync(sync(1, 3, { etag: '"e1"' }));
+  await written(tab.cache);
+  // Same revision, another ETag, no snapshot: the worker still holds the older bytes, so
+  // their digests must not be filed under the new representation's ETag.
+  memory.calls.length = 0;
+  await tab.loader.sync(sync(2, 3, { snapshot: undefined, etag: '"e2"' }));
+  assert.ok(!memory.calls.includes("manifest"), JSON.stringify(memory.calls));
+  await written(tab.cache);
+  assert.deepEqual([...memory.manifests.values()].map((m) => m.etag), ['"e1"']);
+  // A later session loads the new representation (frame a changed): a manifest miss, so a
+  // recomputes instead of importing the old content.
+  const next = session(memory.store, { a: "da2", b: "db" });
+  await next.loader.sync(sync(1, 3, { etag: '"e2"' }));
+  assert.deepEqual(next.calls.filter((c) => /^(frame_keys|compute|import)/.test(c)), ["frame_keys", "compute:a", "import:b"]);
+});
+
+test("a sync superseded while its manifest is read runs no frame_keys and files nothing", async () => {
+  let open = () => {};
+  const gate = new Promise<void>((resolve) => (open = resolve));
+  const memory = memoryStore({
+    manifest: async () => {
+      await gate;
+      return undefined;
+    },
+  });
+  const tab = session(memory.store, { a: "da", b: "db" });
+  const older = tab.loader.sync(sync(1, 3));
+  await new Promise((resolve) => setTimeout(resolve, 5));
+  const newer = tab.loader.sync(sync(2, 4, { etag: undefined }));
+  await newer;
+  open();
+  await older;
+  assert.equal(tab.calls.filter((c) => c === "frame_keys").length, 1, "only the newer sync runs frame_keys");
+  await written(tab.cache);
+  assert.equal(memory.manifests.size, 0, "nothing is filed for the superseded request");
+  assert.ok(tab.posted.every((m) => !("generation" in m) || m.generation === 2));
+});
+
+test("a damaged manifest reads as a miss and never fails the sync", async () => {
+  assert.equal(validManifest({ digests: { a: "da" } }), true);
+  for (const digests of [null, undefined, "da", ["da"], { a: 1 }, { a: null }])
+    assert.equal(validManifest({ digests }), false, JSON.stringify(digests));
+  const memory = memoryStore();
+  const cold = session(memory.store, { a: "da", b: "db" });
+  await cold.loader.sync(sync(1, 3));
+  await written(cold.cache);
+  for (const digests of [null, { a: 1, b: "db" }]) {
+    for (const [k, m] of memory.manifests) memory.manifests.set(k, { ...m, digests: digests as never });
+    const warm = session(memory.store, { a: "da", b: "db" });
+    await warm.loader.sync(sync(1, 3));
+    assert.deepEqual(warm.calls.filter((c) => /^(frame_keys|compute|import)/.test(c)), ["frame_keys", "import:a", "import:b"]);
+    assert.deepEqual(
+      warm.posted.filter((m) => m.type === "synced").map((m) => m.type === "synced" && m.error),
+      [undefined],
+    );
+    assert.equal(warm.cache.stats().manifestMisses, 1);
+    await written(warm.cache);
+  }
+});
+
+test("a manifest hit is written again, so manifests are evicted by use", async () => {
+  const memory = memoryStore();
+  const cold = session(memory.store, { a: "da", b: "db" });
+  await cold.loader.sync(sync(1, 3));
+  await written(cold.cache);
+  memory.calls.length = 0;
+  const warm = session(memory.store, { a: "da", b: "db" });
+  await warm.loader.sync(sync(1, 3));
+  await written(warm.cache);
+  assert.equal(warm.cache.stats().manifestHits, 1);
+  assert.ok(memory.calls.includes("write:0:1"), JSON.stringify(memory.calls));
+});
+
+test("a record over the per-record bound is counted as oversized, not written", async () => {
+  const memory = memoryStore();
+  const cold = session(memory.store, { a: "da", b: "db" });
+  const engine = cold.engine as { export_record: EngineApi["export_record"] };
+  const exportRecord = engine.export_record;
+  engine.export_record = (id, digest) =>
+    id === "b" ? new Uint8Array(RECORD_ENTRY_BYTES + 1) : exportRecord(id, digest);
+  await cold.loader.sync(sync(1, 3));
+  const stats = await written(cold.cache);
+  const [stored] = memory.records.values();
+  assert.equal(memory.records.size, 1);
+  assert.deepEqual([stats.written, stats.oversized, stats.bytesWritten], [1, 1, stored.size]);
+});
+
 test("nothing is read from the cache before a sync carries a snapshot the server answered", async () => {
   const memory = memoryStore();
   const fresh = session(memory.store, { a: "da", b: "db" });
@@ -447,4 +549,44 @@ test("font bytes come from the worker cache once verified; a damaged entry is fe
   await off(manifest);
   assert.equal(fetches, 3);
   assert.ok(FONT_ENTRIES >= 16);
+});
+
+test("the font cache holds at most its byte bound, oldest first; a font above it is not kept", async () => {
+  const href = (request: string | Request) => (typeof request === "string" ? request : request.url);
+  const entries = new Map<string, { bytes: ArrayBuffer; headers: Headers }>();
+  const cache = {
+    match: async (request: string | Request) => {
+      const entry = entries.get(href(request));
+      return entry ? new Response(entry.bytes.slice(0), { headers: entry.headers }) : undefined;
+    },
+    put: async (request: string | Request, response: Response) => {
+      entries.delete(href(request));
+      entries.set(href(request), { bytes: await response.arrayBuffer(), headers: response.headers });
+    },
+    delete: async (request: string | Request) => entries.delete(href(request)),
+    keys: async () => [...entries.keys()].map((url) => new Request(url)),
+  };
+  const storage = { open: async () => cache } as unknown as CacheStorage;
+  const font = async (text: string) => {
+    const bytes = new TextEncoder().encode(text).buffer as ArrayBuffer;
+    const digest = await crypto.subtle.digest("SHA-256", bytes);
+    const hash = Array.from(new Uint8Array(digest), (b) => b.toString(16).padStart(2, "0")).join("");
+    return { bytes, manifest: { id: text, hash, url: `/fonts/${text}` } };
+  };
+  const fonts = await Promise.all(["font-0001", "font-0002", "font-0003", "a font of 30 bytes, too large"].map(font));
+  const origin = "http://127.0.0.1";
+  // An entry stored before sizes were recorded (no size header) is measured from its body.
+  entries.set(`${origin}/__fagent/engine-fonts/old`, { bytes: new ArrayBuffer(9), headers: new Headers() });
+  const fetchFont = cachedFontBytes(
+    async (manifest) => fonts.find((f) => f.manifest.hash === manifest.hash)!.bytes,
+    { enabled: () => true, storage, origin, bounds: { entries: 64, bytes: 25 } },
+  );
+  const names = () => [...entries.keys()].map((url) => url.slice(url.lastIndexOf("/") + 1));
+  for (const { manifest } of fonts) {
+    await fetchFont(manifest);
+    await new Promise((resolve) => setTimeout(resolve, 5));
+  }
+  assert.deepEqual(names(), [fonts[1].manifest.hash, fonts[2].manifest.hash]);
+  assert.deepEqual([...entries.values()].map((e) => e.headers.get("x-fagent-bytes")), ["9", "9"]);
+  assert.ok(FONT_BYTES >= 64 * 1024 * 1024);
 });

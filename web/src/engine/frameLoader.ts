@@ -64,7 +64,8 @@ const SUPERSEDED = Symbol("superseded");
  */
 export class FrameLoader {
   private generation = 0;
-  private accepted?: { projectId: string; revision: number; snapshot: Snapshot };
+  /** The loaded snapshot and the ETag that arrived with it (the only one trusted for it). */
+  private accepted?: { projectId: string; revision: number; snapshot: Snapshot; etag?: string };
   private failedFonts = new Set<string>();
   /**
    * What the page was told about each committed frame. A reused frame resends it: the page
@@ -120,6 +121,7 @@ export class FrameLoader {
           projectId: request.projectId,
           revision: request.revision,
           snapshot: request.snapshot,
+          etag: request.etag,
         };
       }
       const accepted = this.accepted;
@@ -130,10 +132,13 @@ export class FrameLoader {
         throw new Error("The engine is missing this snapshot revision.");
       if (request.bypass) this.failedFonts.clear();
       // The cache is read only from here on: this sync carries a snapshot the server answered.
+      // An ETag that did not arrive with the loaded snapshot names another representation
+      // (same revision, new bytes): its digests are neither read nor filed from this one.
+      const etag = request.etag && request.etag === accepted.etag ? request.etag : undefined;
       const digests = cache
-        ? await this.cachedKeys(cache, engine, request, reads.signal)
+        ? await this.cachedKeys(cache, engine, request, etag, reads.signal, current)
         : this.keys(engine, request);
-      if (!current()) return;
+      if (!digests || !current()) return;
       const records =
         cache && !request.bypass
           ? this.lookup(cache, engine, request, digests, reads.signal)
@@ -236,16 +241,28 @@ export class FrameLoader {
     return digests;
   }
 
-  /** Digests stored for this ETag and frame list, else `frame_keys` (then stored). */
-  private async cachedKeys(cache: SceneCache, engine: EngineApi, request: Sync, signal: AbortSignal) {
-    const framesKey = request.etag ? await cache.framesKey(request.frames) : undefined;
-    if (request.etag && framesKey && !request.bypass) {
-      const known = await cache.digests(request.projectId, request.etag, framesKey, signal);
+  /**
+   * Digests stored for `etag` (trusted for the loaded snapshot) and this frame list, else
+   * `frame_keys` (then stored). Undefined when a newer sync took over during the reads: a dead
+   * request runs no `frame_keys` (~0.4 s on a 229-frame board) and files nothing.
+   */
+  private async cachedKeys(
+    cache: SceneCache,
+    engine: EngineApi,
+    request: Sync,
+    etag: string | undefined,
+    signal: AbortSignal,
+    current: () => boolean,
+  ) {
+    const framesKey = etag ? await cache.framesKey(request.frames) : undefined;
+    if (!current()) return undefined;
+    if (etag && framesKey && !request.bypass) {
+      const known = await cache.digests(request.projectId, etag, framesKey, signal);
+      if (!current()) return undefined;
       if (known) return known;
     }
     const digests = this.keys(engine, request);
-    if (request.etag && framesKey)
-      cache.rememberDigests(request.projectId, request.etag, framesKey, digests);
+    if (etag && framesKey) cache.rememberDigests(request.projectId, etag, framesKey, digests);
     return digests;
   }
 

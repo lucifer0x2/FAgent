@@ -434,6 +434,28 @@ test("client: the snapshot crosses once per revision unless Retry bypasses it", 
     .filter((m) => (m as { type: string }).type === "sync")
     .map((m) => Boolean((m as { snapshot?: unknown }).snapshot));
   assert.deepEqual(sent, [true, false, true, true]);
+  // Same revision, new ETag (a 200 with new bytes at an equal revision): the new snapshot
+  // crosses with its ETag, so the worker never files digests of the old one under it.
+  worker.posted.length = 0;
+  const tagged = { projectId: "p", revision: 5 } as never;
+  const rebuilt = { projectId: "p", revision: 5 } as never;
+  client.sync(tagged, [], false, '"a"');
+  client.sync(tagged, [], false, '"a"');
+  client.sync(rebuilt, [], false, '"b"');
+  client.sync(rebuilt, [], false, null);
+  const syncs = worker.posted.filter((m) => (m as { type: string }).type === "sync") as {
+    snapshot?: unknown;
+    etag?: string;
+  }[];
+  assert.deepEqual(
+    syncs.map((m) => [m.snapshot === undefined ? null : m.snapshot === tagged ? "a" : "b", m.etag ?? null]),
+    [
+      ["a", '"a"'],
+      [null, '"a"'],
+      ["b", '"b"'],
+      ["b", null],
+    ],
+  );
   client.setCamera({ scale: 1, tx: 0, ty: 0, width: 1, height: 1 });
   client.setCamera({ scale: 1, tx: 0, ty: 0, width: 1, height: 1 });
   assert.equal(

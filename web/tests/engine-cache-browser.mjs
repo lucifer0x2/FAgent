@@ -1,7 +1,8 @@
 // The engine scene cache's IndexedDB store (web/src/engine/recordStore.ts) in a real
 // Chromium (Task 42): one read transaction resolving each record on its own, misses and
-// damaged values as undefined, other engine builds removed on write, least recently used
-// eviction (touched records stay), manifests, removal and an aborted read. The module runs
+// damaged records or manifests as undefined, other engine builds removed by a store's first
+// write only, least recently used eviction (records touched in the same batch stay, no usage
+// row outlives its record), manifests, removal and an aborted read. The module runs
 // through Vite on a blank page of its origin, in a new browser context (empty profile).
 // Usage: node web/tests/engine-cache-browser.mjs   (FAGENT_TEST_CHANNEL=chrome for Chrome)
 import assert from "node:assert/strict";
@@ -45,41 +46,91 @@ try {
     await new Promise((resolve) => setTimeout(resolve, 5));
     await one.write({ records: [record("b1", "d")], touched: [], manifests: [] });
     out.afterEviction = await read(one, ["a", "b", "c", "d"].map((d) => key("b1", d)));
-    await one.remove(key("b1", "c"));
-    out.afterRemove = await read(one, [key("b1", "c")]);
-    // A damaged value (no bytes) reads as a miss.
-    await new Promise((resolve, reject) => {
-      const open = indexedDB.open("fagent.engine-scenes");
-      open.onsuccess = () => {
-        const tx = open.result.transaction("records", "readwrite");
-        tx.objectStore("records").put({ ...record("b1", "d"), bytes: "not bytes" });
-        tx.oncomplete = () => (open.result.close(), resolve());
-        tx.onerror = () => reject(tx.error);
-      };
+    // Raw rows of one object store, as `build/digest` names.
+    const rows = (name) =>
+      new Promise((resolve, reject) => {
+        const open = indexedDB.open("fagent.engine-scenes");
+        open.onsuccess = () => {
+          const request = open.result.transaction(name).objectStore(name).getAll();
+          request.onsuccess = () => {
+            open.result.close();
+            resolve(request.result.map((row) => `${row.build}/${row.digest ?? row.etag}`).sort());
+          };
+          request.onerror = () => reject(request.error);
+        };
+      });
+    // One batch that touches the oldest stored record ("c") and adds one at capacity: the
+    // touched record ranks as just used, so the oldest untouched one goes ("a").
+    await new Promise((resolve) => setTimeout(resolve, 5));
+    await one.write({ records: [record("b1", "e")], touched: [{ key: key("b1", "c"), size: 10 }], manifests: [] });
+    out.touchedAtCapacity = await read(one, ["a", "c", "d", "e"].map((d) => key("b1", d)));
+    // A batch whose touched records must go anyway leaves no usage row without its record.
+    await new Promise((resolve) => setTimeout(resolve, 5));
+    await one.write({
+      records: ["f", "g", "h"].map((d) => record("b1", d)),
+      touched: ["c", "d", "e"].map((d) => ({ key: key("b1", d), size: 10 })),
+      manifests: [],
     });
-    out.damaged = await read(one, [key("b1", "d")]);
+    out.usage = await rows("usage");
+    out.records = await rows("records");
+    await one.remove(key("b1", "h"));
+    out.afterRemove = await read(one, [key("b1", "h")]);
+    // A damaged value (no bytes) reads as a miss; so do manifests whose digests are not an
+    // object of strings.
+    const put = (name, value) =>
+      new Promise((resolve, reject) => {
+        const open = indexedDB.open("fagent.engine-scenes");
+        open.onsuccess = () => {
+          const tx = open.result.transaction(name, "readwrite");
+          tx.objectStore(name).put(value);
+          tx.oncomplete = () => (open.result.close(), resolve());
+          tx.onerror = () => reject(tx.error);
+        };
+      });
+    await put("records", { ...record("b1", "g"), bytes: "not bytes" });
+    out.damaged = await read(one, [key("b1", "g")]);
+    const manifest = { build: "b1", projectId: "p", framesKey: "k", used: 0 };
+    await put("manifests", { ...manifest, etag: '"null"', digests: null });
+    await put("manifests", { ...manifest, etag: '"number"', digests: { f: 1 } });
+    out.damagedManifests = await Promise.all(
+      ['"null"', '"number"'].map((etag) => one.manifest(["b1", "p", etag, "k"], new AbortController().signal)),
+    );
     // An aborted read resolves every record as a miss.
     const controller = new AbortController();
     controller.abort();
-    out.aborted = await read(one, [key("b1", "a")], controller.signal);
-    // Another build's write removes every row of b1 (records, usage, manifests).
+    out.aborted = await read(one, [key("b1", "f")], controller.signal);
+    // Another build's first write removes every row of b1 (records, usage, manifests) ...
     const two = m.indexedDbStore("b2");
     await two.write({ records: [record("b2", "a")], touched: [], manifests: [] });
-    out.oldBuild = await read(one, [key("b1", "a")]);
+    out.oldBuild = await read(one, [key("b1", "f")]);
     out.oldManifest = await one.manifest(["b1", "p", '"e"', "k"], new AbortController().signal);
     out.newBuild = await read(two, [key("b2", "a")]);
+    // ... once per worker: two tabs on different builds then keep each other's rows.
+    await one.write({ records: [record("b1", "x")], touched: [], manifests: [] });
+    await two.write({ records: [record("b2", "y")], touched: [], manifests: [] });
+    out.bothBuilds = [...(await read(one, [key("b1", "x")])), ...(await read(two, ["a", "y"].map((d) => key("b2", d))))];
+    // A new worker of b1 sweeps b2 at its first write.
+    const three = m.indexedDbStore("b1");
+    await three.write({ records: [], touched: [], manifests: [] });
+    out.afterNewWorker = [...(await read(three, [key("b1", "x")])), ...(await read(two, [key("b2", "y")]))];
     return out;
   });
   assert.equal(result.wrote, true);
   assert.deepEqual(result.read, ["record a", null, "record c"]);
   assert.deepEqual(result.manifest, { f: "a" });
   assert.deepEqual(result.afterEviction, ["record a", null, "record c", "record d"]);
+  assert.deepEqual(result.touchedAtCapacity, [null, "record c", "record d", "record e"]);
+  assert.deepEqual(result.usage, ["b1/f", "b1/g", "b1/h"], "no usage row outlives its record");
+  assert.deepEqual(result.records, result.usage);
   assert.deepEqual(result.afterRemove, [null]);
   assert.deepEqual(result.damaged, [null]);
+  assert.deepEqual(result.damagedManifests, [undefined, undefined]);
   assert.deepEqual(result.aborted, [null]);
   assert.deepEqual(result.oldBuild, [null]);
   assert.equal(result.oldManifest, undefined);
   assert.deepEqual(result.newBuild, ["record a"]);
+  assert.deepEqual(result.bothBuilds, ["record x", "record a", "record y"]);
+  assert.deepEqual(result.afterNewWorker, ["record x", null]);
   await context.close();
   console.log("engine-cache-browser: ok");
 } finally {

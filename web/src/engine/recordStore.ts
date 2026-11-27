@@ -73,7 +73,10 @@ export interface RecordStore {
     signal: AbortSignal,
   ): { records: Promise<StoredRecord | undefined>[]; done: Promise<number> };
   manifest(key: ManifestKey, signal: AbortSignal): Promise<StoredManifest | undefined>;
-  /** Evicts, then stores the batch; resolves false when nothing was committed. */
+  /**
+   * Evicts, then stores the batch; resolves false when nothing was committed. The first
+   * committed write of a store also deletes every row of other builds.
+   */
   write(batch: WriteBatch): Promise<boolean>;
   remove(key: RecordKey): Promise<void>;
 }
@@ -117,6 +120,17 @@ const valid = (value: unknown): value is StoredRecord => {
   );
 };
 
+/** A manifest whose digests are a plain object of strings; anything else reads as a miss. */
+export const validManifest = (value: unknown): value is StoredManifest => {
+  const digests = (value as StoredManifest | undefined)?.digests;
+  return (
+    typeof digests === "object" &&
+    digests !== null &&
+    !Array.isArray(digests) &&
+    Object.values(digests).every((digest) => typeof digest === "string")
+  );
+};
+
 /** Keys of `build` sort between `[build]` and `[build, []]` (an array sorts after strings). */
 const own = (build: string) => IDBKeyRange.bound([build], [build, []]);
 const others = (build: string) => [
@@ -130,6 +144,8 @@ export function indexedDbStore(
 ): RecordStore | undefined {
   if (typeof indexedDB === "undefined") return undefined;
   let opening: Promise<IDBDatabase | undefined> | undefined;
+  /** Other builds' rows were deleted by a committed write of this store (once per worker). */
+  let swept = false;
   const database = () =>
     (opening ??= new Promise((resolve) => {
       let done = false;
@@ -234,33 +250,46 @@ export function indexedDbStore(
         const request = tx.objectStore("manifests").get(key);
         request.onsuccess = () => (value = request.result);
       });
-      return value && typeof value.digests === "object" ? value : undefined;
+      return validManifest(value) ? value : undefined;
     },
-    write(batch) {
+    async write(batch) {
       const used = Date.now();
       const records = batch.records.filter((r) => r.size <= RECORD_ENTRY_BYTES);
-      return transaction(["records", "usage", "manifests"], "readwrite", WRITE_DEADLINE, undefined, (tx) => {
+      const sweep = !swept;
+      const ok = await transaction(["records", "usage", "manifests"], "readwrite", WRITE_DEADLINE, undefined, (tx) => {
         const [store, usage, manifests] = ["records", "usage", "manifests"].map((n) => tx.objectStore(n));
-        // Records of other engine builds can never be read again: they go first.
-        for (const range of others(build))
-          for (const s of [store, usage, manifests]) s.delete(range);
+        // Records of other engine builds are never read by this one. They go once per worker
+        // (its first write), not on every write: a tab still open on another build (kept across
+        // a deploy) would otherwise wipe this build's rows on each of its loads, and back.
+        if (sweep)
+          for (const range of others(build))
+            for (const s of [store, usage, manifests]) s.delete(range);
         const rows = usage.getAll(own(build));
         rows.onsuccess = () => {
+          // Records this batch's loads read are as recent as the ones it adds: their last use
+          // moves to now before ranking, so a load never evicts what it has just imported.
+          const touched = new Set(batch.touched.map(({ key }) => JSON.stringify(key)));
+          const current = (rows.result as Usage[]).map((row) =>
+            touched.has(JSON.stringify(row.key)) ? { ...row, used } : row,
+          );
           const incoming = records.map((r) => ({ key: recordKey(r), size: r.size }));
-          for (const key of evictions(rows.result as Usage[], incoming, bounds)) {
+          const evicted = new Set<string>();
+          for (const key of evictions(current, incoming, bounds)) {
+            evicted.add(JSON.stringify(key));
             store.delete(key);
             usage.delete(key);
           }
-          const sizes = new Map(
-            (rows.result as Usage[]).map((row) => [JSON.stringify(row.key), row.size]),
-          );
+          const replaced = new Set(incoming.map(({ key }) => JSON.stringify(key)));
           for (const record of records) {
             store.put(record);
             usage.put({ ...rowKey(record), key: recordKey(record), size: record.size, used });
           }
-          for (const { key, size } of batch.touched)
-            if (sizes.has(JSON.stringify(key)))
-              usage.put({ ...rowKey(key), key, size, used });
+          // Only rows that still have their record (stored, not evicted, not just replaced).
+          for (const row of current) {
+            const id = JSON.stringify(row.key);
+            if (touched.has(id) && !evicted.has(id) && !replaced.has(id))
+              usage.put({ ...rowKey(row.key), key: row.key, size: row.size, used });
+          }
         };
         for (const manifest of batch.manifests) manifests.put({ ...manifest, used });
         if (!batch.manifests.length) return;
@@ -280,6 +309,8 @@ export function indexedDbStore(
           };
         };
       });
+      if (ok && sweep) swept = true;
+      return ok;
     },
     async remove(key) {
       await transaction(["records", "usage"], "readwrite", OPEN_DEADLINE, undefined, (tx) => {

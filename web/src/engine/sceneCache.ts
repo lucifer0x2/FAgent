@@ -1,7 +1,9 @@
 import {
   indexedDbStore,
+  RECORD_ENTRY_BYTES,
   recordKey,
   THEME,
+  validManifest,
   type RecordKey,
   type RecordStore,
   type Resource,
@@ -39,8 +41,11 @@ export interface CacheStats {
   readMs: number;
   imported: number;
   rejected: number;
+  /** Records committed to the store, and their bytes. */
   written: number;
   bytesWritten: number;
+  /** Exported records over the per-record bound, never stored. */
+  oversized: number;
   exportMs: number;
   writeFailures: number;
   pendingWrites: number;
@@ -93,6 +98,7 @@ export class SceneCache {
     rejected: 0,
     written: 0,
     bytesWritten: 0,
+    oversized: 0,
     exportMs: 0,
     writeFailures: 0,
   };
@@ -136,11 +142,15 @@ export class SceneCache {
     const manifest = await opened.store
       .manifest([opened.build, projectId, etag, framesKey], signal)
       .catch(() => undefined);
-    if (!manifest) {
+    // A damaged manifest (digests not an object of strings) would fail the whole sync.
+    if (!manifest || !validManifest(manifest)) {
       this.counters.manifestMisses++;
       return undefined;
     }
     this.counters.manifestHits++;
+    // Written again at the next flush with its last use moved to now, so the manifests a
+    // load reads are the last ones evicted (ranked by use, not by write time).
+    this.manifests.push(manifest);
     return new Map(Object.entries(manifest.digests));
   }
 
@@ -236,6 +246,10 @@ export class SceneCache {
           this.counters.exportMs += this.now() - start;
           if (!exported) continue;
           const size = exported.bytes.byteLength;
+          if (size > RECORD_ENTRY_BYTES) {
+            this.counters.oversized++;
+            continue;
+          }
           records.push({
             build: opened.build,
             projectId: frame.projectId,
