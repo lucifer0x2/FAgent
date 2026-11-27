@@ -279,3 +279,49 @@ async fn stacks_sample_text_in_one_call() {
     );
     assert!(bytes(&found) < outline_bytes);
 }
+
+/// FB-14: text holding a private-use icon glyph carries `textEscaped` in every read that shows
+/// the text; plain text gets no new field.
+#[tokio::test]
+async fn icon_glyph_text_carries_an_escaped_copy() {
+    let s = Server::start().await;
+    let p = fixture(&s).await;
+    let icon = json!([{"op":"create_node","id":"icon","kind":"text","parentId":"hero","props":{"name":"icon","text":"\u{E40D}","fill":"#111111","width":24,"height":24,"fontId":"font_bundled","fontSize":20,"lineHeight":24}}]);
+    assert_eq!(s.batch(&p, 1, "icon", icon).await["committedRevision"], 2);
+    let found = find(
+        &s,
+        json!({"projectId":p,"ids":["icon","title"],"properties":["text"]}),
+    )
+    .await;
+    let by_id = |list: &Value, id: &str| {
+        list.as_array()
+            .unwrap()
+            .iter()
+            .find(|n| n["id"] == id)
+            .unwrap()
+            .clone()
+    };
+    let icon = by_id(&found["matches"], "icon");
+    assert_eq!(icon["props"]["text"], "\u{E40D}");
+    assert_eq!(icon["textEscaped"], "\\uE40D", "{found}");
+    assert!(by_id(&found["matches"], "title")
+        .get("textEscaped")
+        .is_none());
+    let preview = find(&s, json!({"projectId":p,"textContains":"\u{E40D}"})).await;
+    assert_eq!(preview["matches"][0]["textEscaped"], "\\uE40D", "{preview}");
+    for (tool, args) in [
+        ("get_subtree", json!({"projectId":p,"nodeId":"hero"})),
+        (
+            "get_design_context",
+            json!({"projectId":p,"frameId":"hero"}),
+        ),
+    ] {
+        let read = s.call(tool, args).await;
+        assert_eq!(
+            by_id(&read["nodes"], "icon")["textEscaped"],
+            "\\uE40D",
+            "{tool}: {read}"
+        );
+        assert!(by_id(&read["nodes"], "title").get("textEscaped").is_none());
+    }
+}

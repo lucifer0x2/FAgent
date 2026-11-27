@@ -44,6 +44,7 @@ pub(super) fn read(
                     .unwrap()
                     .retain(|k, _| props.contains(k));
             }
+            super::text_escape::annotate(&mut value);
             value
         };
         if node.kind == NodeKind::Instance {

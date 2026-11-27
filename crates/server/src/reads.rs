@@ -23,6 +23,7 @@ mod states;
 #[cfg(test)]
 mod stored_corruption_tests;
 pub(crate) mod targets;
+mod text_escape;
 #[cfg(test)]
 mod traversal_tests;
 mod tree;

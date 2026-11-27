@@ -59,6 +59,7 @@ impl Source<'_> {
                         .retain(|k, _| props.contains(k));
                 }
                 let mut value = json!(authored);
+                super::text_escape::annotate(&mut value);
                 if context {
                     let mut props = self.resolved[node.id.as_str()].props.clone();
                     value["effectiveTheme"] = props
