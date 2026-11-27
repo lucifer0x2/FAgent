@@ -10,9 +10,33 @@ use sha2::{Digest, Sha256};
 /// entry list the offset indexes. `revision` is bound through the snapshot revision instead.
 const UNBOUND: [&str; 5] = ["cursor", "properties", "budget", "limit", "revision"];
 
-/// The cursor scope of a snapshot read: a 16-hex-digit hash of everything bound, followed by the revision
-/// and a short digest per bound field (`<hash>.<revision>.<field>:<digest>,…`), so a mismatch
-/// can name the changed parameter instead of a generic `INVALID_CURSOR`.
+/// One-letter code of every bound request field, so a cursor stays as short as the single hash
+/// it replaced (the byte budget counts the cursor).
+const CODES: [(&str, char); 18] = [
+    ("tool", 't'),
+    ("projectId", 'p'),
+    ("nodeId", 'n'),
+    ("frameId", 'f'),
+    ("depth", 'd'),
+    ("ids", 'i'),
+    ("viewport", 'v'),
+    ("viewports", 'w'),
+    ("theme", 'h'),
+    ("kinds", 'k'),
+    ("nameContains", 'm'),
+    ("textContains", 'x'),
+    ("parentId", 'r'),
+    ("compact", 'c'),
+    ("nodeFormat", 'o'),
+    ("notes", 'N'),
+    ("instances", 'I'),
+    ("statesMode", 's'),
+];
+const DIGEST: usize = 6;
+
+/// The cursor scope of a snapshot read: the revision, then for each bound field its code and
+/// the first six hex digits of its JSON's SHA-256 (`<revision>.t1a2b3cp4d5e6f…`), so a mismatch
+/// names the changed parameter instead of a generic `INVALID_CURSOR`.
 pub fn scope(s: &Snapshot, tool: &str, req: &ReadRequest) -> Result<(String, usize)> {
     if let Some(requested) = req.revision.filter(|r| *r != s.revision) {
         return Err(super::revision_unavailable(requested, s.revision));
@@ -20,35 +44,43 @@ pub fn scope(s: &Snapshot, tool: &str, req: &ReadRequest) -> Result<(String, usi
     let mut query = serde_json::to_value(req)?;
     let fields = query.as_object_mut().unwrap();
     fields.retain(|key, value| !UNBOUND.contains(&key.as_str()) && !value.is_null());
-    let mut digests = vec![format!("tool:{}", digest(&json!(tool))?)];
-    for (key, value) in fields.iter() {
-        digests.push(format!("{key}:{}", digest(value)?));
+    fields.insert("tool".into(), json!(tool));
+    let mut scope = format!("{}.", s.revision);
+    for (name, code) in CODES {
+        if let Some(value) = fields.remove(name) {
+            scope.push(code);
+            scope.push_str(&digest(&value)?);
+        }
     }
-    let hash = Sha256::digest(serde_json::to_vec(&json!([
-        s.project_id,
-        s.revision,
-        tool,
-        query
-    ]))?);
-    let hash = format!("{hash:x}");
-    let scope = format!("{}.{}.{}", &hash[..16], s.revision, digests.join(","));
+    // A field without a code (none today) still binds the cursor, unnamed.
+    if !fields.is_empty() {
+        scope.push('?');
+        scope.push_str(&digest(&query)?);
+    }
     let offset = offset(&scope, req.cursor.as_deref())?;
     Ok((scope, offset))
 }
-/// First eight hex digits of the SHA-256 of `value`'s JSON.
+/// First [`DIGEST`] hex digits of the SHA-256 of `value`'s JSON.
 fn digest(value: &Value) -> Result<String> {
     let hash = format!("{:x}", Sha256::digest(serde_json::to_vec(value)?));
-    Ok(hash[..8].to_owned())
+    Ok(hash[..DIGEST].to_owned())
 }
 /// A scope from [`scope`]: its revision and per-field digests, or `None` for another format.
 fn parts(scope: &str) -> Option<(u64, Vec<(&str, &str)>)> {
-    let mut parts = scope.splitn(3, '.');
-    let (_, revision, fields) = (parts.next()?, parts.next()?, parts.next()?);
-    let fields = fields
-        .split(',')
-        .map(|field| field.split_once(':'))
-        .collect::<Option<Vec<_>>>()?;
-    Some((revision.parse().ok()?, fields))
+    let (revision, fields) = scope.split_once('.')?;
+    let mut list = Vec::new();
+    let mut rest = fields;
+    while !rest.is_empty() {
+        let code = rest.chars().next()?;
+        let digest = rest.get(1..1 + DIGEST)?;
+        let name = CODES
+            .iter()
+            .find(|(_, c)| *c == code)
+            .map_or("query", |(name, _)| *name);
+        list.push((name, digest));
+        rest = &rest[1 + DIGEST..];
+    }
+    Some((revision.parse().ok()?, list))
 }
 /// Why a cursor from `found` does not continue the read `expected`: a newer revision, or the
 /// first bound parameter whose value changed (named in the message and `error.field`).

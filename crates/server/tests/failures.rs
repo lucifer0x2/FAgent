@@ -100,5 +100,7 @@ async fn queue_and_pixel_caps_are_enforced() {
     }
     assert!(rejected >= 4);
     let result=s.call("render_frame",json!({"projectId":p,"revision":1,"frameId":"frame","viewport":{"width":100000,"height":100000}})).await;
-    assert_eq!(result["error"]["code"], "INVALID_REQUEST");
+    // FB-13: over the pixel budget names the budget and the scale that fits.
+    assert_eq!(result["error"]["code"], "PIXEL_BUDGET", "{result}");
+    assert_eq!(result["error"]["maxPixels"], 16_000_000);
 }
