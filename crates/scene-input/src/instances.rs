@@ -10,10 +10,29 @@ fn not_object() -> StorageError {
     StorageError::validation("props", "Properties must be an object")
 }
 
+/// Keys an `overrides.<descendantId>` patch may set on a master descendant. Font keys
+/// (`fontSize`, `lineHeight`, `fontId`, `fontWeight`, `fontStyle`) stay master-only.
 pub const OVERRIDE_KEYS: &[&str] = &[
-    "text", "fill", "visible", "styleId", "assetId", "name", "stroke", "shadow", "states",
-    "opacity", "radius",
+    "text",
+    "fill",
+    "visible",
+    "styleId",
+    "assetId",
+    "name",
+    "stroke",
+    "shadow",
+    "states",
+    "opacity",
+    "radius",
+    "clip",
+    "textDecoration",
+    "textTransform",
+    "textAlign",
+    "letterSpacing",
+    "textWrap",
 ];
+/// Keys an instance node may author; all but `componentId` and `overrides` patch the
+/// expanded root (`stroke` and `states` merge, the rest replace).
 pub const INSTANCE_KEYS: &[&str] = &[
     "componentId",
     "overrides",
@@ -33,6 +52,8 @@ pub const INSTANCE_KEYS: &[&str] = &[
     "shadow",
     "radius",
     "opacity",
+    "states",
+    "clip",
 ];
 
 /// Expands references before resolving styles/tokens, preserving stable virtual IDs.
