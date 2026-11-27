@@ -9,7 +9,7 @@ use ::postgres::GenericClient;
 use serde_json::Value;
 
 const ENTITY: &str = "SELECT data FROM entities WHERE project_id=$1 AND kind=$2 AND id=$3";
-const BINARY: &str = "SELECT CASE WHEN octet_length(bytes)<=$3 THEN bytes END FROM binaries WHERE project_id=$1 AND content_hash=$2";
+pub(super) const BINARY: &str = "SELECT CASE WHEN octet_length(bytes)<=$3 THEN bytes END FROM binaries WHERE project_id=$1 AND content_hash=$2";
 const INSERT_BINARY: &str = "INSERT INTO binaries(project_id,content_hash,bytes) VALUES($1,$2,$3)";
 
 /// Imports one or more assets as one commit. `fields` keeps `import_asset` error fields
@@ -168,6 +168,9 @@ fn asset<C: GenericClient>(
             "Asset content does not match its manifest hash",
         ));
     }
+    let mut asset = [asset];
+    crate::image_size::fill_missing(&mut asset, |_| Some(bytes.clone()));
+    let [asset] = asset;
     Ok((asset, bytes))
 }
 

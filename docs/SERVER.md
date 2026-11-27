@@ -365,6 +365,13 @@ start without a data root and prints the inbox location at startup. Each `STAGIN
 message names `--data-root` / `FAGENT_DATA_ROOT`, and each `PATH_REJECTED` inbox message says
 to copy the file into `inboxDir` from `list_projects`.
 
+Image assets record their natural `width` and `height` (PNG, JPEG and WebP `VP8`, `VP8L` and
+`VP8X` headers, parsed by `fagent_storage::image_size`); an import over 40 million pixels fails
+at `bytes`. A JPEG or WebP whose header gives no size is still accepted, without one. Assets
+imported before JPEG and WebP sizes were recorded keep `null` in storage and read with the size
+from their binary in `list_assets`, snapshots and asset reads (no migration); old bundles with
+those `null` sizes still import.
+
 `import_assets {projectId, expectedRevision, idempotencyKey, items:[…]}` imports 1–50 assets
 (10 MiB each, 64 MiB in total) in one call and commits them atomically as **one** revision.
 The 64 MiB total is reachable only with `path` and copy items: the MCP request body is

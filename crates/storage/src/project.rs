@@ -49,6 +49,7 @@ impl Project {
             .map(|asset| self.asset_path(&asset.relative_key).is_ok())
             .collect();
         apply_observed_readiness(s, &ready);
+        self.fill_image_sizes(s);
     }
 
     /// [`Self::apply_readiness`] from an earlier observation of the same rows (one flag
@@ -56,7 +57,10 @@ impl Project {
     /// Observes the files again when the observation does not cover these rows.
     pub(crate) fn apply_readiness_from(&self, s: &mut Snapshot, ready: &[bool]) {
         match ready.len() == s.assets.len() {
-            true => apply_observed_readiness(s, ready),
+            true => {
+                apply_observed_readiness(s, ready);
+                self.fill_image_sizes(s);
+            }
             false => self.apply_readiness(s),
         }
     }

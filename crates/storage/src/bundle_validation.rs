@@ -130,8 +130,8 @@ pub(crate) fn resources(snapshot: &Snapshot, files: &BTreeMap<String, Vec<u8>>) 
         if binary.len() as u64 != asset.byte_size || hash(binary) != asset.content_hash {
             return Err(invalid("Asset binary differs from snapshot"));
         }
-        let dimensions = assets::asset_dimensions(&asset.media_type, binary)?;
-        if dimensions != (asset.width, asset.height) {
+        let stored = (asset.width, asset.height);
+        if !assets::stored_dimensions_match(&asset.media_type, binary, stored)? {
             return Err(invalid("Asset dimensions differ from binary"));
         }
         expected.insert(key);
