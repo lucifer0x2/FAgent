@@ -175,13 +175,25 @@ async fn invalid_requests_use_existing_error_codes() {
         );
     }
     let first = find(&s, json!({"projectId":p,"kinds":["text"],"limit":1})).await;
+    // FB-38: a changed filter is named in the message and `error.field`.
     let other = json!({"projectId":p,"kinds":["frame"],"limit":1,"cursor":first["nextCursor"]});
-    assert_eq!(code(s.call("find_nodes", other).await), "INVALID_CURSOR");
+    let changed = s.call("find_nodes", other).await;
+    assert_eq!(code(changed.clone()), "INVALID_CURSOR");
+    assert_eq!(changed["error"]["field"], "kinds", "{changed}");
+    assert!(changed["error"]["message"]
+        .as_str()
+        .unwrap()
+        .contains("kinds"));
+    // FB-16/FB-48: the error names the readable revision.
     let stale = json!({"projectId":p,"kinds":["text"],"revision":0});
-    assert_eq!(
-        code(s.call("find_nodes", stale).await),
-        "REVISION_UNAVAILABLE"
-    );
+    let stale = s.call("find_nodes", stale).await;
+    assert_eq!(code(stale.clone()), "REVISION_UNAVAILABLE");
+    assert_eq!(stale["error"]["currentRevision"], 1, "{stale}");
+    assert_eq!(stale["error"]["field"], "revision");
+    assert!(stale["error"]["message"]
+        .as_str()
+        .unwrap()
+        .contains("only the latest revision"));
     let tight = json!({"projectId":p,"ids":["long"],"properties":["text"],"budget":1024});
     assert_eq!(
         code(s.call("find_nodes", tight).await),
@@ -195,7 +207,52 @@ async fn invalid_requests_use_existing_error_codes() {
     )
     .await;
     let resumed = json!({"projectId":p,"kinds":["text"],"limit":1,"cursor":first["nextCursor"]});
-    assert_eq!(code(s.call("find_nodes", resumed).await), "INVALID_CURSOR");
+    let resumed = s.call("find_nodes", resumed).await;
+    assert_eq!(code(resumed.clone()), "INVALID_CURSOR");
+    assert_eq!(resumed["error"]["currentRevision"], 2, "{resumed}");
+    assert!(resumed["error"]["message"]
+        .as_str()
+        .unwrap()
+        .contains("revision 1"));
+}
+
+/// FB-38: `properties`, `budget` and `limit` do not change the match list a cursor indexes, so
+/// a later page may change them and still continues the same read.
+#[tokio::test]
+async fn cursor_pages_may_change_properties_budget_and_limit() {
+    let s = Server::start().await;
+    let p = fixture(&s).await;
+    let all = find(&s, json!({"projectId":p,"kinds":["text"]})).await;
+    let first = find(&s, json!({"projectId":p,"kinds":["text"],"limit":1})).await;
+    let rest = find(
+        &s,
+        json!({"projectId":p,"kinds":["text"],"limit":200,"budget":65536,"properties":["name"],"cursor":first["nextCursor"]}),
+    )
+    .await;
+    let mut seen = ids(&first["matches"]);
+    seen.extend(ids(&rest["matches"]));
+    assert_eq!(seen, ids(&all["matches"]));
+    assert_eq!(rest["matches"][0]["props"], json!({"name":"price"}));
+    let first = s
+        .call(
+            "get_outline",
+            json!({"projectId":p,"nodeId":"hero","limit":1}),
+        )
+        .await;
+    let next = s
+        .call(
+            "get_subtree",
+            json!({"projectId":p,"nodeId":"hero","limit":1,"cursor":first["nextCursor"]}),
+        )
+        .await;
+    assert_eq!(next["error"]["field"], "tool", "{next}");
+    let page = s
+        .call(
+            "get_outline",
+            json!({"projectId":p,"nodeId":"hero","limit":2,"properties":["name"],"budget":4096,"cursor":first["nextCursor"]}),
+        )
+        .await;
+    assert_eq!(ids(&page["nodes"]), ["title", "price-card"], "{page}");
 }
 
 #[tokio::test]

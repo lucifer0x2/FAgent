@@ -5,11 +5,7 @@ mod download;
 mod http;
 mod source;
 mod target;
-use crate::{
-    error::{ApiError, Result},
-    jobs::MAX_WAIT_MS,
-    state::AppState,
-};
+use crate::{error::Result, jobs::MAX_WAIT_MS, state::AppState};
 pub(crate) use download::file;
 use fagent_storage::check_export_settings;
 pub(crate) use http::create;
@@ -40,10 +36,10 @@ pub(crate) async fn export_nodes(state: &AppState, args: Value) -> Result<Value>
         .db(move |store| Ok(store.reader_snapshot(&req.project_id)?.shared))
         .await?;
     let snapshot = &shared.snapshot;
-    if req.revision.is_some_and(|r| r != snapshot.revision) {
-        return Err(ApiError::new(
-            "REVISION_UNAVAILABLE",
-            "Requested authored revision is unavailable",
+    if let Some(requested) = req.revision.filter(|r| *r != snapshot.revision) {
+        return Err(crate::reads::revision_unavailable(
+            requested,
+            snapshot.revision,
         ));
     }
     let theme = req.theme.as_deref().unwrap_or("default");

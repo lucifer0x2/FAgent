@@ -96,6 +96,18 @@ pub(crate) async fn read_database(state: &AppState, name: &str, args: Value) -> 
     memory::read_database(state, name, req).await
 }
 
+/// `REVISION_UNAVAILABLE` for a read, render or export of a revision other than the latest:
+/// only the latest revision is kept readable, so the error names it (`currentRevision`).
+pub(crate) fn revision_unavailable(requested: u64, current: u64) -> crate::ApiError {
+    let mut error = crate::ApiError::new(
+        "REVISION_UNAVAILABLE",
+        &format!("Revision {requested} is unavailable: only the latest revision ({current}) can be read or rendered; omit revision or pass {current}"),
+    );
+    error.0.current_revision = Some(current);
+    error.0.field = Some("revision".into());
+    error
+}
+
 fn request(name: &str, args: Value) -> Result<ReadRequest> {
     let mut req: ReadRequest = serde_json::from_value(args)?;
     if req.node_format.is_some() && name != "get_design_context" {
