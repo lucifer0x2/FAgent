@@ -102,15 +102,18 @@ Append-only. Rules for entries:
 - Verified: web tests 161 + 49, typecheck, `test:engine`, `test:engine-board --strict` (Chrome 158). No Rust change, so no cargo run.
 - Committed in three pieces and pushed to PR #8 at the user's request. Open: the review threads are not answered on GitHub.
 
-### Task 42 packaged (engine persistent scene cache) — 2026-11-27
-
-- User request: after PR #8 a ~225-frame board still takes ~6 s on a loaded machine; make later opens very fast through caching. The user also recorded ~3.8 s before the first frame (suspected WebGPU init) and chose to leave initialization out of scope for now.
-- Decision: package a durable IndexedDB scene cache for the Vello engine path keyed by content digest, plus a digest manifest keyed by snapshot ETag to skip `frame_keys`, as `tasks/42-engine-persistent-scene-cache.md`; it takes over the engine-path parts of Task 32 items 4–5. Order now 42 → 36 → 37 → 31/35 → 33. No code changed.
-
 ### Task 42 — Engine persistent scene cache — 2026-11-27
 
-- Assigned by the user; built on `perf/engine-scene-cache`, then committed on `perf/viewer-large-project` at the user's request (not pushed). A test release of the uncommitted tree ran on port 3900 against the live database for the user to try.
-- Decisions: records are `serde_json` with exact floats (no new dependency); imports wait for the backend like compute (warm attach ends ~60 ms after `sync`); restored frames skip the first-frame draw; bounds 2,000 records / 256 MiB from measured 61–62 KB records; item 5 done (font window 14% of warm `synced`), worker Cache API keyed by font hash; the fixture's white fills became one token for `--edit-shared`.
-- Result: warm All pages `synced` 560 ms vs 2,212 ms cold (−75%), `synced` − `backend` 123 ms, 0 `frame_keys`/`compute`, 2 draws; 904 frames 870 ms (396 ms after `backend`); edit 1 → 1/1/228; shared edit recomputes all, −3% vs cold; cold within spread. Table: `docs/VIEWER.md` "Measurements — 2026-11-27 (engine scene cache, Task 42)".
+- User request: after PR #8 a ~225-frame board still takes ~6 s on a loaded machine; make later opens very fast through caching. WebGPU initialization (~3.8 s before the first frame on the user's machine) stays out of scope for now. Packaged as [Task 42](../../tasks/42-engine-persistent-scene-cache.md) (takes over the engine-path parts of Task 32 items 4–5; order 42 → 36 → 37 → 31/35 → 33).
+- Built on `perf/engine-scene-cache`, then committed on `perf/viewer-large-project` at the user's request (not pushed). A test release of the uncommitted tree ran on port 3900 for the user to try.
+- Decisions: records are `serde_json` with exact floats (no new dependency); imports wait for the backend like compute; restored frames skip the first-frame draw; item 5 done (worker Cache API keyed by font hash); the fixture's white fills became one token for `--edit-shared`.
+- Result: the task file's status and `docs/VIEWER.md` "Measurements — 2026-11-27 (engine scene cache, Task 42)".
 - Verified: web tests 161 + 61, `test:react` (on installed Chrome via a test-only preload; the pinned Chromium is absent), typecheck, `cargo test`/fmt/clippy for `fagent-engine-wasm` (wasm32 clippy: one older warning in `web/backend.rs`), `test:engine`, `test:engine-board --strict`, `test:engine-cache`.
 - Open: `frame_keys` still blocks the attach on a changed ETag (Task 35); Safari/Firefox not measured; the browser HTTP cache is off in all benchmark runs (Playwright routing).
+
+### Scene cache code review fixes (PR #8) — 2026-11-27
+
+- Assigned from a code review of `perf/viewer-large-project` against `main`; fixed on the same branch, nothing committed.
+- Fixed (behavior in `docs/VIEWER.md` "Engine scene cache"): a new ETag at the same revision resends the snapshot, and the worker trusts only the ETag that arrived with its loaded snapshot (digests of older bytes were filed under the new ETag); records touched in a write batch rank as used before it evicts and evicted rows get no usage row; other builds are swept once per worker, not on every write; a sync superseded during its manifest read runs no `frame_keys`; damaged manifests are misses; manifest hits refresh their last use; oversized records are counted apart from writes; the font cache is bounded to 128 MiB too.
+- Verified: web tests 161 + 67, typecheck, `test:engine-cache` and `test:engine` (installed Chrome; the pinned Chromium is absent). The new tests fail on the previous code. No Rust change.
+- Open: without a strong ETag, a 200 with new bytes at the same revision still leaves the worker on the older snapshot (unchanged behavior, outside the cache).

@@ -423,8 +423,9 @@ project whose frames are unchanged imports them instead of running `frame_keys` 
   holds the same keys with size and last use, so eviction never loads records; `manifests` map
   `[build, projectId, etag, framesKey]` (`framesKey` = SHA-256 of the theme and frame list) to a
   digest per frame id. `build` is the module's content hash (its manifest file name) plus the
-  record format; a module without a hash keeps nothing, and the first write of another build
-  deletes every row of the old one.
+  record format; a module without a hash keeps nothing. A worker's first committed write deletes
+  every row of other builds, once per worker: a tab left open on another build (across a deploy)
+  does not wipe this build's rows on each of its loads, nor this one its rows.
 - **Records.** `export_record` writes a committed frame (`crates/engine-wasm/src/record.rs`,
   format 1): JSON of the scene, its structured diagnostics, the request viewport and digest,
   serialized from the frame's own paint scene (no second copy in memory). Every `f32` reads back
@@ -436,12 +437,18 @@ project whose frames are unchanged imports them instead of running `frame_keys` 
   differs, or one whose fonts are not all loaded (an error, never a frame without text).
 - **Bounds.** Records measured 61 KB on average on the 229-frame fixture (14.0 MB) and 62 KB on
   the 904-frame one (56.2 MB): 2,000 records / 256 MiB (two 1,000-frame boards of such frames, e.g. before and
-  after a shared token edit), 16 MiB per record (larger ones are not stored), least recently
-  used first on write (a load's imports refresh their last use); 32 manifests. The Canvas2D
-  cache's 256 entries would not hold one large board.
+  after a shared token edit), 16 MiB per record (larger ones are not stored; counted as
+  `oversized`), least recently used first on write (a load's imports and manifest hits refresh
+  their last use, and records touched in a batch rank as used now before that batch evicts, so a
+  load never evicts what it has just imported); 32 manifests. The Canvas2D cache's 256 entries
+  would not hold one large board.
 - **Load.** `sync` carries the strong ETag the server sent with the accepted snapshot
-  (`useSnapshotEtag`). The worker reads the manifest for that ETag and frame list: a hit gives the
-  digests without `frame_keys`; a miss runs `frame_keys` and stores them. Then one readonly
+  (`useSnapshotEtag`). A new ETag at the same revision (a 200 with new bytes) sends the snapshot
+  again, and the worker trusts an ETag only when it arrived with the snapshot it loaded, so
+  digests are never filed under another representation's ETag. The worker reads the manifest
+  for that ETag and frame list: a hit gives the digests without `frame_keys`; a miss runs
+  `frame_keys` and stores them; a sync superseded during that read stops before `frame_keys`
+  and stores nothing. Then one readonly
   transaction asks for every frame the engine does not already show with its digest; each
   record resolves on its own, and the read starts before the first frame, so it overlaps the
   backend attach. Per frame: in-memory `reuse` first, then a stored record (its fonts through the
@@ -456,7 +463,8 @@ project whose frames are unchanged imports them instead of running `frame_keys` 
 - **Failures.** Opening has a 1 s deadline, a read 3 s, a write 10 s; a timeout, quota error or
   blocked database reads as a miss or skips the write. A record the engine refuses (damaged,
   another format) is deleted and its frame computed and written again; a damaged font list
-  computes too. Retry (`bypass`) reads neither manifest nor records and replaces what it
+  computes too, and a damaged manifest (digests not an object of strings) is a miss. Retry
+  (`bypass`) reads neither manifest nor records and replaces what it
   recomputes; a newer sync aborts the older one's read. The cache never fails a frame.
   `fagentEngine.status().cache` reports hits, misses, bytes and time read, imports, rejections,
   writes and pending writes.
@@ -469,8 +477,9 @@ project whose frames are unchanged imports them instead of running `frame_keys` 
   them again, mostly before the first import: an 86 ms font window in a 631 ms warm `synced`
   (14%, above the 5% threshold of Task 42 item 5) before this cache, 0 after it. The worker
   keeps verified font bytes in the Cache API (`fagent.engine-fonts`, `web/src/engine/fontCache.ts`),
-  keyed by content hash under a synthetic same-origin URL, at most 64 fonts (oldest first); a hit
-  is hash-checked again and a damaged entry fetched anew.
+  keyed by content hash under a synthetic same-origin URL, at most 64 fonts and 128 MiB (oldest
+  stored first; sizes kept in a response header, so eviction reads no font body; a font over
+  128 MiB is not kept); a hit is hash-checked again and a damaged entry fetched anew.
 
 **Fallback.** WebGPU (adapter + device + Vello renderer probe) → WebGL2 (`failIfMajorPerformanceCaveat`,
 probe) → `vello_cpu` into an `ImageBitmap` (`transferFromImageBitmap`) → Canvas2D for the rest of
@@ -743,11 +752,16 @@ its fill run (`results.<scope>.fill`) and per-run traces of the load window.
   without `frame_keys` or `compute`, an edited frame recomputes alone, another build misses, a
   damaged record or font list computes and is replaced, read timeout and write quota fall back
   to compute, Retry bypasses, a newer sync aborts the older read, nothing is read before a sync
-  carries an answered snapshot; LRU eviction, restored-frame pacing, the font cache).
+  carries an answered snapshot, a held sync with a new ETag neither reads nor files digests
+  under it, a sync superseded during its manifest read runs no `frame_keys`, a damaged manifest
+  is a miss, a manifest hit is written again, an oversized record is counted apart; LRU
+  eviction, restored-frame pacing, the font cache and its byte bound). The client test in
+  `engine-runtime.test.ts` checks that a new ETag at the same revision sends the snapshot again.
 - `npm --prefix web run test:engine-cache` (`engine-cache-browser.mjs`, real Chromium IndexedDB;
-  `FAGENT_TEST_CHANNEL=chrome` for Chrome): one read transaction, misses and damaged values, LRU
-  with touched records, manifests, removal, an aborted read, another build's write removing the
-  old rows.
+  `FAGENT_TEST_CHANNEL=chrome` for Chrome): one read transaction, misses and damaged records or
+  manifests, LRU with touched records (also touched and added in one batch at capacity, with no
+  usage row left without its record), manifests, removal, an aborted read, another build's
+  first write removing the old rows, and once per worker only.
 - `cargo test -p fagent-text` covers the shape plan cache (`crates/text/src/plans.rs`): reuse only
   for the same script and features, clones share, fonts never share, cached plans shape exactly
   like fresh ones.
