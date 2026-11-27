@@ -21,12 +21,22 @@ pub(crate) enum Purpose {
     Asset,
 }
 
+/// The fix every `PATH_REJECTED` inbox error names.
+const COPY_INTO_INBOX: &str = "copy the file into inboxDir from list_projects and pass its name";
+
+/// The fix every `STAGING_UNSUPPORTED` error names: the server has no inbox root.
+pub(crate) const NEEDS_DATA_ROOT: &str = "start the server with --data-root DIR or FAGENT_DATA_ROOT to read files from <data-root>/<slug>/inbox";
+
 impl Purpose {
     fn rejected(self) -> StorageError {
-        StorageError::new("PATH_REJECTED", match self {
-            Self::Batch => "Batch path must name a regular file inside this project's inbox; traversal and symlinks are forbidden",
-            Self::Asset => "Asset path must name a regular file inside this project's inbox; traversal and symlinks are forbidden",
-        })
+        let what = match self {
+            Self::Batch => "Batch",
+            Self::Asset => "Asset",
+        };
+        StorageError::new(
+            "PATH_REJECTED",
+            &format!("{what} path must name a regular file inside this project's inbox; traversal and symlinks are forbidden. Fix: {COPY_INTO_INBOX}"),
+        )
     }
     pub(crate) fn missing(self) -> StorageError {
         StorageError::new(
@@ -38,12 +48,13 @@ impl Purpose {
         )
     }
     fn not_regular(self) -> StorageError {
+        let what = match self {
+            Self::Batch => "Batch",
+            Self::Asset => "Asset",
+        };
         StorageError::new(
             "PATH_REJECTED",
-            match self {
-                Self::Batch => "Batch input must be a regular file",
-                Self::Asset => "Asset input must be a regular file",
-            },
+            &format!("{what} input must be a regular file. Fix: {COPY_INTO_INBOX}"),
         )
     }
     fn limit(self) -> (usize, StorageError) {

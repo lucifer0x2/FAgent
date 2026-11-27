@@ -78,6 +78,52 @@ fn without_an_inbox_root_batch_files_stay_unsupported() {
     }
 }
 
+/// Inbox errors name their fix: a missing inbox root names the data root option, a rejected
+/// path names `inboxDir` from `list_projects`.
+#[test]
+fn inbox_errors_name_the_fix() {
+    let (_data, root, storage) = unstaged();
+    let p = storage.create_project("fixture", "Fixture").unwrap();
+    let source = p
+        .read_batch_file(&file(p.id(), 0, "k", "page.ocd"))
+        .unwrap_err();
+    let asset = p.read_inbox_asset("logo.png").unwrap_err();
+    for error in [source, asset] {
+        assert_eq!(error.code, "STAGING_UNSUPPORTED");
+        assert!(
+            error
+                .message
+                .contains("--data-root DIR or FAGENT_DATA_ROOT"),
+            "{}",
+            error.message
+        );
+    }
+    let p = storage
+        .with_inbox_root(root.path())
+        .open_project(p.id())
+        .unwrap();
+    let inbox = root.path().join("fixture/inbox");
+    fs::create_dir_all(inbox.join("folder")).unwrap();
+    let errors = [
+        p.read_batch_file(&file(p.id(), 0, "k", "../ops.json"))
+            .map(|_| ()),
+        p.read_batch_file(&file(p.id(), 0, "k", "folder"))
+            .map(|_| ()),
+        p.read_inbox_asset("../logo.png").map(|_| ()),
+    ];
+    for error in errors {
+        let error = error.unwrap_err();
+        assert_eq!(error.code, "PATH_REJECTED");
+        assert!(
+            error
+                .message
+                .contains("copy the file into inboxDir from list_projects"),
+            "{}",
+            error.message
+        );
+    }
+}
+
 #[test]
 fn the_inbox_root_serves_json_and_source_like_sqlite_staging() {
     let (data, root, storage) = unstaged();

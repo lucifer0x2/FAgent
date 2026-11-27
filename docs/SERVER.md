@@ -360,7 +360,10 @@ the file, then call again without `dryRun`. Storage-level `read_batch_file_opera
 JSON-only. Both engines read the same inbox: SQLite under its data root, PostgreSQL under
 `--data-root` / `FAGENT_DATA_ROOT` (`Storage::with_inbox_root`), with identical request
 checks, containment, cap and parsing; only a `Storage` built without an inbox root returns
-`STAGING_UNSUPPORTED`.
+`STAGING_UNSUPPORTED`. The server binary always has one: PostgreSQL, like SQLite, refuses to
+start without a data root and prints the inbox location at startup. Each `STAGING_UNSUPPORTED`
+message names `--data-root` / `FAGENT_DATA_ROOT`, and each `PATH_REJECTED` inbox message says
+to copy the file into `inboxDir` from `list_projects`.
 
 `import_assets {projectId, expectedRevision, idempotencyKey, items:[…]}` imports 1–50 assets
 (10 MiB each, 64 MiB in total) in one call and commits them atomically as **one** revision.

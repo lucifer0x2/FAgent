@@ -12,6 +12,9 @@ SQLite.
 PostgreSQL mode stores nothing in the data root; it only reads `import_asset` /
 `import_assets` `path` files and `apply_batch_file` files from
 `<data-root>/<slug>/inbox` (default `~/.fagent`) and creates no directory there.
+The server needs that data root like SQLite does: without `--data-root`,
+`FAGENT_DATA_ROOT` or `HOME` it exits with "Data root is required", and at startup
+it prints the inbox location it reads.
 
 For an embedded server, inject the adapter at the composition root:
 
