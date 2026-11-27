@@ -1,10 +1,6 @@
 //! Machine-readable authored keys, generated from the live validator catalog.
 //! Consumer facts describe implemented behavior, never runtime font/asset readiness.
-use fagent_storage::{
-    allowed_props,
-    instances::{INSTANCE_KEYS, OVERRIDE_KEYS},
-    NODE_KINDS, PROPS,
-};
+use fagent_storage::{allowed_props, NODE_KINDS, PROPS};
 use serde_json::{json, Value};
 use sha2::{Digest, Sha256};
 use std::sync::OnceLock;
@@ -48,11 +44,7 @@ fn document() -> Value {
     value["restrictions"]["layout"] = json!("Row/column/free, with decimal 0%–100% child dimensions on definite parent axes and up to 8 full, non-nested layout breakpoints per container. First inclusive maxWidth match uses the requested frame viewport. Row wrap still requires definite positive width and positive minWidth on fill children.");
     value["restrictions"]["theme"] = json!("Frame/instance scope; nearest scoped ancestor wins over render/export fallback. Scoped names must exist in tokens (UNKNOWN_THEME); default always exists. Instance placement scopes apply; explicit instance theme replaces master root theme. Scene/context/inspect report effectiveTheme.");
     value["restrictions"]["animations"] = json!("Canvas/PNG/SVG show resting animation props. HTML preview plays declared animations, including ancestor hover via triggerNodeId. A literal authored group/frame ancestor ID in the same root frame is valid only on hover tracks. get_design_context.animated includes explicit triggerNodeId as discovery metadata.");
-    value["restrictions"]["overrides"] = json!(format!(
-        "Paint-only descendant patches ({}): stroke object merge; shadow array replace; states per-state visual property merge; font keys stay on the master. The master root is not a target: its props go on the instance ({}). Instance and override clip:false paint children past a frame edge. Layout, sizing and structure remain non-overridable.",
-        OVERRIDE_KEYS.join(", "),
-        INSTANCE_KEYS.join(", ")
-    ));
+    value["restrictions"]["overrides"] = json!("Paint-only descendant patches (keys in properties.overrides): stroke object merge; shadow array replace; states per-state merge. Master root props go on the instance (keysByKind.instance). Layout, sizing, font keys and structure remain non-overridable.");
     value["catalogFingerprint"] = json!(format!(
         "{:x}",
         Sha256::digest(serde_json::to_vec(&value).unwrap())

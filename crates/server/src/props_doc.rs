@@ -53,7 +53,7 @@ fn render() -> String {
     out.push_str(
         "\n## Notes\n\n\
          - \"Required\" keys may come from a text style through `styleId` instead of being authored.\n\
-         - Root frames (direct children of a page) need a numeric `width`, and a numeric `height` or `height:\"hug\"` with a row/column layout (the frame takes its content height); a free root needs a numeric `height`.\n\
+         - Root frames need a numeric `width`; `height` is a number or, with row/column, `\"hug\"`.\n\
          - Text color is `fill`; a container's background is `fill`; corner rounding is `radius`.\n\
          - `update_node` replaces the whole `layout` object (unless `merge:true`): resend `mode` with the other layout keys.\n\
          - `links` targets are root frame IDs checked at the end of the batch; `flowStart` goes on \
@@ -89,13 +89,9 @@ mod tests {
     fn instance_and_override_key_lists_match_the_validator() {
         use fagent_storage::instances::{INSTANCE_KEYS, OVERRIDE_KEYS};
         let doc = text();
-        for (label, list) in [
-            ("Instance keys: ", INSTANCE_KEYS),
-            ("partial props object accepting ", OVERRIDE_KEYS),
-        ] {
-            let keys: Vec<String> = list.iter().map(|key| format!("`{key}`")).collect();
-            let line = format!("{label}{}", keys.join(", "));
-            assert!(doc.contains(&line), "{line}");
-        }
+        assert!(doc.contains(&kind_line("instance", INSTANCE_KEYS)));
+        let keys: Vec<String> = OVERRIDE_KEYS.iter().map(|k| format!("`{k}`")).collect();
+        let line = format!("partial props object accepting {}", keys.join(", "));
+        assert!(doc.contains(&line), "{line}");
     }
 }

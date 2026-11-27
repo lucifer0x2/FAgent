@@ -196,10 +196,8 @@ space-between) default to start and need row or column. `stretch` sizes only
 children whose cross size is unset; numbers, percentages and `hug` keep their size. With
 `space-between`, `gap` is the minimum spacing. Centered content wider than its
 stack overflows both sides (clipped by frames); use start when it may not fit.
-Frames and instance roots clip children by default (`clip:true`); groups do not.
-A child's outside stroke, shadow or overhang past a frame edge is cut: set
-`clip:false` on that frame (on an instance, or in `overrides.<frameId>` for a
-master descendant frame) when it must show.
+Frames and instances clip children (groups do not): set `clip:false` on the
+parent to show a child's outside stroke, shadow or overhang.
 `update_node` replaces the whole layout object: resend `mode` and every other
 layout key with the one you change, or send `merge:true` to patch it.
 

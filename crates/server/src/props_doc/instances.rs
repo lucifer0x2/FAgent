@@ -1,6 +1,6 @@
 //! Minimal component authoring contract, outside the compact tool catalog. The key
 //! lists come from the validator's constants, so they match what a commit accepts.
-use fagent_storage::instances::{INSTANCE_KEYS, OVERRIDE_KEYS};
+use fagent_storage::instances::OVERRIDE_KEYS;
 
 fn keys(list: &[&str]) -> String {
     let keys: Vec<String> = list.iter().map(|key| format!("`{key}`")).collect();
@@ -9,15 +9,11 @@ fn keys(list: &[&str]) -> String {
 
 pub(super) fn section() -> String {
     format!(
-        "{INTRO}Instance keys: {}. All but `componentId` and `overrides` patch the expanded \
-         master root: this is where the master root's own props go. Stroke objects merge \
-         (a master width/align stays when only color changes) and `states` merge per state; \
-         the other keys replace. An instance root is a frame and clips its children: set \
-         `clip: false` on the instance to paint a child, stroke or shadow past its edge.\n\n\
+        "{INTRO}The `instance` keys listed above, except `componentId` and `overrides`, patch \
+         the expanded master root (its props go here); `stroke` and `states` merge.\n\n\
          `overrides` is an object keyed by authored master descendant IDs. Each value is a \
          partial props object accepting {}, validated for the target's kind against the fully \
          merged value. {REST}",
-        keys(INSTANCE_KEYS),
         keys(OVERRIDE_KEYS)
     )
 }
@@ -32,10 +28,9 @@ const INTRO: &str = "\n## Components and instances\n\n\
 const REST: &str = "Stroke objects merge; shadow arrays \
      replace all layers; states merge per state and visual property (including stroke). \
      Patching hover preserves focus/pressed and unpatched hover properties. State shadow \
-     remains unsupported. Text overrides cover paint only: font keys (`fontSize`, \
-     `lineHeight`, `fontId`, `fontWeight`, `fontStyle`) stay on the master. Image \
+     remains unsupported. Image \
      references use `assetId`; token references use `{tokenId: \"...\"}`. The target \
-     cannot be the master root: set those props on the instance itself. Layout, sizing, \
+     cannot be the master root. Layout, sizing, font keys, \
      structure and component references cannot be overridden. \
      Master root/child states are inherited by the corresponding expanded nodes. \
      `update_node` replaces the complete `overrides` object (`merge:true` patches entries).\n\n\
