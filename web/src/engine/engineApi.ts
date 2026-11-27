@@ -38,6 +38,24 @@ export interface EngineApi {
     height: number,
     digest: string,
   ): string;
+  /** Whether the shown frame has content `digest` (so `reuse` would succeed). */
+  shows(frameId: string, digest: string): boolean;
+  /** Persistent record of the shown frame while it has `digest` (throws otherwise). */
+  export_record(frameId: string, digest: string): Uint8Array;
+  /** `[{id, hash}]` of the fonts the shown frame draws with (JSON). */
+  record_fonts(frameId: string): string;
+  /**
+   * Stages a record as `compute` would; returns the summary JSON. Throws `{code, message}`
+   * when the record does not answer the request or one of its fonts is not loaded.
+   */
+  import_record(
+    bytes: Uint8Array,
+    revision: number,
+    frameId: string,
+    width: number,
+    height: number,
+    digest: string,
+  ): string;
   has_image(id: string, hash: string): boolean;
   add_image(
     id: string,
@@ -66,6 +84,8 @@ export interface EngineApi {
 
 export interface EngineModule {
   Engine: new () => EngineApi;
+  /** Layout version of `export_record`/`import_record` records (persistent cache key). */
+  record_format?: () => number;
   Surface: {
     webgpu(canvas: OffscreenCanvas): Promise<SurfaceApi>;
     webgl2(canvas: OffscreenCanvas): SurfaceApi;

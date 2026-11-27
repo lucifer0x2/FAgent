@@ -128,6 +128,30 @@ test("frames compute in order, fonts load once, unchanged frames are reused next
   assert.deepEqual(calls, ["compute:a@4", "image:img", "commit:a", "compute:b@4", "image:img", "commit:b"]);
 });
 
+test("a frame that fetched a font yields before it computes, so a camera sent meanwhile is drawn first", async () => {
+  const { engine, calls } = fakeEngine({});
+  const { frames } = loader(engine, {
+    yieldTask: () => {
+      calls.push("yield");
+      return Promise.resolve();
+    },
+  });
+  await frames.sync(sync(1, 3));
+  assert.deepEqual(calls, [
+    "snapshot:3",
+    "yield",
+    "font:font",
+    "yield", // after the font fetch, before compute (the runtime draws pending changes here)
+    "compute:a@3",
+    "image:img",
+    "commit:a",
+    "yield",
+    "compute:b@3", // the font is loaded: no extra yield
+    "image:img",
+    "commit:b",
+  ]);
+});
+
 test("an unavailable font fails its frame; an unavailable image is reported missing", async () => {
   const { engine } = fakeEngine({});
   const { frames, posted } = loader(engine, {

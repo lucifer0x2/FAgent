@@ -348,10 +348,25 @@ bar shows the backend (`Vello · WebGPU`, `Vello · WebGL2`, `Vello · vello_cpu
 - The page sends the accepted snapshot once per revision (`sync`), the frame targets, the board
   layout and the camera. The worker parses the snapshot once, computes frames one at a time
   (fonts fetched and hash-checked in the worker, images decoded with `createImageBitmap`), keeps
-  every scene in Rust and draws on its own `OffscreenCanvas`, one coalesced draw per worker
-  animation frame, plus one between frame computations and one right after each `sync` when
-  something changed, so the last committed frame is drawn even when the worker gets no
-  animation frame (hidden or non-composited page). Unchanged frames (same content digest) move
+  every scene in Rust and draws on its own `OffscreenCanvas`, at most one draw per worker
+  animation frame. Between two frame computations the worker yields through a `MessageChannel`
+  (`web/src/engine/yieldTask.ts`; a nested `setTimeout(0)` chain is clamped to 4 ms per frame),
+  so camera, layout and sync messages received meanwhile run first, and a camera or layout
+  change is drawn before the next frame starts (also after a frame fetched its fonts, since
+  messages ran during the fetch). Waits on the GPU (backend attach, renderer and
+  present probes) poll on a timer instead (`pollTask`), so they do not spin the worker. Committed frames are drawn progressively but
+  paced (`web/src/engine/drawPacing.ts`): every draw encodes the whole board, so the first frame
+  of a sync is drawn at once and later ones together at most once per gap (10× the last draw
+  time, 100–250 ms); the last ones are drawn right before `synced`, so they never wait for an
+  animation frame (hidden or non-composited page). A committed frame's `frame` message is held
+  until the image that shows it and posted just before that `drawn`, so the page never drops a
+  skeleton before the pixels; camera and layout draws in between show held frames without
+  releasing them (releasing would change hug heights, hence the layout, one draw per frame
+  again). If that last draw fails (no backend, a GPU error), the held frames and `synced` wait
+  for the first image the rebuilt or next backend draws, then go out in the same order (frames,
+  `drawn`, `synced`); a newer sync drops the pending `synced`. Failed and reused frames are
+  reported at once, except a reused frame whose message from an older sync still waits for its
+  image (that draw failed): it waits with it. Unchanged frames (same content digest) move
   to the new revision without recomputing and repeat the summary and missing assets the engine
   shows, so a view that never received them (another scope showed the frame first, or a newer
   sync replaced the view) replaces that frame's skeleton too. A frame stays drawn until its
@@ -397,6 +412,82 @@ bar shows the backend (`Vello · WebGPU`, `Vello · WebGL2`, `Vello · vello_cpu
   culling (whole frames and subtrees). Level of detail from Task 29: text below 4 device px is
   drawn as bars; shadows use the analytic blurred rect below device scale 0.5 and the filter layer
   above.
+
+**Engine scene cache (Task 42).** The worker keeps computed frames on disk, so reopening a
+project whose frames are unchanged imports them instead of running `frame_keys` and `compute`
+(measurements below):
+
+- **Store.** IndexedDB `fagent.engine-scenes`, opened in the worker and separate from the
+  Canvas2D `fagent.browser-scenes` (`web/src/engine/recordStore.ts`; policy in `sceneCache.ts`).
+  `records` are keyed by `[build, projectId, digest, width, height, theme]`, never a revision:
+  the record bytes, the fonts `[{id, hash}]` and assets they draw with, and their size. `usage`
+  holds the same keys with size and last use, so eviction never loads records; `manifests` map
+  `[build, projectId, etag, framesKey]` (`framesKey` = SHA-256 of the theme and frame list) to a
+  digest per frame id. `build` is the module's content hash (its manifest file name) plus the
+  record format; a module without a hash keeps nothing. A worker's first committed write deletes
+  every row of other builds, once per worker: a tab left open on another build (across a deploy)
+  does not wipe this build's rows on each of its loads, nor this one its rows.
+- **Records.** `export_record` writes a committed frame (`crates/engine-wasm/src/record.rs`,
+  format 1): JSON of the scene, its structured diagnostics, the request viewport and digest,
+  serialized from the frame's own paint scene (no second copy in memory). Every `f32` reads back
+  bit for bit (digits that would round differently through `f64` are written as their exact
+  `f64` widening; `float_roundtrip` parses `f64` exactly), so an imported frame paints,
+  hit-tests and measures like the computed one. `import_record` stages exactly what `compute`
+  stages, restamped to the accepted revision like `reuse` (its `sourceSceneKey` names the
+  computing revision), and refuses a record whose format, project, frame, viewport or digest
+  differs, one that repeats a node id, or one whose fonts are not all loaded (an error, never a
+  frame without text).
+- **Bounds.** Records measured 61 KB on average on the 229-frame fixture (14.0 MB) and 62 KB on
+  the 904-frame one (56.2 MB): 2,000 records / 256 MiB (two 1,000-frame boards of such frames, e.g. before and
+  after a shared token edit), 16 MiB per record (larger ones are not stored; counted as
+  `oversized`), least recently used first on write (a load's imports and manifest hits refresh
+  their last use, and records touched in a batch rank as used now before that batch evicts, so a
+  load never evicts what it has just imported); 32 manifests. The Canvas2D cache's 256 entries
+  would not hold one large board.
+- **Load.** `sync` carries the strong ETag the server sent with the accepted snapshot
+  (`useSnapshotEtag`). A new ETag at the same revision (a 200 with new bytes) sends the snapshot
+  again, and the worker trusts an ETag only when it arrived with the snapshot it loaded, so
+  digests are never filed under another representation's ETag. The worker reads the manifest
+  for that ETag and frame list: a hit gives the digests without `frame_keys`; a miss runs
+  `frame_keys` and stores them; a sync superseded during that read stops before `frame_keys`
+  and stores nothing. Then one readonly
+  transaction asks for every frame the engine does not already show with its digest; each
+  record resolves on its own, and the read starts before the first frame, so it overlaps the
+  backend attach. Per frame: in-memory `reuse` first, then a stored record (its fonts through the
+  hash-checked path, `import_record`, images as for a computed frame, commit), else `compute`.
+  Imports wait for the backend like computations: on a warm reload the attach ends ~60 ms after
+  `sync` (no `frame_keys` blocks it any more), so starting imports earlier could save at most
+  that. Restored frames never trigger the first-frame draw of a sync (`drawPacing.ts`): they are
+  shown once the progress gap has passed since the first of them, or right before `synced`;
+  the first computed frame of the sync is still drawn at once after restored ones were shown.
+- **Writes.** After `synced` (after the draw that shows the frames): one `export_record` per
+  yield, never while a load runs, in batches of at most 64 records / 32 MiB per transaction,
+  with the manifest and the last use of imported records.
+- **Failures.** Opening has a 1 s deadline, a read 3 s, a write 10 s; a timeout, quota error or
+  blocked database reads as a miss or skips the write. A record the engine refuses (damaged,
+  another format) is deleted and its frame computed and written again; a damaged font list
+  computes too, and a damaged manifest (digests not an object of strings) is a miss. A font a
+  record lists but whose fetch fails is not remembered as failed (computing asks which fonts
+  the frame needs and reports those); neither is a failure of a sync a newer one replaced. Retry
+  (`bypass`) reads neither manifest nor records and replaces what it
+  recomputes; a newer sync aborts the older one's read. The cache never fails a frame.
+  `fagentEngine.status().cache` reports hits, misses, bytes and time read, imports, rejections,
+  writes and pending writes.
+- **Access.** The cache never decides access: the worker reads it only for a sync that carries a
+  snapshot the server answered in this session (digests from that snapshot or its ETag). It holds
+  computed scene records, digest manifests and verified font bytes; no credentials, tokens or
+  snapshot JSON. `navigator.storage.persist()` is called where the worker has it (browsers expose
+  it to windows only, so no permission prompt is raised).
+- **Fonts.** Fonts are served without caching headers, so every load fetched and hash-checked
+  them again, mostly before the first import: an 86 ms font window in a 631 ms warm `synced`
+  (14%, above the 5% threshold of Task 42 item 5) before this cache, 0 after it. The worker
+  keeps verified font bytes in the Cache API (`fagent.engine-fonts`, `web/src/engine/fontCache.ts`),
+  keyed by content hash under a synthetic same-origin URL, at most 64 fonts and 128 MiB (oldest
+  stored first; sizes kept in a response header, so eviction reads no font body; a font over
+  128 MiB is not kept); a hit is hash-checked again and a damaged entry fetched anew. A failed
+  `caches.open()` is retried by the next load; a put over the origin's quota frees at least
+  that font's size from the oldest entries and is tried once more (the fetched bytes are used
+  either way).
 
 **Fallback.** WebGPU (adapter + device + Vello renderer probe) → WebGL2 (`failIfMajorPerformanceCaveat`,
 probe) → `vello_cpu` into an `ImageBitmap` (`transferFromImageBitmap`) → Canvas2D for the rest of
@@ -453,14 +544,261 @@ Apple M3 Pro, Chromium 156 (full build, new headless, real GPU), production buil
   on WebGPU/WebGL2. In the viewer, `engine-smoke` differs from Canvas2D in 0.58% of pixels of the
   fixture screenshot (text antialiasing).
 
+### Measurements — 2026-11-26 (large-board cold load)
+
+Apple M3 Pro (quiet: load average 2.3–2.9 on 11 cores), Google Chrome 158 (new headless, real
+GPU, WebGPU), production build, 1440×900 at DPR 2, Layers closed. Fixture
+(`web/tests/engine-load-fixture.mjs`): 225 screens over 10 pages + 4 component masters = 229 root
+frames, 6,782 authored nodes, 3,602 instances, 5 fonts, root frames `height: "hug"`. Base is
+`77e2430` (viewer and engine wasm both built from it); new adds paced draws, `MessageChannel`
+yields and the shape plan cache. Interleaved: five rounds of one cold run per build (base, new,
+base, …), each run a new browser context; the same release server for both. p50 (min–max), ms
+from navigation:
+
+| | base All pages | new All pages | base `pg-1` (23 frames) | new `pg-1` |
+| --- | --- | --- | --- | --- |
+| Worker created | 362 (360–365) | 359 (355–362) | 361 (355–369) | 363 (361–366) |
+| `sync` sent | 416 (414–418) | 410 (408–415) | 393 (383–399) | 394 (389–396) |
+| `backend` (WebGPU attached) | 946 (943–961) | 944 (938–945) | 837 (823–844) | 836 (827–847) |
+| First frame committed | 983 (979–996) | 980 (975–983) | 969 (959–978) | 967 (958–976) |
+| First `drawn` with it | 984 (980–997) | 980 (976–983) | 976 (966–985) | 967 (958–976) |
+| **`synced`** | **8,595 (8,534–8,777)** | **2,824 (2,812–2,829)** | **1,739 (1,721–1,754)** | **1,199 (1,192–1,210)** |
+| Last `drawn` | 8,610 (8,550–8,793) | 2,844 (2,832–2,849) | 1,755 (1,736–1,770) | 1,217 (1,210–1,228) |
+| Draws while loading | 413 (408–419) | 33 (32–34) | 39 (37–39) | 7 |
+| Worker `render` total | 4,805 | 393 | 528 | 110 |
+| Worker `compute` total | 2,526 | 1,305 | 293 | 165 |
+| Worker `frame_keys` | 466 | 466 | 362 | 365 |
+| Worker `required_fonts` | 99 | 80 | 12 | 11 |
+| Worker `set_layout` (calls) | 31 (227) | 4 (20) | 1 (24) | <1 |
+| Main-thread long tasks | none | none | none | none |
+
+- `synced` on All pages drops by 5.8 s (−67%), on one page by 0.54 s (−31%); every run of the
+  new build is faster than every run of the base. `load_font` (11 ms) and `load_snapshot`
+  (10 ms) are unchanged; the remaining cost is `compute` (1.3 s: shaping, allocation, JSON,
+  sha256 digests) and `frame_keys` (0.47 s, whole-snapshot resolve; Task 35).
+- Progressive display: the new build draws every ~56 ms on average while loading ((`synced` −
+  first frame) / draws). The 250 ms bound caps the pacing gap, not the interval between two
+  draws: pacing is checked between frame computations, so one computation longer than the gap
+  delays the next draw by its own length. The harness then timed
+  "commit → drawn" from the page's `frame` message, which is ~0 on the new build because that
+  message is posted just before the `drawn` that shows it (base: p95 18 ms, one draw per frame);
+  since 2026-11-27 it measures from the worker's commit (below).
+- Zooming while loading (`--interact`, 3 runs each, 6 cameras per run): every camera is drawn
+  before the next frame; camera → `drawn` p50 14–20 ms, max 25–33 ms (base 11–18 / 19–22 ms);
+  `synced` 2.86–2.89 s (base 8.51–8.69 s).
+- GPU waits now poll on a timer (`pollTask`). With the `MessageChannel` yield there, the attach
+  spun ~5.7k probe polls in ~0.5 s of worker time; the timer costs ~20 ms on `synced` (All pages
+  2,806 → 2,824 ms in two interleaved series) and leaves the core idle during the attach.
+- Board (`test:engine-board --strict`, 12 frames, base then new back to back): Vello pan at Fit
+  draw p95 14.5/15.7 → 14.3/14.9 ms (Layers open/closed), pan at 100% 8.9/8.5 → 8.5/8.4 ms, zoom
+  17.5/16.8 → 18.1/18.8 ms (24 draws, noisy), cold load 828–838 → 827–835 ms, no long task.
+
+Rerun (the base dist must carry the base engine wasm: build it in a worktree of the base commit
+with `npm run build:engine-wasm`, then `vite build --outDir <base-dist>` there):
+
+```bash
+export REPAINT_SERVER_BIN=target/release/fagent-server
+node web/tests/engine-load.mjs --channel chrome --runs 1 --scopes all,pg-1 --dist <base-dist> --label base-1
+node web/tests/engine-load.mjs --channel chrome --runs 1 --scopes all,pg-1 --dist <new-dist> --label new-1
+node web/tests/engine-load.mjs --channel chrome --runs 3 --scopes all --interact --dist <new-dist> --label interact-new
+```
+
+Repeat the first two lines alternately for each round; summaries land in
+`artifacts/engine-load/summary-<label>.json` (ignored).
+
+### Measurements — 2026-11-27 (review follow-up, plan cache isolated)
+
+Apple M5 (10 cores, desktop apps running: load average 3.8–6.3), Google Chrome 158 (new headless,
+WebGPU), production builds, the 2026-11-26 fixture and method; another machine than 2026-11-26,
+so compare ratios, not absolute times. Three builds, five interleaved rounds with the order
+rotated: **base** `77e2430`; **no cache**, this branch's viewer with the base engine wasm (byte
+identical to base's: the plan cache is the only Rust change); **new**, this branch with the
+review fixes. Commit → `drawn` now runs from the worker's `commit` to the page receiving the
+first image drawn after it. p50 (min–max), ms from navigation:
+
+| | base All pages | no cache All pages | new All pages | base `pg-1` | no cache `pg-1` | new `pg-1` |
+| --- | --- | --- | --- | --- | --- | --- |
+| Worker created | 349 (348–365) | 351 (344–352) | 350 (349–363) | 348 (346–355) | 352 (346–354) | 356 (345–377) |
+| `/snapshot` request | 349 (347–364) | 351 (344–351) | 350 (348–362) | 347 (346–354) | 351 (345–353) | 355 (344–376) |
+| `backend` attached | 840 (821–909) | 836 (820–855) | 861 (827–865) | 734 (727–799) | 745 (728–780) | 736 (722–852) |
+| First frame message | 868 (848–941) | 864 (848–887) | 889 (855–893) | 837 (828–904) | 853 (836–897) | 839 (822–959) |
+| **`synced`** | **7,222 (7,045–7,550)** | **3,301 (3,274–3,540)** | **2,345 (2,309–2,398)** | **1,440 (1,411–1,521)** | **1,104 (1,089–1,162)** | **1,043 (1,019–1,154)** |
+| Last `drawn` | 7,235 (7,057–7,562) | 3,313 (3,290–3,555) | 2,360 (2,323–2,415) | 1,452 (1,422–1,540) | 1,118 (1,103–1,176) | 1,056 (1,032–1,168) |
+| Draws while loading | 424 (413–426) | 41 (39–43) | 28 (26–29) | 38 (37–40) | 6 | 7 (6–7) |
+| Commit → `drawn` p95 | 14 (14–15) | 107 (106–110) | 102 (101–109) | 13 (12–19) | 96 (93–101) | 108 (102–109) |
+| Commit → `drawn` max | 16 (15–18) | 125 (124–137) | 131 (122–137) | 13 (13–20) | 104 (99–113) | 114 (108–115) |
+| Worker `render` total | 4,067 | 387 | 286 | 412 | 65 | 88 |
+| Worker `compute` total | 2,066 (1,976–2,138) | 1,937 (1,924–2,085) | 1,066 (1,047–1,093) | 236 (230–252) | 230 (225–242) | 137 (134–145) |
+| Worker `frame_keys` | 384 | 382 | 388 | 278 | 281 | 278 |
+| Worker `required_fonts` | 89 | 69 | 70 | 11 | 9 | 10 |
+| Main-thread long tasks | none | none | none | none | none | none |
+
+- Whole patch: All pages `synced` −4.88 s (−68%), `pg-1` −0.40 s (−28%); every new run is faster
+  than every base run.
+- The plan cache alone (no cache → new, same viewer): `compute` 1,937 → 1,066 ms (−45%) on All
+  pages and 230 → 137 ms (−40%) on `pg-1`, `synced` −0.96 s. The viewer changes alone (base → no
+  cache) leave `compute` within run spread (−6%, ranges overlap) and cut `render` 4,067 → 387 ms.
+- Commit → `drawn` on the new build: p95 101–110 ms, max 122–137 ms (Task 36 AC: p95 ≤ 250 ms).
+  The base draws after every frame, hence 14/16 ms at 424 draws.
+- The `/snapshot` request starts with the Worker (~350 ms) in every build: Task 36 item 3 is open.
+- Zooming while loading (`--interact`, 3 interleaved rounds, then 5 more runs of new): camera →
+  `drawn` max 18–34 ms (base 24–26 ms), `synced` 2.42 s (base 7.37 s). The new `cameraOrder`
+  check found a frame computed between a camera and its draw in 1 of 3 base runs and in 4 of 4
+  runs of the branch before the loader fix, always `load_font:font_lato compute:nav`: the camera
+  arrived while the loader awaited a font. The loader now yields after fetching fonts; 0 of 8 runs
+  since.
+- `test:engine-board --strict` passes on this machine (Vello long tasks none).
+
+Rerun (dists built as in the 2026-11-26 rerun; the no-cache dist from a worktree of this branch
+with `crates/text/src` checked out from the base commit and `plans.rs` removed):
+
+```bash
+export REPAINT_SERVER_BIN=target/release/fagent-server
+node web/tests/engine-load.mjs --channel chrome --runs 1 --scopes all,pg-1 --dist <dist> --label <build>-<round>
+node web/tests/engine-load.mjs --channel chrome --runs 1 --scopes all --interact --dist <dist> --label interact-<build>-<round>
+```
+
+Builds sharing one cargo target dir across worktrees can reuse a stale engine (cargo compares
+source mtimes, and paths are workspace-relative): touch the crate sources after switching trees
+and check the engine wasm hash in each dist.
+
+### Measurements — 2026-11-27 (engine scene cache, Task 42)
+
+Apple M5 (10 cores, desktop apps running: load average 1.9–2.7 during the series), Google Chrome
+158.0.8127.37 (new headless, WebGPU), production builds, 1440×900 at DPR 2, Layers closed. The
+2026-11-26 fixture now paints its white fills with one color token (`paper`, same value, so the
+same pixels) for `--edit-shared`. **base** is `66d82f4` (`perf/viewer-large-project`, engine wasm
+`16c9ef85d470`), **new** this branch (`e018392ca174`). Cold: five interleaved rounds of one run per
+build, each in a new browser context (empty profile, so the new build also creates its database
+and writes every record after `synced`). Warm: one persistent profile per series, a cold fill,
+then five reloads. Before the cache, a warm series of this fixture equalled cold (All pages warm
+`synced` p50 2,217 ms against a 2,233 ms fill; `pg-1` 1,040 against 1,132). p50 (min–max), ms
+from navigation:
+
+| | base cold All | new cold All | **new warm All** | base cold `pg-1` | new cold `pg-1` | **new warm `pg-1`** |
+| --- | --- | --- | --- | --- | --- | --- |
+| Worker created | 347 (346–349) | 346 (343–348) | 337 (333–338) | 349 (346–349) | 351 (346–353) | 344 (340–346) |
+| `backend` attached | 813 (803–820) | 817 (808–823) | 436 (431–438) | 736 (731–737) | 721 (713–751) | 435 (431–440) |
+| First commit (worker) | 843 (828–847) | 844 (833–850) | 456 (450–457) | 829 (824–831) | 815 (806–846) | 478 (474–481) |
+| **`synced`** | **2,203 (2,184–2,294)** | **2,212 (2,189–2,235)** | **560 (555–561)** | **1,026 (1,015–1,031)** | **995 (985–1,035)** | **520 (516–524)** |
+| **`synced` − `backend`** | 1,388 (1,381–1,481) | 1,395 (1,380–1,411) | **123 (123–124)** | 292 (284–294) | 270 (268–285) | **84 (83–86)** |
+| Last `drawn` | 2,220 (2,200–2,309) | 2,228 (2,205–2,251) | 588 (584–589) | 1,040 (1,028–1,045) | 1,011 (999–1,049) | 535 (531–539) |
+| Draws while loading | 25 (24–27) | 25 (24–26) | **2** | 7 | 6 (6–7) | 2 |
+| `frame_keys` / `compute` / `import_record` calls | 1 / 229 / 0 | 1 / 229 / 0 | **0 / 0 / 229** | 1 / 23 / 0 | 1 / 23 / 0 | 0 / 0 / 23 |
+| Cache hits, MB read, IndexedDB read ms | – | 0, 0, 2 | 229, 14.0, 10 (10–11) | – | 0, 0, 3 (1–10) | 23, 1.4, 7 (1–8) |
+| Worker `frame_keys` | 367 | 369 | 0 | 286 | 287 | 0 |
+| Worker `compute` total | 1,019 | 1,017 | 0 | 132 | 131 | 0 |
+| Worker `import_record` total | 0 | 0 | 51 (49–51) | 0 | 0 | 16 |
+| Worker `render` total | 239 | 240 | 76 | 86 | 72 | 50 |
+| Font window (requests) | 84 (4) | 86 (4) | 0 (0) | 61 (4) | 62 (4) | 0 (0) |
+| Main-thread long tasks | none | none | none | none | none | none |
+
+| | warm `--edit 1` (All) | warm `--edit-shared` (All) | base cold 4× | new cold 4× | **new warm 4×** |
+| --- | --- | --- | --- | --- | --- |
+| `backend` attached | 799 (792–810) | 793 (778–795) | 458 (439–2,187) | 461 (429–2,185) | 474 (455–489) |
+| First commit (worker) | 809 (800–819) | 810 (796–813) | 2,284 (2,223–2,339) | 2,303 (2,225–2,359) | 494 (476–509) |
+| **`synced`** | **938 (918–940)** | **2,153 (2,136–2,159)** | **8,564 (8,360–8,684)** | **8,601 (8,448–8,950)** | **870 (861–887)** |
+| **`synced` − `backend`** | 136 (126–139) | 1,360 (1,341–1,381) | 8,084 (6,173–8,181) | 8,159 (6,265–8,500) | **396 (395–406)** |
+| Last `drawn` | 957 (937–958) | 2,169 (2,151–2,175) | 8,608 (8,404–8,729) | 8,646 (8,492–8,995) | 920 (909–936) |
+| Draws while loading | 4 | 25 (24–26) | 79 (74–80) | 79 (78–82) | 5 |
+| `frame_keys` / `compute` / `import_record` calls | **1 / 1 / 228** | **1 / 229 / 0** | 1 / 904 / 0 | 1 / 904 / 0 | **0 / 0 / 904** |
+| Cache hits, MB read, IndexedDB read ms | 228, 14.0, 11 | 0, 0, 8 | – | 0, 0, 6 (5–6) | 904, 56.2, 39 (39–48) |
+| Worker `frame_keys` | 364 | 363 | 1,680 | 1,693 | 0 |
+| Worker `compute` total | 15 | 1,018 | 3,956 | 3,965 | 0 |
+| Worker `import_record` total | 50 | 0 | 0 | 0 | 162 (160–165) |
+| Worker `render` total | 59 | 249 | 1,939 | 1,950 | 254 |
+| Font window | 0 | 0 | 147 | 147 | 0 |
+| Main-thread long tasks | none | none | 59 (0–63) ms | 60 (0–63) ms | none |
+
+- Warm All pages: `synced` −1,652 ms (−75%) against cold in the same session, `synced` −
+  `backend` 123 ms (AC ≤ 300 ms), 2 draws (the attach draw and the last one; AC ≤ 3), every frame
+  imported. `backend` attaches ~380 ms earlier because `frame_keys` (367 ms of synchronous worker
+  time) no longer runs during the attach; 229 imports take 51 ms (0.22 ms each). Before the font
+  cache (item 5) the same series gave `synced` 631 ms and `synced` − `backend` 195 ms with an 86 ms
+  font window.
+- Cold: within run spread on both scopes (All +9 ms at p50, ranges overlap; `pg-1` −31 ms). The
+  new build writes after `synced`: 229 records (14.0 MB) cost 42 ms of export work spread over
+  worker yields, 23 records 7 ms.
+- Partial (`--edit 1`, the page away while one screen is retitled through MCP): exactly one
+  `frame_keys` (the ETag changed), one `compute`, 228 imports and one record written, in every
+  run; `synced` 938 ms, `synced` − `backend` 136 ms, 4 draws. `frame_keys` still blocks the attach
+  (Task 35 would shrink it).
+- Shared edit (`--edit-shared`, a new value of the token every root frame paints with before
+  each reload): every frame recomputes and is written again in every run (1 / 229 / 0);
+  `synced` 2,153 ms against 2,212 ms cold (−3%, AC within 10%): fonts come from the font cache.
+- 4× (`--frames 900 --pages 40`: 904 root frames, 27,057 nodes, 41 pages): warm `synced` 870 ms
+  against 8,601 ms cold (−90%), `synced` − `backend` 396 ms (AC ≤ 1 s), 5 draws; 904 imports take
+  162 ms and the read 39 ms for 56.2 MB. Cold over six runs per build (three interleaved, three
+  sequential): +37 ms at p50 (+0.4%), ranges overlap. The fill wrote 904 records (56.2 MB) after
+  `synced` with 167 ms of export work. `backend` lands at ~0.45 s or ~2.2 s in both builds: the
+  1.7 s `frame_keys` blocks the attach when it starts first.
+
+Rerun (the base dist as in the 2026-11-26 rerun):
+
+```bash
+export REPAINT_SERVER_BIN=target/release/fagent-server
+node web/tests/engine-load.mjs --channel chrome --runs 1 --scopes all,pg-1 --dist <dist> --label cold-<build>-<round>
+node web/tests/engine-load.mjs --channel chrome --scopes all,pg-1 --runs 5 --warm --label warm
+node web/tests/engine-load.mjs --channel chrome --scopes all --runs 5 --warm --frames 900 --pages 40 --label warm-4x
+node web/tests/engine-load.mjs --channel chrome --scopes all --runs 5 --warm --edit 1 --label warm-edit
+node web/tests/engine-load.mjs --channel chrome --scopes all --runs 5 --warm --edit-shared --label warm-shared
+node web/tests/engine-load.mjs --channel chrome --runs 1 --scopes all --frames 900 --pages 40 --dist <dist> --label cold4x-<build>-<round>
+```
+
+Summaries land in `artifacts/engine-load/summary-<label>.json` (ignored); each warm summary keeps
+its fill run (`results.<scope>.fill`) and per-run traces of the load window.
+
 ### Tests
 
 - `npm --prefix web test` includes `engine-runtime.test.ts` (renderer choice, the WebGPU → WebGL2 →
-  vello_cpu → Canvas2D chain, probe rejection, device loss rebuild-once, snapshot sent once per
-  revision) and `engine-frames.test.ts` (frame loader: order, reuse, missing font/asset, supersede).
+  vello_cpu → Canvas2D chain, probe rejection, device loss rebuild-once; paced draws with a fake
+  clock: first frame at once, later ones per gap, the last
+  always before `synced`, held `frame` messages posted before their `drawn`; a camera or layout
+  during a load drawn unpaced without releasing held frames; a failed last draw holds its frames
+  and `synced` until the next backend draws them, and a reused frame waiting for that image
+  waits with it; `progressGap` bounds; GPU waits poll on
+  `pollTask`, never on the frame yield), `engine-client.test.ts` (page side: a fresh canvas per
+  fallback step, the snapshot sent once per revision and again with a new ETag, image placement,
+  hidden layouts, overscan) and `engine-frames.test.ts` (frame loader: order, reuse,
+  missing font/asset, supersede, a yield after a font fetch before compute), and
+  `engine-cache.test.ts` (scene cache with an in-memory store: a reload imports every frame
+  without `frame_keys` or `compute`, an edited frame recomputes alone, another build misses, a
+  damaged record or font list computes and is replaced, read timeout and write quota fall back
+  to compute, Retry bypasses, a newer sync aborts the older read, nothing is read before a sync
+  carries an answered snapshot, a held sync with a new ETag neither reads nor files digests
+  under it, a sync superseded during its manifest read runs no `frame_keys`, a damaged manifest
+  is a miss, a manifest hit is written again, an oversized record is counted apart, a font
+  failure of a superseded sync or of a font only a record lists is not remembered; LRU
+  eviction, restored-frame pacing (the first computed frame after restored ones goes at once),
+  the font cache with its byte bound, a retried open and a put over quota).
+- `npm --prefix web run test:engine-cache` (`engine-cache-browser.mjs`, real Chromium IndexedDB;
+  `FAGENT_TEST_CHANNEL=chrome` for Chrome): one read transaction, misses and damaged records or
+  manifests, LRU with touched records (also touched and added in one batch at capacity, with no
+  usage row left without its record), manifests, removal, an aborted read, another build's
+  first write removing the old rows, and once per worker only.
+- `cargo test -p fagent-text` covers the shape plan cache (`crates/text/src/plans.rs`): reuse only
+  for the same script and features, clones share, fonts never share, cached plans shape exactly
+  like fresh ones.
+- `npm --prefix web run test:engine-load` (`web/tests/engine-load.mjs`) measures the cold load of
+  a large synthetic project (see the 2026-11-26 and 2026-11-27 measurements for options). Commit →
+  `drawn` runs from the worker's `commit` call to the page's receipt of the image of the first
+  draw after it; with `--interact` it checks that no frame computation starts between a camera's
+  `set_camera` and its draw (`cameraOrder`). `--frames`, `--pages`, `--runs` and `--latency` must
+  be integers (`--pages` ≤ `--frames`). `--warm` (Task 42) uses one persistent profile per scope
+  in a temporary directory: a cold navigation fills the cache, the runner waits for its writes,
+  then `--runs` reloads are measured; `--edit <k>` retitles k screens through MCP before each
+  reload (the page is away meanwhile, so no live update computes them first), `--edit-shared`
+  changes the token every root frame paints with. Each run also reports `synced − backend`, engine
+  call counts (`frame_keys`, `compute`, `import_record`, …), the worker's cache counters and the
+  font window (first font request to the last `load_font`). Routing the glue (for the engine
+  timers) turns the browser HTTP cache off, cold and warm alike.
 - `cargo test -p fagent-engine-wasm`: compute summary equals the JSON scene path, staging,
   hit test (clip ancestors, revision, board offsets), reuse, layout release, drawing with backdrop,
-  culling and LOD through `vello_cpu`.
+  culling and LOD through `vello_cpu`; frame records: an imported frame equals the computed one
+  in summary (but revision), hit tests, bounds and `vello_cpu` pixels of a board draw (byte
+  identical), the record's scene equals the JSON path's, records of another format, project,
+  frame, viewport or digest are refused, a missing font is an error, floats read back bit for bit
+  (200,000 sampled `f32` patterns).
 - `npm --prefix web run test:engine` (real Chromium): WebGPU paint, hit test and Inspector equal to
   Canvas2D, screenshot diff, overscan (the test fulfils `/api/v1/viewer` with `overscan: 0.1`; a pan
   within the margin while camera messages are held shows frame pixels in the exposed strip, equal
@@ -468,6 +806,8 @@ Apple M3 Pro, Chromium 156 (full build, new headless, real GPU), production buil
   GPU → vello_cpu, module failure → Canvas2D. `npm --prefix web run test:engine-board` measures the
   board (fails on a > 50 ms canvas-path long task). `FAGENT_TEST_RENDERER=vello node
   web/tests/node-actions-smoke.mjs` runs the export/copy/context-menu smoke on the engine.
+  Without the pinned browsers in `.runtime/browsers`, `FAGENT_TEST_CHANNEL=chrome` runs these
+  (GPU and GPU-less cases) on an installed Google Chrome.
 
 **Open (outside P1):** tile cache so Fit composites instead of re-encoding (Task 31); Safari 26 and
 slower machines before any default change; image mipmaps at very small zoom; glyph-atlas eviction

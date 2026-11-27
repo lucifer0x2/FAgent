@@ -60,6 +60,17 @@ pub struct NodeBounds {
     pub lines: usize,
 }
 
+/// What a persistent record (`record.rs`) needs besides the paint scene and the summary.
+pub struct Source {
+    pub schema_version: u32,
+    /// As computed: its revision is the computing one, like `sourceSceneKey`.
+    pub provenance: fagent_layout::Provenance,
+    /// The scene's own diagnostic strings (the summary carries the structured ones).
+    pub diagnostics: Vec<String>,
+    /// The requested viewport the digest covers; a hug frame's scene height differs.
+    pub request: [f64; 2],
+}
+
 pub struct Frame {
     pub scene: PaintScene,
     pub prepared: Prepared,
@@ -69,10 +80,17 @@ pub struct Frame {
     pub revision: u64,
     /// Revision-free content digest; equal digests let a new revision reuse the frame.
     pub digest: String,
+    pub source: Source,
 }
 
 impl Frame {
-    pub fn new(scene: Scene, diagnostics: Vec<serde_json::Value>, digest: String) -> Self {
+    /// `request` is the viewport the frame was asked for (`compute`'s width and height).
+    pub fn new(
+        scene: Scene,
+        diagnostics: Vec<serde_json::Value>,
+        digest: String,
+        request: [f64; 2],
+    ) -> Self {
         let p = &scene.provenance;
         let summary = Summary {
             project_id: p.project_id.clone(),
@@ -113,6 +131,12 @@ impl Frame {
                 })
                 .map(|[x0, y0, x1, y1]| [x0, y0, x1 - x0, y1 - y0]),
         };
+        let source = Source {
+            schema_version: scene.schema_version,
+            provenance: scene.provenance.clone(),
+            diagnostics: scene.diagnostics,
+            request,
+        };
         let paint = PaintScene {
             provenance: Some(Provenance {
                 viewport: Viewport {
@@ -143,6 +167,7 @@ impl Frame {
             scene: paint,
             index,
             digest,
+            source,
         }
     }
 

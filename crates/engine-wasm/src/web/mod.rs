@@ -37,6 +37,13 @@ fn json<T: Serialize>(value: &T) -> String {
     serde_json::to_string(value).unwrap_or_else(|_| "null".into())
 }
 
+/// Version of the frame record layout (`export_record`/`import_record`); the Worker keys
+/// its persistent store by it together with the module's content hash.
+#[wasm_bindgen]
+pub fn record_format() -> u32 {
+    crate::RECORD_FORMAT
+}
+
 /// Decoded image kept so a backend switch can re-upload it.
 struct RawImage {
     hash: String,
@@ -237,6 +244,46 @@ impl Engine {
     ) -> Result<String, JsValue> {
         self.model
             .compute(revision as u64, frame_id, width, height, digest)
+            .map(|s| json(&s))
+            .map_err(storage_err)
+    }
+
+    /// Whether the shown frame has content `digest` (so `reuse` would succeed).
+    pub fn shows(&self, frame_id: &str, digest: &str) -> bool {
+        self.model.shows(frame_id, digest)
+    }
+
+    /// Persistent record of the shown frame while it still has `digest` (Worker store only).
+    pub fn export_record(&self, frame_id: &str, digest: &str) -> Result<Vec<u8>, JsValue> {
+        self.model
+            .export_record(frame_id, digest)
+            .map_err(storage_err)
+    }
+
+    /// `[{id, hash}]` of the fonts the shown frame draws with, stored beside its record.
+    pub fn record_fonts(&self, frame_id: &str) -> String {
+        let fonts: Vec<_> = self
+            .model
+            .record_fonts(frame_id)
+            .into_iter()
+            .map(|(id, hash)| serde_json::json!({ "id": id, "hash": hash }))
+            .collect();
+        json(&fonts)
+    }
+
+    /// Stages a record as `compute` would stage the frame at `revision`; returns the summary
+    /// JSON. A record that does not answer the request, or a font not loaded, is an error.
+    pub fn import_record(
+        &mut self,
+        bytes: &[u8],
+        revision: f64,
+        frame_id: &str,
+        width: f64,
+        height: f64,
+        digest: &str,
+    ) -> Result<String, JsValue> {
+        self.model
+            .import_record(bytes, revision as u64, frame_id, width, height, digest)
             .map(|s| json(&s))
             .map_err(storage_err)
     }

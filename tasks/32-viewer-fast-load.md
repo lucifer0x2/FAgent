@@ -1,7 +1,7 @@
 # Task 32 — P3 Fast load: durable snapshot, immutable WASM, font/image cache, timing
 
 **Status:** NOT ASSIGNED. Packaged 2026-11-16. Phase P3 of
-[VELLO-GPU-RENDERER-RESEARCH.md](../docs/VELLO-GPU-RENDERER-RESEARCH.md).
+[VELLO-GPU-RENDERER-RESEARCH.md](../docs/VELLO-GPU-RENDERER-RESEARCH.md). The engine-path parts of items 4–5 and the "durable scene cache for the engine path" note moved to [Task 42](42-engine-persistent-scene-cache.md) (2026-11-27).
 **Depends on:** Task 30 (engine path). Items 1, 2, 5 can be done independently and also benefit Canvas2D.
 **Owned scope:** `web/src/snapshotHttp.ts`, `web/src/hooks/useSnapshot.ts`, new cache `web/src/cache/`,
 `web/src/engine/`, `crates/server/src/viewer_static.rs` + `cache_hints.rs` (`.wasm`, font, asset headers),

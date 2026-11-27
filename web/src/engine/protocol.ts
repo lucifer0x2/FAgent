@@ -83,6 +83,11 @@ export type PageMessage =
       frames: FrameRequest[];
       /** Retry: recompute even frames whose content key is unchanged. */
       bypass: boolean;
+      /**
+       * Strong ETag of the accepted snapshot (the server's response in this session): the
+       * worker's scene cache keys frame digests by it, so a reload skips `frame_keys`.
+       */
+      etag?: string;
     }
   /** `seq` increases per layout; the worker answers `drawn` once a render shows it. */
   | { type: "layout"; placements: Placement[]; seq: number }
@@ -120,6 +125,8 @@ export type WorkerMessage =
        * `missing` then repeat what the engine shows, now at `revision`.
        */
       reused?: boolean;
+      /** Imported from the worker's persistent scene cache instead of computed. */
+      restored?: boolean;
       missing?: string[];
       error?: string;
     }

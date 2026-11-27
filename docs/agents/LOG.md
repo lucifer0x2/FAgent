@@ -85,3 +85,43 @@ Append-only. Rules for entries:
 - User request: raise the default note count to 20000 and make the note text, reply and author limits configurable through the environment, then deploy natively.
 - Done on `feat/note-limits-env`: `NoteLimits` in scene-input (defaults, ceilings, messages) replaces the `MAX_NOTE*` constants; the server reads `FAGENT_MAX_NOTES`, `FAGENT_MAX_NOTE_TEXT`, `FAGENT_MAX_NOTE_REPLIES`, `FAGENT_MAX_NOTE_AUTHOR` once at startup (raise only, default..=ceiling). The `apply_batch` schema, bundle preflight and the note read reservation follow the configured limits. Docs: `SERVER.md`, `SERVER-OPERATIONS.md`, `BACKUP.md`, `NATIVE-RUNTIME.md`.
 - Verified: scene-input, node-memory and storage tests, server startup/schema/context tests, clippy, wasm32 check; a debug server rejects `FAGENT_MAX_NOTES=100`, prints raised limits and publishes `maxLength` 8000 for note text in `tools/list`. `notes::a_notes_only_commit_enqueues_no_prerender` fails here on `main` too (no prerender in this environment).
+
+### Viewer large-board load (Tasks 36/37 partial) — 2026-11-26
+
+- User report: a large project's All pages board (~225 frames) takes over 7 s to render. Work on `perf/viewer-large-project` (from `feat/note-limits-env`); started on a loaded machine, measured and finished on a quiet M3 Pro.
+- Decisions: paced progressive draws with `frame` messages held until the image that shows them (`drawPacing.ts`, `workerRuntime.ts`), `MessageChannel` yields between frames (`yieldTask.ts`) but timer polling for GPU waits (`pollTask`), per-font HarfRust shape plan cache (`crates/text/src/plans.rs`), cold-load benchmark `test:engine-load`. Item 2's "off-viewport commits do not dirty the board" dropped: pacing bounds the draws instead.
+- Result: All pages `synced` 8.6 → 2.8 s on a synthetic 229-frame board; table, method and rerun commands in `docs/VIEWER.md` "Measurements — 2026-11-26". Committed in five pieces and pushed at the user's request as PR #8 (not merged).
+- Not run: `test:react` (`app-shell-smoke.mjs` needs the pinned Chromium); `cargo test -p fagent-server` render tests need the Chromium render worker (same failure list on `77e2430`).
+- Open: Task 36 items 3–4 and `--base-url`, Task 37 items 1 (native bench), 3–4, Task 35, parallel compute workers (needs a design decision).
+
+### PR #8 review follow-up (Tasks 36/37) — 2026-11-27
+
+- User request: pull `perf/viewer-large-project`, fix the CodeRabbit "Request changes" on PR #8 and report numbers. The local tree held an older uncommitted copy of the same patch; fast-forwarded to `origin` (backup patch kept outside the repo).
+- Fixed: a failed last draw keeps held frames and `synced` until an image is drawn (`workerRuntime.ts`); the loader yields after fetching fonts, so a camera received meanwhile is drawn before that frame computes (`frameLoader.ts`; found by the new check, base included). Benchmark: integer counts with `pages ≤ frames` and counts taken from the generated fixture, `/snapshot` request mark, commit → `drawn` from the worker's commit, `cameraOrder` check. Commit, compute and camera times come from the glue wrapper instead of a new protocol event, so the product carries no probe. Docs: Task 36 `--scopes` commands, Task 37 attribution with cache-only evidence, the 2026-11-26 entry above shortened.
+- Result: the plan cache alone cuts `compute` 45% on All pages; table in `docs/VIEWER.md` "Measurements — 2026-11-27".
+- Verified: web tests 161 + 49, typecheck, `test:engine`, `test:engine-board --strict` (Chrome 158). No Rust change, so no cargo run.
+- Committed in three pieces and pushed to PR #8 at the user's request. Open: the review threads are not answered on GitHub.
+
+### Task 42 — Engine persistent scene cache — 2026-11-27
+
+- User request: after PR #8 a ~225-frame board still takes ~6 s on a loaded machine; make later opens very fast through caching. WebGPU initialization (~3.8 s before the first frame on the user's machine) stays out of scope for now. Packaged as [Task 42](../../tasks/42-engine-persistent-scene-cache.md) (takes over the engine-path parts of Task 32 items 4–5; order 42 → 36 → 37 → 31/35 → 33).
+- Built on `perf/engine-scene-cache`, then committed on `perf/viewer-large-project` at the user's request, pushed to PR #8 with the review fixes below. A test release of the uncommitted tree ran on port 3900 for the user to try.
+- Decisions: records are `serde_json` with exact floats (no new dependency); imports wait for the backend like compute; restored frames skip the first-frame draw; item 5 done (worker Cache API keyed by font hash); the fixture's white fills became one token for `--edit-shared`.
+- Result: the task file's status and `docs/VIEWER.md` "Measurements — 2026-11-27 (engine scene cache, Task 42)".
+- Verified: web tests 161 + 61, `test:react` (on installed Chrome via a test-only preload; the pinned Chromium is absent), typecheck, `cargo test`/fmt/clippy for `fagent-engine-wasm` (wasm32 clippy: one older warning in `web/backend.rs`), `test:engine`, `test:engine-board --strict`, `test:engine-cache`.
+- Open: `frame_keys` still blocks the attach on a changed ETag (Task 35); Safari/Firefox not measured; the browser HTTP cache is off in all benchmark runs (Playwright routing).
+
+### Scene cache code review fixes (PR #8) — 2026-11-27
+
+- Assigned from a code review of `perf/viewer-large-project` against `main`; fixed on the same branch, committed in two pieces and pushed to PR #8 at the user's request.
+- Fixed (behavior in `docs/VIEWER.md` "Engine scene cache"): a new ETag at the same revision resends the snapshot, and the worker trusts only the ETag that arrived with its loaded snapshot (digests of older bytes were filed under the new ETag); records touched in a write batch rank as used before it evicts and evicted rows get no usage row; other builds are swept once per worker, not on every write; a sync superseded during its manifest read runs no `frame_keys`; damaged manifests are misses; manifest hits refresh their last use; oversized records are counted apart from writes; the font cache is bounded to 128 MiB too.
+- Verified: web tests 161 + 67, typecheck, `test:engine-cache` and `test:engine` (installed Chrome; the pinned Chromium is absent). The new tests fail on the previous code. No Rust change.
+- Open: without a strong ETag, a 200 with new bytes at the same revision still leaves the worker on the older snapshot (unchanged behavior, outside the cache).
+
+### CodeRabbit reviews 2–3 on PR #8 — 2026-11-27
+
+- User request: fix every open CodeRabbit finding on PR #8 (reviews on `66d82f4` and `8ac57df`, 13 findings) and the failed "Task Acceptance Criteria" pre-merge check. Review 1 (`5cb67b2`) was already fixed in `bc9e3fd`..`66d82f4`.
+- Fixed (behavior in `docs/VIEWER.md`): a reused frame waits with an older sync's held message for it; a restored-only release no longer delays the first computed frame; font failures of a superseded sync, or of a font only a stored record lists, are not remembered; the font cache retries a failed open and frees space on a quota error; records that repeat a node id are rejected (Rust); the load probe accepts the last image before `synced` and pairs each commit with its own image; warm edit rounds count across scopes (unique keys and whites); the browser test stops Vite when the browser cannot launch; the ETag client test compares full pairs; the 250 ms wording. Client tests moved to `engine-client.test.ts` (the runtime test file had passed 1,000 lines).
+- Pre-merge check: "PR scope" lines in tasks 36, 37 and 42 (one PR at the user's request, deferrals listed); the PR description must still name Tasks 36, 37 and 42 (no GitHub CLI on this machine).
+- Verified: web tests 161 + 71, typecheck, `test:engine-cache`, `test:engine`, `test:engine-board --strict` (installed Chrome, rebuilt engine module), `cargo test`/fmt/clippy for `fagent-engine-wasm` (wasm32 clippy: older warnings only), `engine-load.mjs` smoke runs (20 frames, two scopes: cold, `--warm --edit 1`, `--warm --edit-shared`). New tests fail on the previous code.
+- Committed in four pieces and pushed to PR #8 at the user's request. Open: the GitHub review threads are not answered; the PR description does not name Task 42 yet.

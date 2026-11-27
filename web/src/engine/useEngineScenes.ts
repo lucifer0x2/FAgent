@@ -1,6 +1,7 @@
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { diagnosticLabel } from "../diagnostics";
 import type { FrameSceneView, SceneView } from "../hooks/useScene";
+import { useSnapshotEtag } from "../hooks/useSnapshot";
 import { publishScheduler } from "../scene/publishScheduler";
 import { pageView, type FrameTarget } from "../scene/staleFrames";
 import type { Snapshot } from "../types";
@@ -82,6 +83,13 @@ export function useEngineScenes(
   useLayoutEffect(() => {
     latest.current = loaded;
   }, [loaded]);
+  // The server's strong ETag for this exact snapshot: the worker's scene cache keys frame
+  // digests by it. Read through a ref so that it never starts a sync of its own.
+  const snapshotEtag = useSnapshotEtag(snapshot);
+  const etag = useRef(snapshotEtag);
+  useLayoutEffect(() => {
+    etag.current = snapshotEtag;
+  }, [snapshotEtag]);
   const lastRetry = useRef(retryKey);
   useEffect(() => {
     if (!active || !snapshot) return;
@@ -116,6 +124,7 @@ export function useEngineScenes(
         height: target.height,
       })),
       bypass,
+      etag.current,
     );
     const off = engineClient.onFrame((event) => {
       if (event.generation !== generation) return;

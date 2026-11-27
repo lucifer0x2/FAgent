@@ -62,7 +62,8 @@ export class EngineClient {
   private replies = new Map<number, (value: unknown) => void>();
   private sequence = 0;
   private generation = 0;
-  private sent?: { projectId: string; revision: number };
+  /** The snapshot the worker holds: project, revision and the ETag it arrived with. */
+  private sent?: { projectId: string; revision: number; etag?: string };
   private lastCamera = "";
   private lastLayout = "";
   private layoutSeq = 0;
@@ -258,12 +259,20 @@ export class EngineClient {
     });
   }
 
-  /** Computes `frames` at the snapshot's revision; returns the generation of its events. */
-  sync(snapshot: Snapshot, frames: FrameRequest[], bypass: boolean) {
+  /**
+   * Computes `frames` at the snapshot's revision; returns the generation of its events.
+   * `etag`: the strong ETag the server sent with this snapshot (scene cache key). A new ETag
+   * at the same revision is a new representation (`snapshotHttp.ts` accepts a 200 with new
+   * bytes at an equal revision), so the snapshot crosses again with it: the worker files
+   * frame digests under an ETag only together with the snapshot they were computed from.
+   */
+  sync(snapshot: Snapshot, frames: FrameRequest[], bypass: boolean, etag?: string | null) {
     const generation = ++this.generation;
+    const tag = etag || undefined;
     const held =
       this.sent?.projectId === snapshot.projectId &&
       this.sent.revision === snapshot.revision &&
+      this.sent.etag === tag &&
       !bypass;
     this.post({
       type: "sync",
@@ -273,8 +282,9 @@ export class EngineClient {
       ...(held ? {} : { snapshot }),
       frames,
       bypass,
+      ...(tag ? { etag: tag } : {}),
     });
-    this.sent = { projectId: snapshot.projectId, revision: snapshot.revision };
+    this.sent = { projectId: snapshot.projectId, revision: snapshot.revision, etag: tag };
     return generation;
   }
 
