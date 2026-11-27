@@ -1,5 +1,7 @@
 //! Taffy layout with batched cached or synchronous text measurement.
 mod engine;
+#[cfg(test)]
+mod free_fill_tests;
 mod measurement;
 mod model;
 #[cfg(test)]
