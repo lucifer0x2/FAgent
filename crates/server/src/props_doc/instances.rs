@@ -1,22 +1,42 @@
-//! Minimal component authoring contract, outside the compact tool catalog.
-pub(super) fn section() -> &'static str {
-    "\n## Components and instances\n\n\
+//! Minimal component authoring contract, outside the compact tool catalog. The key
+//! lists come from the validator's constants, so they match what a commit accepts.
+use fagent_storage::instances::{INSTANCE_KEYS, OVERRIDE_KEYS};
+
+fn keys(list: &[&str]) -> String {
+    let keys: Vec<String> = list.iter().map(|key| format!("`{key}`")).collect();
+    keys.join(", ")
+}
+
+pub(super) fn section() -> String {
+    format!(
+        "{INTRO}Instance keys: {}. All but `componentId` and `overrides` patch the expanded \
+         master root: this is where the master root's own props go. Stroke objects merge \
+         (a master width/align stays when only color changes) and `states` merge per state; \
+         the other keys replace. An instance root is a frame and clips its children: set \
+         `clip: false` on the instance to paint a child, stroke or shadow past its edge.\n\n\
+         `overrides` is an object keyed by authored master descendant IDs. Each value is a \
+         partial props object accepting {}, validated for the target's kind against the fully \
+         merged value. {REST}",
+        keys(INSTANCE_KEYS),
+        keys(OVERRIDE_KEYS)
+    )
+}
+
+const INTRO: &str = "\n## Components and instances\n\n\
      A reusable master is a `frame` with `component: {name: \"TableRow\"}`. Its children \
      are authored normally. Masters may use fill/hug sizing; a rendered root frame \
-     still needs fixed dimensions. Create an `instance` leaf with `componentId` pointing \
+     still needs a numeric width. Create an `instance` leaf with `componentId` pointing \
      to the master. It inherits the master's layout and paint; its own name, visibility, \
-     position and sizing replace the corresponding root properties. Instances also accept \
-     `fill`, `stroke`, `shadow`, `radius` and `opacity` on the expanded master root. \
-     Stroke objects merge, retaining a master width/align when only color changes.\n\n\
-     `overrides` is an object keyed by authored master descendant IDs. Each value is a \
-     partial props object accepting `text`, `fill`, `visible`, `styleId`, `assetId`, \
-     `name`, `stroke`, `shadow`, `states`, `opacity` and `radius`, validated for the \
-     target's kind against the fully merged value. Stroke objects merge; shadow arrays \
+     position and sizing replace the corresponding root properties. ";
+
+const REST: &str = "Stroke objects merge; shadow arrays \
      replace all layers; states merge per state and visual property (including stroke). \
      Patching hover preserves focus/pressed and unpatched hover properties. State shadow \
-     remains unsupported. Image references use \
-     `assetId`; token references use `{tokenId: \"...\"}`. The target cannot be the master \
-     root. Layout, sizing, structure and component references cannot be overridden. \
+     remains unsupported. Text overrides cover paint only: font keys (`fontSize`, \
+     `lineHeight`, `fontId`, `fontWeight`, `fontStyle`) stay on the master. Image \
+     references use `assetId`; token references use `{tokenId: \"...\"}`. The target \
+     cannot be the master root: set those props on the instance itself. Layout, sizing, \
+     structure and component references cannot be overridden. \
      Master root/child states are inherited by the corresponding expanded nodes. \
      `update_node` replaces the complete `overrides` object (`merge:true` patches entries).\n\n\
      Frames and instances accept `theme: \"night\"`: the name must occur in a token's \
@@ -38,5 +58,4 @@ pub(super) fn section() -> &'static str {
      child bounds/lines. Choose `instances: \"expand\"` for the full virtual tree. \
      `get_outline` and `get_subtree` show instance leaves with `componentId` and \
      `childCount`; scope a virtual child directly to read it. `find_nodes` accepts \
-     `kinds: [\"instance\"]` and searches overridden child text using virtual IDs.\n"
-}
+     `kinds: [\"instance\"]` and searches overridden child text using virtual IDs.\n";

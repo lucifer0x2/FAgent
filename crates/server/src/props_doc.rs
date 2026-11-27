@@ -53,7 +53,7 @@ fn render() -> String {
     out.push_str(
         "\n## Notes\n\n\
          - \"Required\" keys may come from a text style through `styleId` instead of being authored.\n\
-         - Root frames (direct children of a page) need numeric `width` and `height`.\n\
+         - Root frames (direct children of a page) need a numeric `width`, and a numeric `height` or `height:\"hug\"` with a row/column layout (the frame takes its content height); a free root needs a numeric `height`.\n\
          - Text color is `fill`; a container's background is `fill`; corner rounding is `radius`.\n\
          - `update_node` replaces the whole `layout` object (unless `merge:true`): resend `mode` with the other layout keys.\n\
          - `links` targets are root frame IDs checked at the end of the batch; `flowStart` goes on \
@@ -65,7 +65,7 @@ fn render() -> String {
          - Not supported: blur, conic gradients, gradient or shadow on text, shadow in states, `alignSelf`, `space-around`/`space-evenly`. Do not invent keys for them.\n",
     );
     out.push_str(&animations::section());
-    out.push_str(instances::section());
+    out.push_str(&instances::section());
     out.push_str("\n## Interaction states\n\n`states` declares hover, pressed, focus and disabled as flat objects. Only fill, opacity, radius and stroke (box kinds) are accepted, with the same token/style references as resting props. No state inherits another or changes children. `update_node` replaces the entire states object; {} clears it. State strokes paint after layout, even inside strokes: resting borders reserve space. Font weight and shadow are not supported. Read statesMode:resolved and map declared variants to CSS pseudo-classes. P07a hover animations still require one explicit keyframe; there is no `to` property or implicit states.hover target.\n");
     out
 }
@@ -82,6 +82,20 @@ mod tests {
         }
         for spec in PROPS {
             assert!(doc.contains(&format!("| `{}` |", spec.key)), "{}", spec.key);
+        }
+    }
+
+    #[test]
+    fn instance_and_override_key_lists_match_the_validator() {
+        use fagent_storage::instances::{INSTANCE_KEYS, OVERRIDE_KEYS};
+        let doc = text();
+        for (label, list) in [
+            ("Instance keys: ", INSTANCE_KEYS),
+            ("partial props object accepting ", OVERRIDE_KEYS),
+        ] {
+            let keys: Vec<String> = list.iter().map(|key| format!("`{key}`")).collect();
+            let line = format!("{label}{}", keys.join(", "));
+            assert!(doc.contains(&line), "{line}");
         }
     }
 }

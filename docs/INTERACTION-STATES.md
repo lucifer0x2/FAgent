@@ -9,8 +9,10 @@ arrays; `strokeColor` and `strokeWidth` are aliases rejected by the base catalog
 Font weight and shadow have no base property and are unsupported in states.
 
 Instances inherit the component master's declarations through expansion; their
-virtual children retain each master child's own states. Instances cannot author
-`states` or descendant `states` overrides in the minimal P24 whitelist. Reference
+virtual children retain each master child's own states. An instance may author its
+own root `states` and descendant `overrides.<childId>.states`; each merges per state
+over the master's declarations (for example
+`{"componentId":"button","states":{"hover":{"fill":"#1d4ed8"}}}`). Reference
 component definitions expose `resolvedStates` under the same opt-in mode/filter
 as scoped nodes. See [Components and instances](COMPONENTS.md).
 
