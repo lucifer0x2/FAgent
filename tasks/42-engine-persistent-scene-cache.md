@@ -10,6 +10,7 @@
 - Docs: `docs/VIEWER.md` (section "Vello engine" + a measurements subsection), this file, `docs/agents/LOG.md`.
 - Not owned: server, storage, the Canvas2D path (`web/src/scene/*`, `scene.worker.ts`; reading `browserSceneCache.ts`/`sceneStore.ts` for patterns is fine, changing their behavior is not), layout/scene-wasm compute results, the startup Suspense delay (Task 36 item 3), WebGPU initialization.
 **Workspace:** a new branch `perf/engine-scene-cache` from `perf/viewer-large-project` (keep PR #8 reviewable); rebase onto `main` once PR #8 merges. Do not push or open a PR unless the user asks.
+**PR scope (2026-11-27):** at the user's request the work was committed on `perf/viewer-large-project` and pushed to PR #8, which therefore covers [Task 36](36-viewer-cold-load-quick-wins.md) items 1, 2, 5, [Task 37](37-text-shape-plan-paint-caches.md) item 2 and this task (owned scope above, plus the code review fixes recorded in `docs/agents/LOG.md`). Deferred: Task 35 (`frame_keys` on a changed ETag), Safari/Firefox measurements.
 
 ## Context
 

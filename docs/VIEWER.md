@@ -365,7 +365,8 @@ bar shows the backend (`Vello · WebGPU`, `Vello · WebGL2`, `Vello · vello_cpu
   again). If that last draw fails (no backend, a GPU error), the held frames and `synced` wait
   for the first image the rebuilt or next backend draws, then go out in the same order (frames,
   `drawn`, `synced`); a newer sync drops the pending `synced`. Failed and reused frames are
-  reported at once. Unchanged frames (same content digest) move
+  reported at once, except a reused frame whose message from an older sync still waits for its
+  image (that draw failed): it waits with it. Unchanged frames (same content digest) move
   to the new revision without recomputing and repeat the summary and missing assets the engine
   shows, so a view that never received them (another scope showed the frame first, or a newer
   sync replaced the view) replaces that frame's skeleton too. A frame stays drawn until its
@@ -434,7 +435,8 @@ project whose frames are unchanged imports them instead of running `frame_keys` 
   hit-tests and measures like the computed one. `import_record` stages exactly what `compute`
   stages, restamped to the accepted revision like `reuse` (its `sourceSceneKey` names the
   computing revision), and refuses a record whose format, project, frame, viewport or digest
-  differs, or one whose fonts are not all loaded (an error, never a frame without text).
+  differs, one that repeats a node id, or one whose fonts are not all loaded (an error, never a
+  frame without text).
 - **Bounds.** Records measured 61 KB on average on the 229-frame fixture (14.0 MB) and 62 KB on
   the 904-frame one (56.2 MB): 2,000 records / 256 MiB (two 1,000-frame boards of such frames, e.g. before and
   after a shared token edit), 16 MiB per record (larger ones are not stored; counted as
@@ -456,14 +458,17 @@ project whose frames are unchanged imports them instead of running `frame_keys` 
   Imports wait for the backend like computations: on a warm reload the attach ends ~60 ms after
   `sync` (no `frame_keys` blocks it any more), so starting imports earlier could save at most
   that. Restored frames never trigger the first-frame draw of a sync (`drawPacing.ts`): they are
-  shown once the progress gap has passed since the first of them, or right before `synced`.
+  shown once the progress gap has passed since the first of them, or right before `synced`;
+  the first computed frame of the sync is still drawn at once after restored ones were shown.
 - **Writes.** After `synced` (after the draw that shows the frames): one `export_record` per
   yield, never while a load runs, in batches of at most 64 records / 32 MiB per transaction,
   with the manifest and the last use of imported records.
 - **Failures.** Opening has a 1 s deadline, a read 3 s, a write 10 s; a timeout, quota error or
   blocked database reads as a miss or skips the write. A record the engine refuses (damaged,
   another format) is deleted and its frame computed and written again; a damaged font list
-  computes too, and a damaged manifest (digests not an object of strings) is a miss. Retry
+  computes too, and a damaged manifest (digests not an object of strings) is a miss. A font a
+  record lists but whose fetch fails is not remembered as failed (computing asks which fonts
+  the frame needs and reports those); neither is a failure of a sync a newer one replaced. Retry
   (`bypass`) reads neither manifest nor records and replaces what it
   recomputes; a newer sync aborts the older one's read. The cache never fails a frame.
   `fagentEngine.status().cache` reports hits, misses, bytes and time read, imports, rejections,
@@ -479,7 +484,10 @@ project whose frames are unchanged imports them instead of running `frame_keys` 
   keeps verified font bytes in the Cache API (`fagent.engine-fonts`, `web/src/engine/fontCache.ts`),
   keyed by content hash under a synthetic same-origin URL, at most 64 fonts and 128 MiB (oldest
   stored first; sizes kept in a response header, so eviction reads no font body; a font over
-  128 MiB is not kept); a hit is hash-checked again and a damaged entry fetched anew.
+  128 MiB is not kept); a hit is hash-checked again and a damaged entry fetched anew. A failed
+  `caches.open()` is retried by the next load; a put over the origin's quota frees at least
+  that font's size from the oldest entries and is tried once more (the fetched bytes are used
+  either way).
 
 **Fallback.** WebGPU (adapter + device + Vello renderer probe) → WebGL2 (`failIfMajorPerformanceCaveat`,
 probe) → `vello_cpu` into an `ImageBitmap` (`transferFromImageBitmap`) → Canvas2D for the rest of
@@ -569,7 +577,9 @@ from navigation:
   (10 ms) are unchanged; the remaining cost is `compute` (1.3 s: shaping, allocation, JSON,
   sha256 digests) and `frame_keys` (0.47 s, whole-snapshot resolve; Task 35).
 - Progressive display: the new build draws every ~56 ms on average while loading ((`synced` −
-  first frame) / draws), never more than 250 ms apart by construction. The harness then timed
+  first frame) / draws). The 250 ms bound caps the pacing gap, not the interval between two
+  draws: pacing is checked between frame computations, so one computation longer than the gap
+  delays the next draw by its own length. The harness then timed
   "commit → drawn" from the page's `frame` message, which is ~0 on the new build because that
   message is posted just before the `drawn` that shows it (base: p95 18 ms, one draw per frame);
   since 2026-11-27 it measures from the worker's commit (below).
@@ -741,12 +751,15 @@ its fill run (`results.<scope>.fill`) and per-run traces of the load window.
 ### Tests
 
 - `npm --prefix web test` includes `engine-runtime.test.ts` (renderer choice, the WebGPU → WebGL2 →
-  vello_cpu → Canvas2D chain, probe rejection, device loss rebuild-once, snapshot sent once per
-  revision; paced draws with a fake clock: first frame at once, later ones per gap, the last
+  vello_cpu → Canvas2D chain, probe rejection, device loss rebuild-once; paced draws with a fake
+  clock: first frame at once, later ones per gap, the last
   always before `synced`, held `frame` messages posted before their `drawn`; a camera or layout
   during a load drawn unpaced without releasing held frames; a failed last draw holds its frames
-  and `synced` until the next backend draws them; `progressGap` bounds; GPU waits poll on
-  `pollTask`, never on the frame yield) and `engine-frames.test.ts` (frame loader: order, reuse,
+  and `synced` until the next backend draws them, and a reused frame waiting for that image
+  waits with it; `progressGap` bounds; GPU waits poll on
+  `pollTask`, never on the frame yield), `engine-client.test.ts` (page side: a fresh canvas per
+  fallback step, the snapshot sent once per revision and again with a new ETag, image placement,
+  hidden layouts, overscan) and `engine-frames.test.ts` (frame loader: order, reuse,
   missing font/asset, supersede, a yield after a font fetch before compute), and
   `engine-cache.test.ts` (scene cache with an in-memory store: a reload imports every frame
   without `frame_keys` or `compute`, an edited frame recomputes alone, another build misses, a
@@ -754,9 +767,10 @@ its fill run (`results.<scope>.fill`) and per-run traces of the load window.
   to compute, Retry bypasses, a newer sync aborts the older read, nothing is read before a sync
   carries an answered snapshot, a held sync with a new ETag neither reads nor files digests
   under it, a sync superseded during its manifest read runs no `frame_keys`, a damaged manifest
-  is a miss, a manifest hit is written again, an oversized record is counted apart; LRU
-  eviction, restored-frame pacing, the font cache and its byte bound). The client test in
-  `engine-runtime.test.ts` checks that a new ETag at the same revision sends the snapshot again.
+  is a miss, a manifest hit is written again, an oversized record is counted apart, a font
+  failure of a superseded sync or of a font only a record lists is not remembered; LRU
+  eviction, restored-frame pacing (the first computed frame after restored ones goes at once),
+  the font cache with its byte bound, a retried open and a put over quota).
 - `npm --prefix web run test:engine-cache` (`engine-cache-browser.mjs`, real Chromium IndexedDB;
   `FAGENT_TEST_CHANNEL=chrome` for Chrome): one read transaction, misses and damaged records or
   manifests, LRU with touched records (also touched and added in one batch at capacity, with no
