@@ -45,7 +45,8 @@ Use the guard from that successful commit for subsequent work on the same scope.
 For diagnostics, `get_edit_context {projectId,pageIds}` returns a guard and
 dependency metadata from one authoritative snapshot: `expectedRevision`,
 `pageIds`, `dependencyCount`, up to 100 sorted `dependencies` keys, and
-`dependenciesTruncated`. It returns no design payload, binary bytes or internal
+`dependenciesTruncated`, plus the project's `noteCount` and the configured
+`noteLimit` (`FAGENT_MAX_NOTES`). It returns no design payload, binary bytes or internal
 paths. Read authored data with `revision` equal to this guard, or use the revision
 of an existing authored read directly. **Never relabel an older design read with
 a newly fetched revision.**

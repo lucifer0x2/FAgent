@@ -49,7 +49,7 @@ Note limits can be raised, never lowered, through the environment; an empty vari
 | `FAGENT_MAX_NOTE_REPLIES` | Replies per note | 100 | 1000 |
 | `FAGENT_MAX_NOTE_AUTHOR` | Characters of one author | 64 | 256 |
 
-The `apply_batch` schema publishes the text and author limits in use, and project bundles are checked against the same note count. A server with lower limits (the variables removed again, or a rollback to an older release) still admits and serves a stored project over them, as node memory does for any invalid stored data; it judges a batch that writes such a note, or raises the note count, by its own limits and rejects bundles over them.
+The `apply_batch` schema publishes the text and author limits in use, `get_edit_context` returns the project's `noteCount` and the `noteLimit` in use, and project bundles are checked against the same note count. A server with lower limits (the variables removed again, or a rollback to an older release) still admits and serves a stored project over them, as node memory does for any invalid stored data; it judges a batch that writes such a note, or raises the note count, by its own limits and rejects bundles over them.
 
 `--host` takes `127.0.0.1` (default) or `0.0.0.0`, which listens on every interface for a container whose port is published on host loopback only; Host/Origin checks are unchanged, and worker callbacks and `imageUrl` still use `http://127.0.0.1:<port>`, so no other address is accepted. See "Docker" in `README.md`.
 

@@ -56,6 +56,10 @@ impl ViewSource for ProjectState {
         Box::new(ProjectState::notes(self))
     }
 
+    fn note_count(&self) -> usize {
+        self.store.res.notes.len()
+    }
+
     fn page(&self, id: &str) -> Option<&str> {
         self.page_of(id).map(|page| page.id.as_str())
     }

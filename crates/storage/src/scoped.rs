@@ -65,17 +65,26 @@ pub(crate) fn edit_context_indexed(
     })?;
     index.tree.validate_pages(&page_ids)?;
     let dependencies = index.closure(&page_ids)?;
-    Ok(edit_context_response(snapshot, page_ids, &dependencies))
+    let notes = snapshot.notes.len();
+    Ok(edit_context_response(
+        snapshot,
+        page_ids,
+        &dependencies,
+        notes,
+    ))
 }
 
-/// Shared wire formatter for the legacy and persistent dependency adapters.
+/// Shared wire formatter for the legacy and persistent dependency adapters. `note_count`
+/// is the project's note count at this revision; `noteLimit` is the configured cap.
 pub(crate) fn edit_context_response(
     snapshot: &Snapshot,
     page_ids: Vec<String>,
     dependencies: &BTreeSet<String>,
+    note_count: usize,
 ) -> Value {
     json!({"projectId":snapshot.project_id,"expectedRevision":snapshot.revision,
         "pageIds":page_ids,"dependencyCount":dependencies.len(),
         "dependencies":dependencies.iter().take(100).collect::<Vec<_>>(),
-        "dependenciesTruncated":dependencies.len()>100})
+        "dependenciesTruncated":dependencies.len()>100,
+        "noteCount":note_count,"noteLimit":note_limits().notes})
 }
