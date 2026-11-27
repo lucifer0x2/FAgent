@@ -47,15 +47,17 @@ pub(crate) fn page(diagnostics: &mut Vec<Value>, offset: usize, limit: usize) ->
     if offset == 0 && total <= limit {
         return None;
     }
+    // The offset is caller input with no upper bound: saturate instead of overflowing.
+    let end = offset.saturating_add(limit);
     let mut index = 0;
     diagnostics.retain(|d| {
         if d["code"] != ITEM {
             return true;
         }
         index += 1;
-        (offset + 1..=offset + limit).contains(&index)
+        index > offset && index <= end
     });
-    let next = (offset + limit < total).then_some(offset + limit);
+    let next = (end < total).then_some(end);
     Some(json!({"offset":offset,"limit":limit,"total":total,"nextOffset":next}))
 }
 
@@ -108,5 +110,13 @@ mod tests {
         let mut whole = job(3).as_array().unwrap().clone();
         assert_eq!(page(&mut whole, 0, 12), None);
         assert_eq!(whole.len(), 5);
+    }
+
+    #[test]
+    fn an_offset_past_every_item_shows_none() {
+        let mut list = job(3).as_array().unwrap().clone();
+        let meta = page(&mut list, usize::MAX, 12).unwrap();
+        assert_eq!(meta["nextOffset"], Value::Null);
+        assert_eq!(list.len(), 2, "only the other diagnostic and the summary stay");
     }
 }
