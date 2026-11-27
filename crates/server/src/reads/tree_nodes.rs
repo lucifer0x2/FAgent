@@ -5,6 +5,24 @@ use fagent_storage::Node;
 use serde_json::{json, Value};
 use std::collections::HashMap;
 
+/// One `get_outline` entry. `properties` adds a `props` object holding only those authored
+/// keys; without it the entry stays prop-free.
+pub(super) fn outline_entry(node: &Node, properties: Option<&Vec<String>>) -> Value {
+    let mut value = json!({"id":node.id,"parentId":node.parent_id,"kind":node.kind,"name":node.props["name"],"sortKey":node.sort_key});
+    if let Some(keys) = properties {
+        let props: serde_json::Map<String, Value> = node
+            .props
+            .as_object()
+            .into_iter()
+            .flatten()
+            .filter(|(k, _)| keys.contains(k))
+            .map(|(k, v)| (k.clone(), v.clone()))
+            .collect();
+        value["props"] = Value::Object(props);
+    }
+    value
+}
+
 pub(super) struct Source<'a> {
     pub index: &'a TreeIndex<'a>,
     pub expanded: &'a TreeIndex<'a>,
@@ -30,7 +48,7 @@ impl Source<'_> {
             .filter(|(_, d)| req.depth.is_none_or(|max| *d <= max))
         {
             let mut value = if name == "get_outline" {
-                json!({"id":node.id,"parentId":node.parent_id,"kind":node.kind,"name":node.props["name"],"sortKey":node.sort_key})
+                outline_entry(node, req.properties.as_ref())
             } else {
                 let mut authored = (*node).clone();
                 if let Some(props) = &req.properties {
@@ -41,6 +59,7 @@ impl Source<'_> {
                         .retain(|k, _| props.contains(k));
                 }
                 let mut value = json!(authored);
+                super::text_escape::annotate(&mut value);
                 if context {
                     let mut props = self.resolved[node.id.as_str()].props.clone();
                     value["effectiveTheme"] = props

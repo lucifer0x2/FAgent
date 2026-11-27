@@ -28,7 +28,7 @@ impl Jobs {
         match result {
             Err(error) => {
                 entry.value["status"] = json!("failed");
-                entry.value["error"] = json!(error.0);
+                entry.value["error"] = error.value()["error"].clone();
             }
             Ok((computed, rendered)) if entry.value["kind"] == "export" => {
                 super::export::finish(entry, &self.config.base_url, &computed, rendered);
@@ -37,7 +37,8 @@ impl Jobs {
                 entry.value["status"] = json!("ready");
                 entry.value["scene"] = computed["scene"].clone();
                 entry.value["provenance"] = computed["scene"]["provenance"].clone();
-                entry.value["diagnostics"] = computed["scene"]["diagnostics"].clone();
+                entry.value["diagnostics"] =
+                    crate::text_diagnostics::reported(&computed["scene"]["diagnostics"]);
                 entry.value["readiness"] = computed["readiness"].clone();
                 match rendered {
                     Ok(Rendered::Frame(png)) => {
@@ -62,7 +63,7 @@ impl Jobs {
                     }
                     Ok(Rendered::Export(_)) => {}
                     Err(error) => {
-                        entry.value["error"] = json!(error.0);
+                        entry.value["error"] = error.value()["error"].clone();
                     }
                 }
             }

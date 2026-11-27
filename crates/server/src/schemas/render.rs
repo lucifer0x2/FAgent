@@ -5,7 +5,7 @@
 use super::{id, object, text, viewport};
 use serde_json::{json, Map, Value};
 
-pub const DESCRIPTION: &str = "Enqueue immutable exact-revision rendering; returns bounded job and HTTP PNG resource metadata when ready. Call it in one of two modes: enqueue with projectId, revision, frameId and viewport (theme, state and scale optional), or poll with projectId and jobId (waitMs optional); arguments mixing the two modes are rejected. Poll using jobId; pass waitMs (0–10000, default 0) to have the poll return as soon as the job leaves pending, or its current state when the wait expires, instead of polling in a tight loop. waitMs is only accepted with jobId. The PNG is the exact pixels the design has at that revision and viewport, so it is also how an implementation is compared against the design. The response leaves out the computed scene (every node, line, font and asset; tens to hundreds of KB) and keeps status, sceneKey, imageUrl/image, provenance, diagnostics and readiness: read bounds and text lines with inspect_layout for that sceneKey, or pass includeScene:true (either mode) for the full scene inline.";
+pub const DESCRIPTION: &str = "Enqueue immutable exact-revision rendering; returns bounded job and HTTP PNG resource metadata when ready. Call it in one of two modes: enqueue with projectId, revision, frameId and viewport (theme, state and scale optional), or poll with projectId and jobId (waitMs optional); arguments mixing the two modes are rejected. Poll using jobId; pass waitMs (0–10000, default 0) to have the poll return as soon as the job leaves pending, or its current state when the wait expires, instead of polling in a tight loop. waitMs is only accepted with jobId. The PNG is the exact pixels the design has at that revision and viewport, so it is also how an implementation is compared against the design. The response leaves out the computed scene (every node, line, font and asset; tens to hundreds of KB) and keeps status, sceneKey, imageUrl/image, provenance, diagnostics and readiness: read bounds and text lines with inspect_layout for that sceneKey, or pass includeScene:true (either mode) for the full scene inline. At most 16,000,000 px (width×height×scale²); PIXEL_BUDGET gives maxScale.";
 const ENQUEUE_REQUIRED: [&str; 4] = ["projectId", "revision", "frameId", "viewport"];
 const POLL_REQUIRED: [&str; 2] = ["projectId", "jobId"];
 
@@ -43,6 +43,14 @@ mod tests {
 
     fn check(args: Value) -> Result<(), String> {
         crate::schemas::validate("render_frame", &args).map_err(|e| e.0.code)
+    }
+    /// FB-13/FB-49: both image tools state the pixel budget an agent must fit.
+    #[test]
+    fn render_and_export_descriptions_state_the_pixel_budget() {
+        for description in [super::DESCRIPTION, crate::schemas::export::DESCRIPTION] {
+            assert!(description.contains("16,000,000"), "{description}");
+            assert!(description.contains("maxScale"), "{description}");
+        }
     }
     #[test]
     fn published_schema_is_the_flat_union_of_both_modes() {

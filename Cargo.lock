@@ -823,6 +823,7 @@ dependencies = [
  "tempfile",
  "tokio",
  "tower-http",
+ "unicode-properties",
  "uuid",
 ]
 

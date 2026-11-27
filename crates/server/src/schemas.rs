@@ -96,13 +96,14 @@ fn build() -> Vec<Tool> {
         ),
     );
     let tree = json!({"projectId":id(),"nodeId":node_id(),"frameId":id(),"depth":{"type":"integer","minimum":0,"maximum":8},"limit":count(200),"budget":{"type":"integer","minimum":1024,"maximum":65536},"properties":{"type":"array","maxItems":50,"items":text(64)},"viewport":viewport(),"theme":text(64),"cursor":text(1024),"revision":{"type":"integer","minimum":0}});
+    const TEXT_ESCAPED: &str = "Icon/private-use text adds textEscaped.";
     // Each read says what it is for, so a caller can tell the three scopes apart without trying them.
     const CAPS: &str = " depth (0–8) keeps nodes at most that many levels below the scope root, which is level 0 (project scope: pages are 0, their root frames 1); a node whose children were cut carries omittedChildren. Omitted depth reads the whole scope. One consistent revision, at most 200 nodes and 64 KiB per page; truncation is explicit.";
     for (name, required, purpose) in [
         (
             "get_outline",
             vec!["projectId"],
-            "Ordered id/parentId/kind/name/sortKey of the whole project tree. Start here to find the page or frame ID for a scoped read; depth:1 lists every page with its root frames. It carries no props. Instances are leaves with componentId and childCount.",
+            "Ordered id/parentId/kind/name/sortKey of the whole project tree. Start here to find the page or frame ID for a scoped read; depth:1 lists every page with its root frames. properties adds props with only those authored keys. Instances are leaves with componentId and childCount.",
         ),
         (
             "get_subtree",
@@ -117,6 +118,10 @@ fn build() -> Vec<Tool> {
     ] {
         let mut properties = tree.clone();
         let mut description = format!("{purpose}{CAPS}");
+        if name != "get_outline" {
+            description.push(' ');
+            description.push_str(TEXT_ESCAPED);
+        }
         if name == "get_design_context" {
             properties["viewports"] = json!({"type":"array","minItems":1,"maxItems":4,"items":viewport()});
             properties["compact"] = json!({"type":"boolean"});
@@ -135,7 +140,7 @@ fn build() -> Vec<Tool> {
     let kinds = json!({"enum":["page","frame","group","rectangle","text","image","instance"]});
     add(
         "find_nodes",
-        "Find nodes in one call when you know a name, visible text, kind or ID; use get_outline when you need structure. Criteria are ANDed (kinds is OR within the list) and at least one is required. Matching is case-insensitive substring via lowercase, without accent folding or Unicode normalization; textContains only matches text nodes' props.text; parentId matches the direct children of that node, so parentId:<pageId> with kinds:[\"frame\"] lists a page's root frames. Scope is the project, or one nodeId or frameId subtree. Returns preorder matches with id, kind, name, parentId, depth and the ancestor path (up to 8 nearest, pathTruncated when cut), plus textPreview and the requested authored properties. instances:reference (default) skips virtual nodes inside instances (IDs with /) unless nodeId is on or inside the instance or ids/parentId names them; expand searches them. totalMatches and scannedNodes cover the whole scope before paging, in that mode: totalMatches 0 means nothing matched, not an error; skippedInstanceMatches (only when >0) counts matches reference skipped: repeat with instances:expand to list them. truncated with nextCursor means more pages. Position (left/right) is not searchable: read bounds with get_design_context viewports or inspect_layout nodeIds. One revision, up to 200 matches and 64 KiB per page.".into(),
+        format!("Find nodes in one call when you know a name, visible text, kind or ID; use get_outline when you need structure. Criteria are ANDed (kinds is OR within the list) and at least one is required. Matching is case-insensitive substring via lowercase, without accent folding or Unicode normalization; textContains only matches text nodes' props.text; parentId matches the direct children of that node, so parentId:<pageId> with kinds:[\"frame\"] lists a page's root frames. Scope is the project, or one nodeId or frameId subtree. Returns preorder matches with id, kind, name, parentId, depth and the ancestor path (up to 8 nearest, pathTruncated when cut), plus textPreview and the requested authored properties. instances:reference (default) skips virtual nodes inside instances (IDs with /) unless nodeId is on or inside the instance or ids/parentId names them; expand searches them. totalMatches and scannedNodes cover the whole scope before paging, in that mode: totalMatches 0 means nothing matched, not an error; skippedInstanceMatches (only when >0) counts matches reference skipped: repeat with instances:expand to list them. truncated with nextCursor means more pages. Position (left/right) is not searchable: read bounds with get_design_context viewports or inspect_layout nodeIds. One revision, up to 200 matches and 64 KiB per page. {TEXT_ESCAPED}"),
         object(
             json!({"projectId":id(),"nodeId":node_id(),"frameId":id(),"kinds":{"type":"array","minItems":1,"maxItems":7,"items":kinds},"nameContains":text(128),"textContains":text(256),"ids":{"type":"array","minItems":1,"maxItems":200,"items":node_id()},"parentId":node_id(),"properties":{"type":"array","maxItems":20,"items":text(64)},"instances":{"enum":["reference","expand"]},"limit":count(200),"budget":{"type":"integer","minimum":1024,"maximum":65536},"cursor":text(1024),"revision":{"type":"integer","minimum":0}}),
             &["projectId"],
@@ -193,7 +198,7 @@ fn build() -> Vec<Tool> {
         render::published(),
     );
     add("export_nodes", export::DESCRIPTION.into(), export::schema());
-    add("inspect_layout","Frame-local pixel bounds and the exact text lines of an existing job's scene key: the measured ground truth to check an implementation against, for the viewport that job used. Reading another viewport requires another render. No layout explanation or diff in v1. Nodes come in scene order, up to limit (default and max 200) per page; budget (bytes) is uncapped unless given. fields picks bounds and/or lines (default both); fields:[\"bounds\"] is much smaller. truncated:true always comes with nextCursor: repeat the same arguments with cursor to read the rest. The cursor binds the job, so later commits do not invalidate it.".into(),object(json!({"projectId":id(),"jobId":id(),"sceneKey":text(128),"nodeIds":{"type":"array","maxItems":200,"items":node_id()},"fields":{"type":"array","minItems":1,"maxItems":2,"items":{"enum":["bounds","lines"]}},"limit":count(200),"budget":{"type":"integer","minimum":1024,"maximum":65536},"cursor":text(1024)}),&["projectId","jobId","sceneKey"]));
+    add("inspect_layout","Frame-local pixel bounds and the exact text lines of an existing job's scene key: the measured ground truth to check an implementation against, for the viewport that job used. Reading another viewport requires another render. No layout explanation or diff in v1. Nodes come in scene order, up to limit (default and max 200) per page; budget (bytes) is uncapped unless given. fields picks bounds and/or lines (default both); fields:[\"bounds\"] is much smaller. truncated:true always comes with nextCursor: repeat the same nodeIds with cursor to read the rest. The cursor binds the job, so later commits do not invalidate it. diagnosticsOffset/Limit page overflow items.".into(),object(json!({"projectId":id(),"jobId":id(),"sceneKey":text(128),"nodeIds":{"type":"array","maxItems":200,"items":node_id()},"fields":{"type":"array","minItems":1,"maxItems":2,"items":{"enum":["bounds","lines"]}},"limit":count(200),"budget":{"type":"integer","minimum":1024,"maximum":65536},"cursor":text(1024),"diagnosticsOffset":{"type":"integer","minimum":0},"diagnosticsLimit":count(500)}),&["projectId","jobId","sceneKey"]));
     crate::viewer_auth::admin::tools(&mut add);
     tools
 }

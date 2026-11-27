@@ -2,7 +2,9 @@
 use serde_json::{json, Value};
 use std::collections::{HashMap, HashSet};
 
-const MAX_NODES: usize = 12;
+/// Items a job stores; the summary counts the rest as `omittedNodes`. Responses that repeat a
+/// job's diagnostics (render records, context) show the first 12; `inspect_layout` pages all.
+const MAX_NODES: usize = 500;
 const EDGE_TOLERANCE: f64 = 0.5;
 const LAYOUT_GRID: f64 = 1. / 64.;
 

@@ -37,6 +37,7 @@ pub(super) fn entry(
         }
         value["props"] = props;
     }
+    super::super::text_escape::annotate(&mut value);
     value
 }
 
