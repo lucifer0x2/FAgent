@@ -33,9 +33,12 @@ export function progressGap(lastDrawMs: number) {
  */
 export class FramePacer {
   private held: WorkerMessage[] = [];
-  private first = false;
-  /** A computed (not restored) frame is held since this sync started. */
-  private computed = false;
+  /** Something was released in this sync (before any sync: as if it had been). */
+  private released = true;
+  /** A computed (not restored) frame was released in this sync. */
+  private computedShown = true;
+  /** A computed (not restored) frame of this sync is held now. */
+  private computedHeld = false;
   /** When the held frames started waiting. */
   private heldAt = -Infinity;
   private releasedAt = -Infinity;
@@ -54,13 +57,14 @@ export class FramePacer {
    * (from the first of them) or the end of the sync: a warm load draws once or twice.
    */
   startSync() {
-    this.first = true;
-    this.computed = false;
+    this.released = false;
+    this.computedShown = false;
+    this.computedHeld = false;
   }
 
   hold(message: WorkerMessage) {
     if (!this.held.length) this.heldAt = this.now();
-    if (!(message.type === "frame" && message.restored)) this.computed = true;
+    if (!(message.type === "frame" && message.restored)) this.computedHeld = true;
     this.held.push(message);
   }
 
@@ -68,12 +72,21 @@ export class FramePacer {
     return this.held.length > 0;
   }
 
-  /** Held frames should be shown now: the first computed of a sync, or the gap has passed. */
+  /** Whether a `frame` message for `frameId` still waits for the image that shows it. */
+  holds(frameId: string) {
+    return this.held.some((message) => message.type === "frame" && message.frameId === frameId);
+  }
+
+  /**
+   * Held frames should be shown now: the first computed frame of a sync (also after restored
+   * frames were released before it), or the gap has passed since the first held frame of the
+   * sync, then since the last release.
+   */
   due() {
     if (!this.held.length) return false;
-    const gap = progressGap(this.drawMs);
-    if (this.first) return this.computed || this.now() - this.heldAt >= gap;
-    return this.now() - this.releasedAt >= gap;
+    if (this.computedHeld && !this.computedShown) return true;
+    const since = this.released ? this.releasedAt : this.heldAt;
+    return this.now() - since >= progressGap(this.drawMs);
   }
 
   /** Duration of the last draw, which sets the gap. */
@@ -84,7 +97,9 @@ export class FramePacer {
   /** Posts the held messages: their frames are in the image posted next, or already shown. */
   release() {
     if (!this.held.length) return;
-    this.first = false;
+    this.released = true;
+    this.computedShown ||= this.computedHeld;
+    this.computedHeld = false;
     this.releasedAt = this.now();
     for (const message of this.held.splice(0)) this.post(message);
   }

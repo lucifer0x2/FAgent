@@ -163,9 +163,17 @@ export function engineRuntime(deps: RuntimeDeps) {
     dirty = true;
     schedule();
   };
-  /** The loader's messages: committed frames wait for their draw; `synced` comes last. */
+  /**
+   * The loader's messages: committed frames wait for their draw; `synced` comes last. A
+   * reused frame is shown already, unless an older sync's message for it still waits for its
+   * image (its draw failed): then the reused one waits too, so no skeleton goes first.
+   */
   const loaderPost = (message: WorkerMessage) => {
-    if (message.type === "frame" && !message.error && !message.reused)
+    if (
+      message.type === "frame" &&
+      !message.error &&
+      (!message.reused || pacer.holds(message.frameId))
+    )
       return pacer.hold(message);
     if (message.type === "synced") {
       // The last frames must not wait for an animation frame: a worker gets none while its

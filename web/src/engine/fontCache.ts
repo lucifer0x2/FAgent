@@ -50,19 +50,43 @@ export function cachedFontBytes(
   const bounds = options.bounds ?? { entries: FONT_ENTRIES, bytes: FONT_BYTES };
   const key = (hash: string) => new URL(`/__fagent/engine-fonts/${hash}`, options.origin).href;
   let opened: Promise<Cache | undefined> | undefined;
+  // Shared while pending or open; a failed open is forgotten, so a later load tries again
+  // (this one fetches from the network).
   const open = () =>
-    (opened ??= (options.storage?.open(NAME) ?? Promise.resolve(undefined)).catch(() => undefined));
+    (opened ??= (options.storage?.open(NAME) ?? Promise.resolve(undefined)).catch(() => {
+      opened = undefined;
+      return undefined;
+    }));
+  /** Stored entries, oldest first (insertion order: a put moves its key last), with sizes. */
+  const entries = async (cache: Cache) => {
+    const keys = await cache.keys();
+    const sizes = await Promise.all(keys.map(async (request) => entrySize(await cache.match(request))));
+    return { keys, sizes };
+  };
+  const put = (cache: Cache, hash: string, bytes: ArrayBuffer) =>
+    cache.put(
+      key(hash),
+      new Response(bytes.slice(0), { headers: { [SIZE_HEADER]: String(bytes.byteLength) } }),
+    );
   const store = async (hash: string, bytes: ArrayBuffer) => {
     if (bytes.byteLength > bounds.bytes) return;
     const cache = await open();
     if (!cache) return;
-    await cache.put(
-      key(hash),
-      new Response(bytes.slice(0), { headers: { [SIZE_HEADER]: String(bytes.byteLength) } }),
-    );
-    // Insertion order (a put moves its key last): the oldest go until both bounds hold.
-    const keys = await cache.keys();
-    const sizes = await Promise.all(keys.map(async (request) => entrySize(await cache.match(request))));
+    try {
+      await put(cache, hash, bytes);
+    } catch (cause) {
+      if ((cause as { name?: unknown })?.name !== "QuotaExceededError") throw cause;
+      // The origin's quota is full (the failed put is rolled back): free at least this font's
+      // size from the oldest entries, then try once more. The live bytes are used either way.
+      const { keys, sizes } = await entries(cache);
+      for (let i = 0, freed = 0; i < keys.length && freed < bytes.byteLength; i++) {
+        await cache.delete(keys[i]);
+        freed += sizes[i];
+      }
+      await put(cache, hash, bytes);
+    }
+    // The oldest go until both bounds hold (never the font just stored, which is last).
+    const { keys, sizes } = await entries(cache);
     let count = keys.length;
     let total = sizes.reduce((sum, size) => sum + size, 0);
     for (let i = 0; i < keys.length - 1 && (count > bounds.entries || total > bounds.bytes); i++) {

@@ -156,7 +156,7 @@ function memoryStore(
 function session(
   store: RecordStore,
   digests: Record<string, string>,
-  options: { build?: string; fetch?: () => Promise<ArrayBuffer> } = {},
+  options: { build?: string; fetch?: (manifest: { id: string }) => Promise<ArrayBuffer> } = {},
 ) {
   const { engine, calls } = fakeEngine(digests);
   const posted: WorkerMessage[] = [];
@@ -513,6 +513,86 @@ test("restored frames wait for the gap or the end of the sync; a computed one dr
   pacer.hold(frame(true));
   pacer.hold(frame(false));
   assert.equal(pacer.due(), true, "a computed frame is drawn at once, with the restored ones");
+  // Restored frames released first: the first computed frame of the sync still goes at once,
+  // the next ones wait for the gap since that release, and restored ones keep their pacing.
+  pacer.release();
+  pacer.startSync();
+  pacer.hold(frame(true));
+  clock = 400;
+  assert.equal(pacer.due(), true);
+  pacer.release();
+  pacer.hold(frame(false));
+  assert.equal(pacer.due(), true, "the first computed frame after a restored-only release");
+  pacer.release();
+  pacer.hold(frame(false));
+  assert.equal(pacer.due(), false, "later computed frames are paced");
+  pacer.release();
+  pacer.hold(frame(true));
+  clock = 559;
+  assert.equal(pacer.due(), false);
+  clock = 560;
+  assert.equal(pacer.due(), true, "restored frames wait for the gap since the last release");
+});
+
+test("a font failure of a superseded sync does not fail the next sync's frames", async () => {
+  let reject = (_: Error) => {};
+  let fetches = 0;
+  const memory = memoryStore();
+  const tab = session(memory.store, { a: "da", b: "db" }, {
+    fetch: () =>
+      ++fetches === 1
+        ? new Promise<ArrayBuffer>((_, fail) => (reject = fail))
+        : Promise.resolve(new ArrayBuffer(4)),
+  });
+  const older = tab.loader.sync(sync(1, 3));
+  for (let i = 0; i < 100 && !fetches; i++) await new Promise((resolve) => setTimeout(resolve, 1));
+  assert.equal(fetches, 1, "the older sync is fetching its font");
+  const newer = tab.loader.sync(sync(2, 4, { etag: undefined }));
+  reject(new Error("offline"));
+  await Promise.all([older, newer]);
+  assert.ok(tab.posted.every((m) => !("generation" in m) || m.generation === 2));
+  assert.deepEqual(
+    frames(tab.posted).map((m) => [m.frameId, m.error ?? null]),
+    [
+      ["a", null],
+      ["b", null],
+    ],
+  );
+});
+
+test("a font only a stored record lists is not remembered as failed when its fetch fails", async () => {
+  const extraHash = "b".repeat(64);
+  const twoFonts = (revision: number) =>
+    ({
+      ...snapshot(revision),
+      fonts: [
+        ...snapshot(revision).fonts,
+        { id: "extra", family: "E", weight: 400, style: "normal", contentHash: extraHash },
+      ],
+    }) as Snapshot;
+  const memory = memoryStore();
+  const cold = session(memory.store, { a: "da", b: "db" });
+  await cold.loader.sync(sync(1, 3, { snapshot: twoFonts(3) }));
+  await written(cold.cache);
+  // Frame a's stored font list names a font the frame does not need.
+  for (const [k, r] of memory.records)
+    if (r.frameId === "a") memory.records.set(k, { ...r, fonts: [...r.fonts, { id: "extra", hash: extraHash }] });
+  let extraFailures = 1;
+  const warm = session(memory.store, { a: "da", b: "db" }, {
+    fetch: (manifest) =>
+      manifest.id === "extra" && extraFailures-- > 0
+        ? Promise.reject(new Error("offline"))
+        : Promise.resolve(new ArrayBuffer(4)),
+  });
+  await warm.loader.sync(sync(1, 3, { snapshot: twoFonts(3) }));
+  assert.deepEqual(warm.calls.filter((c) => /^(compute|import)/.test(c)), ["compute:a", "import:b"]);
+  // A later frame that needs the font fetches it (the network is back) instead of failing.
+  const engine = warm.engine as { required_fonts: EngineApi["required_fonts"] };
+  engine.required_fonts = () => JSON.stringify([{ id: "font", hash: HASH }, { id: "extra", hash: extraHash }]);
+  await warm.loader.sync(sync(2, 3, { snapshot: undefined, frames: [{ frameId: "c", width: 100, height: 100 }] }));
+  const [c] = frames(warm.posted).filter((m) => m.frameId === "c");
+  assert.equal(c.error, undefined, c.error);
+  assert.ok(warm.calls.includes("font:extra"));
 });
 
 test("font bytes come from the worker cache once verified; a damaged entry is fetched again", async () => {
@@ -551,7 +631,11 @@ test("font bytes come from the worker cache once verified; a damaged entry is fe
   assert.ok(FONT_ENTRIES >= 16);
 });
 
-test("the font cache holds at most its byte bound, oldest first; a font above it is not kept", async () => {
+/**
+ * A Cache API stand-in that keeps headers and insertion order (a put moves its key last).
+ * `quota`: total stored bytes above which a put rejects with `QuotaExceededError`.
+ */
+function headerCache(quota = Infinity) {
   const href = (request: string | Request) => (typeof request === "string" ? request : request.url);
   const entries = new Map<string, { bytes: ArrayBuffer; headers: Headers }>();
   const cache = {
@@ -560,20 +644,30 @@ test("the font cache holds at most its byte bound, oldest first; a font above it
       return entry ? new Response(entry.bytes.slice(0), { headers: entry.headers }) : undefined;
     },
     put: async (request: string | Request, response: Response) => {
+      const bytes = await response.arrayBuffer();
+      const others = [...entries].filter(([url]) => url !== href(request));
+      if (others.reduce((sum, [, e]) => sum + e.bytes.byteLength, bytes.byteLength) > quota)
+        throw new DOMException("Quota exceeded", "QuotaExceededError");
       entries.delete(href(request));
-      entries.set(href(request), { bytes: await response.arrayBuffer(), headers: response.headers });
+      entries.set(href(request), { bytes, headers: response.headers });
     },
     delete: async (request: string | Request) => entries.delete(href(request)),
     keys: async () => [...entries.keys()].map((url) => new Request(url)),
   };
-  const storage = { open: async () => cache } as unknown as CacheStorage;
-  const font = async (text: string) => {
-    const bytes = new TextEncoder().encode(text).buffer as ArrayBuffer;
-    const digest = await crypto.subtle.digest("SHA-256", bytes);
-    const hash = Array.from(new Uint8Array(digest), (b) => b.toString(16).padStart(2, "0")).join("");
-    return { bytes, manifest: { id: text, hash, url: `/fonts/${text}` } };
-  };
-  const fonts = await Promise.all(["font-0001", "font-0002", "font-0003", "a font of 30 bytes, too large"].map(font));
+  return { cache, entries, storage: { open: async () => cache } as unknown as CacheStorage };
+}
+
+/** A font's bytes and manifest (`hash` is the SHA-256 of the bytes). */
+async function testFont(text: string) {
+  const bytes = new TextEncoder().encode(text).buffer as ArrayBuffer;
+  const digest = await crypto.subtle.digest("SHA-256", bytes);
+  const hash = Array.from(new Uint8Array(digest), (b) => b.toString(16).padStart(2, "0")).join("");
+  return { bytes, manifest: { id: text, hash, url: `/fonts/${text}` } };
+}
+
+test("the font cache holds at most its byte bound, oldest first; a font above it is not kept", async () => {
+  const { entries, storage } = headerCache();
+  const fonts = await Promise.all(["font-0001", "font-0002", "font-0003", "a font of 30 bytes, too large"].map(testFont));
   const origin = "http://127.0.0.1";
   // An entry stored before sizes were recorded (no size header) is measured from its body.
   entries.set(`${origin}/__fagent/engine-fonts/old`, { bytes: new ArrayBuffer(9), headers: new Headers() });
@@ -589,4 +683,36 @@ test("the font cache holds at most its byte bound, oldest first; a font above it
   assert.deepEqual(names(), [fonts[1].manifest.hash, fonts[2].manifest.hash]);
   assert.deepEqual([...entries.values()].map((e) => e.headers.get("x-fagent-bytes")), ["9", "9"]);
   assert.ok(FONT_BYTES >= 64 * 1024 * 1024);
+});
+
+test("the font cache opens again after a failed open; a full quota frees old fonts and retries", async () => {
+  const origin = "http://127.0.0.1";
+  const fonts = await Promise.all(["font-0001", "font-0002", "font-0003"].map(testFont));
+  const live = async (manifest: { hash: string }) => fonts.find((f) => f.manifest.hash === manifest.hash)!.bytes;
+  const settle = () => new Promise((resolve) => setTimeout(resolve, 5));
+  // The first open rejects (storage briefly unavailable); a later load opens again.
+  const store = headerCache();
+  let opens = 0;
+  const flaky = {
+    open: async () => {
+      if (++opens === 1) throw new Error("storage unavailable");
+      return store.cache;
+    },
+  } as unknown as CacheStorage;
+  const fetchFont = cachedFontBytes(live, { enabled: () => true, storage: flaky, origin });
+  await fetchFont(fonts[0].manifest);
+  await settle();
+  await fetchFont(fonts[1].manifest);
+  await settle();
+  assert.equal(opens, 2, "the failed open is not kept; the next open is shared");
+  assert.equal(store.entries.size, 2, "both fetched fonts are stored once the cache opens");
+  // An origin quota of 20 bytes holds two 9-byte fonts: the third put frees the oldest one.
+  const full = headerCache(20);
+  const quotaFont = cachedFontBytes(live, { enabled: () => true, storage: full.storage, origin });
+  for (const { manifest } of fonts) {
+    assert.deepEqual(new Uint8Array(await quotaFont(manifest)), new Uint8Array(await live(manifest)));
+    await settle();
+  }
+  const names = [...full.entries.keys()].map((url) => url.slice(url.lastIndexOf("/") + 1));
+  assert.deepEqual(names, [fonts[1].manifest.hash, fonts[2].manifest.hash]);
 });

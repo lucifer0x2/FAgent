@@ -283,12 +283,18 @@ export class FrameLoader {
     return cache.lookup(request.projectId, wanted, signal);
   }
 
-  /** Fetches and loads the fonts in `required` the engine lacks; false: none fetched. */
+  /**
+   * Fetches and loads the fonts in `required` the engine lacks; false: none fetched. A failed
+   * fetch is remembered (later frames fail without fetching again) unless a newer sync took
+   * over meanwhile, or the list is a stored record's (`speculative`: it may name a font the
+   * frame no longer needs; computing then reports the fonts it does need).
+   */
   private async fonts(
     engine: EngineApi,
     manifests: Manifests,
     required: { id: string; hash: string }[],
     current: () => boolean,
+    speculative = false,
   ): Promise<boolean | typeof SUPERSEDED> {
     let fetchedFont = false;
     for (const font of required) {
@@ -303,7 +309,8 @@ export class FrameLoader {
       try {
         bytes = await (this.deps.fetchFont ?? this.deps.fetchBytes)(manifest);
       } catch (cause) {
-        this.failedFonts.add(key);
+        if (!current()) return SUPERSEDED;
+        if (!speculative) this.failedFonts.add(key);
         throw new Error(`Missing font: ${font.id} (${message(cause, "unavailable")})`);
       }
       if (!current()) return SUPERSEDED;
@@ -362,7 +369,7 @@ export class FrameLoader {
     current: () => boolean,
   ): Promise<Shown | typeof SUPERSEDED | undefined> {
     try {
-      if ((await this.fonts(engine, manifests, stored.fonts, current)) === SUPERSEDED)
+      if ((await this.fonts(engine, manifests, stored.fonts, current, true)) === SUPERSEDED)
         return SUPERSEDED;
     } catch {
       // The stored font list is not the record (a damaged entry, or a font the network
