@@ -164,6 +164,14 @@ fn records_that_do_not_answer_the_request_are_rejected() {
         code(&mut model, &bytes[..bytes.len() / 2], id, 200.0, d),
         "RECORD_INVALID"
     );
+    // A repeated node id (a damaged record) would index one node for every copy.
+    let mut repeated: Value = serde_json::from_slice(bytes).unwrap();
+    let nodes = repeated["scene"]["nodes"].as_array_mut().unwrap();
+    assert!(nodes.len() >= 2, "the fixture frame has children");
+    let first = nodes[0]["id"].clone();
+    nodes[1]["id"] = first;
+    let repeated = serde_json::to_vec(&repeated).unwrap();
+    assert_eq!(code(&mut model, &repeated, id, 200.0, d), "RECORD_INVALID");
     // Another project with the same frame ids and content.
     let mut next = snapshot(4, "Hello engine");
     next["projectId"] = json!("engine-next");

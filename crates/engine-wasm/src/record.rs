@@ -113,6 +113,20 @@ pub fn decode(bytes: &[u8], expected: &Expected) -> Result<Record, StorageError>
             ),
         ));
     }
+    // `Frame::new` indexes nodes by id (the last one wins): a repeated id would give every
+    // copy one node's bounds and clip children against the wrong ancestor.
+    let mut ids = std::collections::HashSet::with_capacity(record.scene.nodes.len());
+    if let Some(node) = record
+        .scene
+        .nodes
+        .iter()
+        .find(|n| !ids.insert(n.id.as_str()))
+    {
+        return Err(error(
+            "RECORD_INVALID",
+            &format!("Frame record repeats node {}", node.id),
+        ));
+    }
     let p = &record.scene.provenance;
     let answers = record.project_id == expected.project_id
         && p.project_id == expected.project_id
