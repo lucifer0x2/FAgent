@@ -171,10 +171,10 @@ representation schema 1.
 
 Components are authored `frame` nodes with `props.component:{name}`. An authored
 `instance` is a leaf with `componentId`, optional sizing/position/name/visibility,
-root paint keys (`INSTANCE_KEYS`, including `states` and `clip`) and flat
-descendant-ID `overrides` limited to `OVERRIDE_KEYS` (paint, text, visibility,
-`states`, `clip` and text paint keys; no layout, sizing or font keys). The lists are
-in [Components and instances](COMPONENTS.md). Storage expands these references before resolution/layout; the engine
+root paint and `layout` keys (`INSTANCE_KEYS`, including `states` and `clip`) and
+`overrides` keyed by master descendant ID or `<nestedInstanceId>/<descendantId>`,
+limited to `OVERRIDE_KEYS` (paint, text, visibility, `states`, `clip`, text paint,
+sizing and `layout` keys; no font keys or position). The lists are in [Components and instances](COMPONENTS.md). Storage expands these references before resolution/layout; the engine
 and renderer receive ordinary frames and stable virtual children
 `<instanceId>/<masterChildId>`. Virtual children are read-only. Snapshot and bundle
 data always retain authored references, never the expanded tree.

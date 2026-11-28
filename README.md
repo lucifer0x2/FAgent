@@ -72,7 +72,7 @@ Every frame on this page was authored by an agent through FAgent's own MCP tools
 - **Token-efficient by design** — depth-limited outlines, `find_nodes`, compact scoped context,
   inbox file imports instead of base64, and renders that omit the scene unless asked.
 - **Design-system building blocks** — color, dimension and number tokens with aliases and
-  themes, styles, components with flat instance overrides, interaction states, prototype links
+  themes, styles, components with instance overrides (sizes, layout, nested instances), interaction states, prototype links
   and animations. [Tokens →](docs/RESOLUTION.md) · [Components →](docs/COMPONENTS.md)
 - **Built to be implemented** — `get_design_context` returns authored references beside resolved
   values, so code is written against tokens, not raw colors.
