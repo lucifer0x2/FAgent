@@ -43,7 +43,19 @@ impl Project {
                 "Asset content does not match its manifest hash",
             ));
         }
+        let mut asset = [asset];
+        image_size::fill_missing(&mut asset, |_| Some(bytes.clone()));
+        let [asset] = asset;
         Ok((asset, bytes))
+    }
+    /// Sizes of ready image assets stored without one, read from their files: assets
+    /// imported before JPEG and WebP sizes were recorded. Nothing is written back.
+    pub(crate) fn fill_image_sizes(&self, s: &mut Snapshot) {
+        image_size::fill_missing(&mut s.assets, |asset| {
+            let path = self.asset_path(&asset.relative_key).ok()?;
+            let small = fs::metadata(&path).ok()?.len() <= MAX_ASSET_BYTES as u64;
+            small.then(|| fs::read(path).ok()).flatten()
+        });
     }
     pub fn import_asset(&self, request: ImportAssetRequest) -> Result<ImportAssetResult> {
         let mut imported = self.import_items(request.into(), Fields::Single)?;
@@ -182,18 +194,68 @@ impl Project {
         Ok(orphan)
     }
 }
+/// The size an import records: required for PNG; read from the JPEG or WebP header when it
+/// gives one (a header without a size stays accepted, sizeless); none for fonts. Images
+/// over `MAX_IMAGE_PIXELS` are rejected.
 pub(crate) fn asset_dimensions(mime: &str, bytes: &[u8]) -> Result<(Option<u32>, Option<u32>)> {
+    if !signature_matches(mime, bytes) {
+        return Err(StorageError::validation(
+            "mediaType",
+            "Supported asset types are PNG, JPEG, WebP, TTF, OTF and WOFF2 with matching signatures",
+        ));
+    }
+    let size = image_size::image_size(mime, bytes);
+    let over_budget = || {
+        StorageError::validation(
+            "bytes",
+            &format!(
+                "Image dimensions exceed the supported pixel budget of {} pixels",
+                image_size::MAX_IMAGE_PIXELS
+            ),
+        )
+    };
+    match (mime, size) {
+        ("image/png", None) => Err(over_budget()),
+        (_, Some((w, h))) if u64::from(w) * u64::from(h) > image_size::MAX_IMAGE_PIXELS => {
+            Err(over_budget())
+        }
+        (_, Some((w, h))) => Ok((Some(w), Some(h))),
+        (_, None) => Ok((None, None)),
+    }
+}
+
+/// Whether a stored asset's size agrees with its binary. JPEG and WebP assets imported
+/// before their sizes were recorded keep a null size and stay valid.
+pub(crate) fn stored_dimensions_match(
+    mime: &str,
+    bytes: &[u8],
+    stored: (Option<u32>, Option<u32>),
+) -> Result<bool> {
+    if matches!(mime, "image/jpeg" | "image/webp") && stored == (None, None) {
+        if !signature_matches(mime, bytes) {
+            // The same signature error an import gives.
+            asset_dimensions(mime, bytes)?;
+        }
+        return Ok(true);
+    }
+    Ok(asset_dimensions(mime, bytes)? == stored)
+}
+
+fn signature_matches(mime: &str, bytes: &[u8]) -> bool {
     match mime {
-        "image/png" if bytes.len()>=33 && bytes.starts_with(b"\x89PNG\r\n\x1a\n") && &bytes[12..16]==b"IHDR" => {
-            let width=u32::from_be_bytes(bytes[16..20].try_into().unwrap()); let height=u32::from_be_bytes(bytes[20..24].try_into().unwrap());
-            if width==0 || height==0 || width as u64*height as u64>40_000_000 { return Err(StorageError::validation("bytes","Image dimensions exceed the supported pixel budget")); } Ok((Some(width),Some(height)))
-        },
-        "image/jpeg" if bytes.starts_with(b"\xff\xd8\xff") => Ok((None,None)),
-        "image/webp" if bytes.len()>=12 && bytes.starts_with(b"RIFF") && &bytes[8..12]==b"WEBP" => Ok((None,None)),
-        "font/ttf" if bytes.len()>12 && (bytes.starts_with(&[0,1,0,0]) || bytes.starts_with(b"true")) => Ok((None,None)),
-        "font/otf" if bytes.len()>12 && bytes.starts_with(b"OTTO") => Ok((None,None)),
-        "font/woff2" if bytes.len()>48 && bytes.starts_with(b"wOF2") => Ok((None,None)),
-        _=>Err(StorageError::validation("mediaType","Supported asset types are PNG, JPEG, WebP, TTF, OTF and WOFF2 with matching signatures")),
+        "image/png" => {
+            bytes.len() >= 33
+                && bytes.starts_with(b"\x89PNG\r\n\x1a\n")
+                && &bytes[12..16] == b"IHDR"
+        }
+        "image/jpeg" => bytes.starts_with(b"\xff\xd8\xff"),
+        "image/webp" => bytes.len() >= 12 && bytes.starts_with(b"RIFF") && &bytes[8..12] == b"WEBP",
+        "font/ttf" => {
+            bytes.len() > 12 && (bytes.starts_with(&[0, 1, 0, 0]) || bytes.starts_with(b"true"))
+        }
+        "font/otf" => bytes.len() > 12 && bytes.starts_with(b"OTTO"),
+        "font/woff2" => bytes.len() > 48 && bytes.starts_with(b"wOF2"),
+        _ => false,
     }
 }
 

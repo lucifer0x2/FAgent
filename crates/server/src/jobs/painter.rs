@@ -23,7 +23,20 @@ pub(super) enum Painter<'a> {
 }
 
 impl Painter<'_> {
+    /// Paints `scene` at `scale`. A surface over the pixel budget (including a hug root that
+    /// grew past the requested viewport) fails before dispatch with the limit, the requested
+    /// pixels and the largest scale that fits, the same on every backend.
     pub async fn paint(&mut self, scene: &Value, scale: f64) -> Result<Painted> {
+        let surface = super::png::surface(scene);
+        if let Some((width, height)) = surface {
+            super::png::check_pixels(width, height, scale)?;
+        }
+        self.paint_backend(scene, scale)
+            .await
+            .map_err(|error| super::png::explain(error, surface, scale))
+    }
+
+    async fn paint_backend(&mut self, scene: &Value, scale: f64) -> Result<Painted> {
         match self {
             Self::Chromium(worker) => {
                 let value = worker

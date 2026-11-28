@@ -58,7 +58,7 @@ Base `/api/v1`, localhost. Success returns the described JSON value; failures re
 - Project and workspace SSE send `project_visibility_changed` with `{}` and
   no cursor ID when the visible list may change. The public listener suppresses
   private project hints and ends streams whose project becomes private.
-- `GET /projects/:projectId/scene?frameId=...&revision=...&width=...&height=...&theme=default&state=default` → RenderJob below. This is a read request for a computed representation and may enqueue bounded work. Scene revision must exactly match requested revision. Old unavailable snapshot returns `REVISION_UNAVAILABLE`.
+- `GET /projects/:projectId/scene?frameId=...&revision=...&width=...&height=...&theme=default&state=default` → RenderJob below. This is a read request for a computed representation and may enqueue bounded work. Scene revision must exactly match requested revision. Old unavailable snapshot returns `REVISION_UNAVAILABLE` with `currentRevision` (only the latest revision can be read or rendered).
 - `POST /projects/:projectId/exports` → `{projectId,revision,exports:[{nodeId,jobId,status,files?,error?}]}`. Body is the `export_nodes` MCP arguments without `projectId`: `nodeIds` (1–8), optional `settings` (1–8), `theme`, `revision`, `waitMs` (0–10000). The exact MCP runtime schema, cross-field validation, pixel/queue budgets and pipeline apply. `projectId` in the body and unknown fields are rejected. Same Host/Origin guard as other routes. This requests computed files and never changes the authored revision. Poll pending jobs with `GET /jobs/:jobId`, then download the returned file URL.
 - `GET /jobs/:jobId` → RenderJob.
 - `GET /jobs/:jobId/image` → PNG when ready, otherwise structured readiness error.
@@ -68,7 +68,7 @@ Base `/api/v1`, localhost. Success returns the described JSON value; failures re
 
 RenderJob: `{ jobId, status: "pending"|"ready"|"failed", projectId, revision, frameId, sceneKey?, scene?, provenance?, readiness?, diagnostics?, error?, imageUrl? }`. Ready `scene` conforms to `renderer/types.ts`; scene nodes may carry `stroke {color[4], width[4], align}` (sides [top, right, bottom, left], present only when a side is wider than 0; `scene-2`/`web-2`); its provenance source revision is authoritative. Failure never returns success for strict PNG. Scene can be present with missing-resource diagnostics for labeled non-strict viewer placeholders, while strict export fails.
 
-ExportJob (same routes and job table): `{ jobId, kind: "export", nodeId, status, projectId, revision, frameId (the root frame), sceneKey, provenance?, readiness?, files?: [{ url, fileName, format, mimeType, scale, width, height, bytes }], error? }`; never `scene` or `imageUrl`. A failed export (for example `EMPTY_BOUNDS`, `PIXEL_BUDGET`, `EXPORT_SCALE_RANGE`) has `status: "failed"`. Details: `docs/SERVER.md`, "Exporting node images".
+ExportJob (same routes and job table): `{ jobId, kind: "export", nodeId, status, projectId, revision, frameId (the root frame), sceneKey, provenance?, readiness?, files?: [{ url, fileName, format, mimeType, scale, width, height, bytes }], error? }`; never `scene` or `imageUrl`. A failed export (for example `EMPTY_BOUNDS`, `PIXEL_BUDGET`, `EXPORT_SCALE_RANGE`) has `status: "failed"`; a `PIXEL_BUDGET` error (render or export) carries `maxPixels`, `requestedPixels` and `maxScale` (or `maxHeight` for a hug root over budget at scale 1). Details: `docs/SERVER.md`, "Exporting node images".
 
 `sceneKey` equals `scene.provenance.sourceSceneKey`. Successful PNG metadata also
 includes MIME, dimensions, scale and runtime identity. Chromium jobs keep
@@ -128,7 +128,7 @@ must report missing/moved IDs rather than silently substituting a different node
 
 ## MCP/domain
 
-MCP Streamable HTTP `/mcp`, versioned typed schemas and bounded results. Public storage/layout types remain authoritative for exact Rust signatures. Domain operations are ordered: `create_node`, `update_node`, `reparent_node`, `reorder_node`, `delete_subtree`, `upsert_token`, `upsert_style`. Resource imports use bounded bytes, never arbitrary filesystem paths. See worker reports for validation and limits.
+MCP Streamable HTTP `/mcp`, versioned typed schemas and bounded results. Public storage/layout types remain authoritative for exact Rust signatures. Domain operations are ordered: `create_node`, `update_node`, `reparent_node`, `reorder_node`, `delete_subtree`, `upsert_token`, `upsert_style`. Resource imports use bounded bytes, never arbitrary filesystem paths. Mutation result shapes (commit fields and the optional `deletedNoteIds`) are defined in [`SERVER.md`](SERVER.md) and [`SERVER-OPERATIONS.md`](SERVER-OPERATIONS.md). See worker reports for validation and limits.
 
 `apply_batch` / `apply_batch_file` commit in writer order with last-writer-wins per
 top-level props key and `(parentId, position)` (Task28 I3): `expectedRevision` is
@@ -171,8 +171,10 @@ representation schema 1.
 
 Components are authored `frame` nodes with `props.component:{name}`. An authored
 `instance` is a leaf with `componentId`, optional sizing/position/name/visibility,
-and flat descendant-ID `overrides` (`text`, `fill`, `visible`, `styleId`, `assetId`,
-`name` only). Storage expands these references before resolution/layout; the engine
+root paint keys (`INSTANCE_KEYS`, including `states` and `clip`) and flat
+descendant-ID `overrides` limited to `OVERRIDE_KEYS` (paint, text, visibility,
+`states`, `clip` and text paint keys; no layout, sizing or font keys). The lists are
+in [Components and instances](COMPONENTS.md). Storage expands these references before resolution/layout; the engine
 and renderer receive ordinary frames and stable virtual children
 `<instanceId>/<masterChildId>`. Virtual children are read-only. Snapshot and bundle
 data always retain authored references, never the expanded tree.
@@ -193,8 +195,8 @@ Cycles, nesting beyond 8 levels and an expanded project above 200,000 nodes fail
 before commit. `COMPONENT_IN_USE` returns `count` and at most 20 `instanceIds`;
 virtual mutations return `INSTANCE_CHILD_READONLY`. Component subtrees cannot use
 links, flow starts or animations. Master updates invalidate scenes at the new revision.
-Expansion retains master-root and descendant interaction states. The instance
-override whitelist does not include states; opt-in `resolvedStates` also applies
+Expansion retains master-root and descendant interaction states; an instance and its
+overrides merge `states` per state. Opt-in `resolvedStates` also applies
 to reference component definitions. See [Components and instances](COMPONENTS.md).
 
 ### Hover animation sources

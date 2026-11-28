@@ -90,7 +90,10 @@ fn check_instance(
         theme: "default",
     };
     for (target, patch) in overrides {
-        if target == &master.id || !plain.ancestors(target).any(|a| a.id == master.id) {
+        if target == &master.id {
+            return Err(master_root_target(&node.id, target));
+        }
+        if !plain.ancestors(target).any(|a| a.id == master.id) {
             return Err(not_descendant(lookup, &node.id, target, &master.id));
         }
         let patch = patch.as_object().ok_or_else(|| {
@@ -146,6 +149,21 @@ pub(super) fn check_expanded<'a>(
         }
     }
     Ok(())
+}
+
+/// An override keyed by the master root: its props are instance keys, not overrides.
+fn master_root_target(node: &str, target: &str) -> StorageError {
+    let mut error = StorageError::validation(
+        &format!("props.overrides.{target}"),
+        &format!(
+            "Override targets are master descendants; the master root's properties are set on the instance itself (for example {{\"componentId\":\"{target}\",\"fill\":\"#ffffff\"}}). Instance keys: {}",
+            INSTANCE_KEYS.join(", ")
+        ),
+    );
+    let context = error.node_context();
+    context.node_id = Some(node.into());
+    context.allowed_keys = Some(INSTANCE_KEYS.iter().map(|s| (*s).into()).collect());
+    error
 }
 
 /// A non-descendant override target, most likely a mistyped descendant ID or instance key.

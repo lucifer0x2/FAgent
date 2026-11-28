@@ -10,7 +10,7 @@ pub(crate) const SUMMARY: &str = "TEXT_OVERFLOW_SUMMARY";
 pub(crate) const BUDGET_SHARE: usize = 4;
 const SCOPE: &str = "complete-measured-scene-before-pagination";
 /// Fits the single-summary step in the 256-byte share of the minimum 1024-byte budget.
-const RETRIEVE: &str = "All items: inspect_layout per job, or a larger budget";
+const RETRIEVE: &str = "All items: inspect_layout diagnosticsOffset per job";
 /// Item fields kept once examples, box, font and message are dropped.
 const COMPACT_FIELDS: [&str; 7] = [
     "code",

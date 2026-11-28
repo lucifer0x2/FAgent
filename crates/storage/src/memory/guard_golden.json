@@ -156,14 +156,14 @@
       "footprint": ["node:r2","note:note","page:p2"],
       "guards": [[11,11,11,11,11,0],[10,10,10,10,10,0],[11,11,11,11,11,0],[5,5,5,5,5,0],[null,null,null,0,0,0],[5,5,5,5,5,0],[5,5,5,5,5,0],[null,null,0,0,0,0],[10,10,10,10,10,0]],
       "operations": [{"id":"r2","op":"delete_subtree"}],
-      "results": [{},{"concurrent":[],"concurrentTotal":0},{"concurrent":[],"concurrentTotal":0},{"concurrent":[],"concurrentTotal":0},{"concurrentUnknown":true},{}]
+      "results": [{"deletedNoteIds":["note"]},{"concurrent":[],"concurrentTotal":0,"deletedNoteIds":["note"]},{"concurrent":[],"concurrentTotal":0,"deletedNoteIds":["note"]},{"concurrent":[],"concurrentTotal":0,"deletedNoteIds":["note"]},{"concurrentUnknown":true,"deletedNoteIds":["note"]},{"deletedNoteIds":["note"]}]
     },
     {
       "changedIds": ["f2","note","r1","r2"],
       "footprint": ["*","node:f2","node:r1","node:r2","note:note","page:p1","page:p2"],
       "guards": [[11,11,11,11,11,0],[10,10,10,10,10,0],[11,11,11,11,11,0],[5,5,5,5,5,0],[6,6,6,6,6,0],[5,5,5,5,5,0],[5,5,5,5,5,0],[6,6,6,6,6,0],[10,10,10,10,10,0]],
       "operations": [{"id":"f2","op":"delete_subtree"}],
-      "results": [{},{"concurrent":[],"concurrentTotal":0},{"concurrent":[],"concurrentTotal":0},{"concurrent":[{"key":"name","nodeId":"f2","revision":2}],"concurrentTotal":1},{"concurrentUnknown":true},{}]
+      "results": [{"deletedNoteIds":["note"]},{"concurrent":[],"concurrentTotal":0,"deletedNoteIds":["note"]},{"concurrent":[],"concurrentTotal":0,"deletedNoteIds":["note"]},{"concurrent":[{"key":"name","nodeId":"f2","revision":2}],"concurrentTotal":1,"deletedNoteIds":["note"]},{"concurrentUnknown":true,"deletedNoteIds":["note"]},{"deletedNoteIds":["note"]}]
     },
     {
       "changedIds": ["tail"],
@@ -177,7 +177,7 @@
       "footprint": ["*","node:f2","node:p2","node:r1","node:r2","note:note","page:p1","page:p2"],
       "guards": [[11,11,11,11,11,0],[10,10,10,10,10,0],[11,11,11,11,11,0],[5,5,5,5,5,0],[2,2,2,2,2,0],[5,5,5,5,5,0],[5,5,5,5,5,0],[2,2,2,2,2,0],[10,10,10,10,10,0]],
       "operations": [{"id":"p2","op":"delete_subtree"}],
-      "results": [{},{"concurrent":[],"concurrentTotal":0},{"concurrent":[],"concurrentTotal":0},{"concurrent":[{"key":"name","nodeId":"f2","revision":2}],"concurrentTotal":1},{"concurrentUnknown":true},{}]
+      "results": [{"deletedNoteIds":["note"]},{"concurrent":[],"concurrentTotal":0,"deletedNoteIds":["note"]},{"concurrent":[],"concurrentTotal":0,"deletedNoteIds":["note"]},{"concurrent":[{"key":"name","nodeId":"f2","revision":2}],"concurrentTotal":1,"deletedNoteIds":["note"]},{"concurrentUnknown":true,"deletedNoteIds":["note"]},{"deletedNoteIds":["note"]}]
     },
     {
       "changedIds": ["p1"],
@@ -282,7 +282,7 @@
       "footprint": ["node:r1","page:p1"],
       "guards": [[11,11,11,11,11,0],[10,10,10,10,10,0],[11,11,11,11,11,0],[null,null,0,0,0,0],[4,4,4,4,4,0],[4,4,4,4,4,0],[4,4,4,4,4,0],[null,null,0,0,0,0],[10,10,10,10,10,0]],
       "operations": [{"id":"n2","nodeId":"r1","op":"create_note","text":"x"},{"id":"r1","op":"delete_subtree"}],
-      "results": [{},{"concurrent":[],"concurrentTotal":0},{"concurrent":[{"key":"name","nodeId":"r1","revision":2}],"concurrentTotal":1},{"concurrent":[],"concurrentTotal":0},{"concurrentUnknown":true},{}]
+      "results": [{"deletedNoteIds":["n2"]},{"concurrent":[],"concurrentTotal":0,"deletedNoteIds":["n2"]},{"concurrent":[{"key":"name","nodeId":"r1","revision":2}],"concurrentTotal":1,"deletedNoteIds":["n2"]},{"concurrent":[],"concurrentTotal":0,"deletedNoteIds":["n2"]},{"concurrentUnknown":true,"deletedNoteIds":["n2"]},{"deletedNoteIds":["n2"]}]
     },
     {
       "error": 8,

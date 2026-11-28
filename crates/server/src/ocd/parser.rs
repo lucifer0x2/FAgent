@@ -1,6 +1,7 @@
 //! Syntax of one line: a node (`kind[#id][.style] parts… ["text"]`) or a directive
 //! (`@name positional… parts…`). Meaning (IDs, shorthands, defaults) is applied in `expand`.
 use super::error::{OcdError, Result};
+use super::keys::effective_key;
 use super::lexer::{Line, Token};
 
 /// Node kinds as written in source.
@@ -37,7 +38,7 @@ pub enum Part {
     Size(Token, Token),
     /// `row`, `col`, `free`, `wrap`
     Flag(Token),
-    /// `key=value`
+    /// `key=value`; a bare `clip` is `clip=true`.
     Attr(Token, Token),
     /// A trailing quoted string.
     Text(Token),
@@ -114,6 +115,13 @@ pub fn statement(line: Line) -> Result<Stmt> {
             return Err(at.error(format!("@{name} needs {min} argument(s): {usage}")));
         }
         let positional = rest[..count].to_vec();
+        // A bare `clip` is a node prop; on @token it would become a theme named `clip`.
+        if let Some(bare) = rest[count..]
+            .iter()
+            .find(|t| name == "token" && t.text == "clip")
+        {
+            return Err(bare.error("@token takes theme=value, type= and name="));
+        }
         let parts = parts(rest[count..].to_vec(), true)?;
         return Ok(Stmt::Directive(DirectiveStmt {
             name: head.slice(1, None),
@@ -194,6 +202,10 @@ fn parts(tokens: Vec<Token>, text_anywhere: bool) -> Result<Vec<Part>> {
             Part::Attr(token.slice(0, Some(eq)), token.slice(eq + 1, None))
         } else if matches!(text, "row" | "col" | "free" | "wrap") {
             Part::Flag(token)
+        } else if text == "clip" {
+            // A bare `clip` is `clip=true`; the value points at the key.
+            let on = token.part("true".into(), 0);
+            Part::Attr(token, on)
         } else if let Some(size) = size(&token) {
             size
         } else {
@@ -219,7 +231,13 @@ fn size(token: &Token) -> Option<Part> {
 }
 
 fn unexpected(token: &Token) -> OcdError {
-    let flag = match token.text.as_str() {
+    let key = token.text.as_str();
+    if effective_key(key).is_some() {
+        return token.error(format!(
+            "`{key}` needs a value: write {key}=<value>; only clip, row, col, free and wrap stand alone"
+        ));
+    }
+    let flag = match key {
         "column" | "vertical" | "stack" => Some("col"),
         "horizontal" => Some("row"),
         "absolute" => Some("free"),
@@ -227,7 +245,7 @@ fn unexpected(token: &Token) -> OcdError {
     };
     token
         .error(format!(
-            "Unexpected `{}`; expected key=value, a flag (row, col, free, wrap), WxH, .style or a final \"text\"",
+            "Unexpected `{}`; expected key=value, a flag (row, col, free, wrap, clip), WxH, .style or a final \"text\"",
             token.text
         ))
         .suggest(flag)

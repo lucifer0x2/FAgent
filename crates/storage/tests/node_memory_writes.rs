@@ -95,7 +95,12 @@ fn postgres_pair(label: &str) -> Pair {
     }
 }
 
-fn differential(pair: &Pair, seeds: std::ops::Range<u64>, steps: usize) {
+/// Returns the totals; callers whose run is long enough also assert coverage.
+fn differential(
+    pair: &Pair,
+    seeds: std::ops::Range<u64>,
+    steps: usize,
+) -> memory_writes_support::Tally {
     pair.seed();
     let mut total = memory_writes_support::Tally::default();
     for seed in seeds {
@@ -107,6 +112,7 @@ fn differential(pair: &Pair, seeds: std::ops::Range<u64>, steps: usize) {
         total.replays += tally.replays;
         total.previews += tally.previews;
         total.oracle += tally.oracle;
+        total.deleted_notes += tally.deleted_notes;
     }
     let (warm, (cold_hits, cold_loads)) = (pair.warm.memory_stats(), pair.cold_writes.get());
     eprintln!(
@@ -123,6 +129,7 @@ fn differential(pair: &Pair, seeds: std::ops::Range<u64>, steps: usize) {
     assert!(warm.write_hits > warm.write_loads, "{warm:?}");
     assert_eq!(cold_hits, 0, "cold storages start empty");
     assert!(cold_loads > 0, "cold storages loaded the project");
+    total
 }
 
 /// Writers race on threads against `warm`; replaying their requests in the order
@@ -199,7 +206,12 @@ fn racing(pair: &Pair) {
 #[test]
 fn sqlite_warm_and_cold_memory_writes_agree() {
     let temp = tempfile::tempdir().unwrap();
-    differential(&sqlite_pair(temp.path()), 1..4, 300);
+    let total = differential(&sqlite_pair(temp.path()), 1..4, 300);
+    // Checked on every oracle batch; this longer run is sure to reach a cascade.
+    assert!(
+        total.deleted_notes > 0,
+        "node deletions reported their notes"
+    );
 }
 
 #[test]

@@ -97,6 +97,7 @@ impl SharedSnapshot {
                 view.metadata(),
                 pages,
                 &dependencies,
+                view.source().note_count(),
             ));
         }
         crate::scoped::edit_context_indexed(&self.snapshot, &self.indexes, pages)

@@ -190,3 +190,39 @@ async fn find_nodes_parent_id_lists_direct_children_only() {
     );
     assert_eq!(find["inputSchema"]["required"], json!(["projectId"]));
 }
+
+/// FB-52: `properties` adds a `props` object with only those authored keys to every outline
+/// entry, on a page scope and on the project-wide read; without it the output stays prop-free.
+#[tokio::test]
+async fn outline_properties_add_only_the_requested_props() {
+    let s = Server::start().await;
+    let p = fixture(&s).await;
+    let keys = json!(["x", "y", "width", "height"]);
+    for args in [
+        json!({"projectId":p,"nodeId":"screens","depth":1,"properties":keys}),
+        json!({"projectId":p,"depth":1,"properties":keys}),
+    ] {
+        let page = read(&s, "get_outline", args).await;
+        let frames: Vec<_> = page["nodes"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .filter(|n| n["kind"] == "frame")
+            .collect();
+        assert!(!frames.is_empty(), "{page}");
+        for frame in frames {
+            assert_eq!(frame["props"], json!({"width":300,"height":200}), "{frame}");
+        }
+    }
+    let plain = read(
+        &s,
+        "get_outline",
+        json!({"projectId":p,"nodeId":"screens","depth":1}),
+    )
+    .await;
+    assert!(plain["nodes"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .all(|n| n.get("props").is_none()));
+}

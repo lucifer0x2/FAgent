@@ -18,7 +18,7 @@ fn at(source: &str) -> (usize, usize, String) {
 #[test]
 fn long_lists_compile_in_linear_time() {
     let items = 200_000;
-    let padding = format!("page#p\n  frame#f p={}1\n", "1,".repeat(items - 1));
+    let padding = format!("page#p\n  frame#f h=10 p={}1\n", "1,".repeat(items - 1));
     let started = Instant::now();
     let compiled = compile(&padding).unwrap();
     let elapsed = started.elapsed();
@@ -124,7 +124,7 @@ fn parser_edges() {
     let (_, _, message) = at("@token ink\n");
     assert!(message.contains("@token id value"), "{message}");
     assert_eq!(
-        ops("page#p\n  frame#f\n    rect .5x10\n")[2]["props"],
+        ops("page#p\n  frame#f h=10\n    rect .5x10\n")[2]["props"],
         json!({"width":0.5,"height":10})
     );
     // The head form has no size: `rect.5x10` is the style `5x10` (see tests_shorthands).

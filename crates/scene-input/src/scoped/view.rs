@@ -21,6 +21,10 @@ pub trait ViewSource: Send + Sync {
     fn nodes(&self) -> Box<dyn Iterator<Item = &Node> + '_>;
     /// Every note, by id.
     fn notes(&self) -> Box<dyn Iterator<Item = &Note> + '_>;
+    /// Note count; sources with an index override the walk.
+    fn note_count(&self) -> usize {
+        self.notes().count()
+    }
     /// The page containing `id` (itself for a page).
     fn page(&self, id: &str) -> Option<&str>;
     /// Notes anchored to node `id`, by note id.

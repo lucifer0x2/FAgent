@@ -79,7 +79,13 @@ fn many_overflows_have_bounded_examples_and_an_explicit_omission_summary() {
             .push(template.clone());
     }
     append(&mut value, &[]);
-    let issues = value["diagnostics"].as_array().unwrap();
+    // FB-32: the scene stores all 15 items; the record view shows 12 and counts the rest.
+    let stored = value["diagnostics"].as_array().unwrap();
+    assert_eq!(stored.len(), 16);
+    assert_eq!(stored[15]["reportedNodes"], 15);
+    assert_eq!(stored[15]["omittedNodes"], 0);
+    let shown = crate::text_diagnostics::reported(&value["diagnostics"]);
+    let issues = shown.as_array().unwrap();
     assert_eq!(issues.len(), 13);
     assert_eq!(issues[1]["outsideLineCount"], 4);
     assert_eq!(issues[1]["examples"].as_array().unwrap().len(), 2);
@@ -88,4 +94,23 @@ fn many_overflows_have_bounded_examples_and_an_explicit_omission_summary() {
     assert_eq!(issues[12]["reportedNodes"], 12);
     let with_provenance = issues.iter().filter(|i| i.get("provenance").is_some());
     assert_eq!(with_provenance.count(), 1);
+}
+
+/// FB-32: a job stores at most 500 items; its summary counts the rest.
+#[test]
+fn stored_items_are_capped_at_500_with_a_count_beyond() {
+    let mut value = scene(Value::Null);
+    let mut template = value["nodes"][1].clone();
+    for i in 0..501 {
+        template["id"] = json!(format!("text-{i}"));
+        value["nodes"]
+            .as_array_mut()
+            .unwrap()
+            .push(template.clone());
+    }
+    append(&mut value, &[]);
+    let stored = value["diagnostics"].as_array().unwrap();
+    assert_eq!(stored.len(), 501);
+    assert_eq!(stored[500]["reportedNodes"], 500);
+    assert_eq!(stored[500]["omittedNodes"], 2);
 }

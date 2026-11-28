@@ -1,6 +1,6 @@
 //! Machine-readable authored keys, generated from the live validator catalog.
 //! Consumer facts describe implemented behavior, never runtime font/asset readiness.
-use fagent_storage::{allowed_props, NODE_KINDS, PROPS};
+use fagent_storage::{allowed_props, instances::OVERRIDE_KEYS, NODE_KINDS, PROPS};
 use serde_json::{json, Value};
 use sha2::{Digest, Sha256};
 use std::sync::OnceLock;
@@ -36,7 +36,7 @@ fn document() -> Value {
         "capabilityVersion":1,
         "sceneVersion":pipeline_version("SCENE_VERSION"),
         "rendererVersion":pipeline_version("RENDERER_VERSION"),
-        "keysByKind":keys,"properties":properties,
+        "keysByKind":keys,"overrideKeys":OVERRIDE_KEYS,"properties":properties,
         "statusMeaning":{"supported":"Implemented in this consumer, subject to documented value/kind restrictions","metadata":"Preserved for discovery/export or implementation; does not itself paint pixels","resting":"Only the resting/default result; interaction is not played","diagnostic":"Accepted, omitted or approximate in this consumer with an explicit diagnostic","unclassified":"No consumer claim; integration must classify this catalog addition"},
         "runtime":"Static support only. Read job provenance/readiness/diagnostics for loaded resources and glyph coverage. No implicit font fallback or pixel-parity guarantee.",
         "restrictions":{"stroke":"Solid per-side CSS shorthand; SVG omits stroke with SVG_STROKE_NOT_EXPORTED","shadow":"Box layers only, at most 8; no state shadow. SVG omits shadow with SVG_SHADOW_NOT_EXPORTED.","fill":"Solids on text; boxes also accept linear/radial gradients with 2..16 ordered stops. Gradient stops accept solid colors/color tokens. Fill animation requires a solid resting fill.","radius":"Scalar or CSS 1..4 corner shorthand; overlapping radii scale together.","text":"Plain semantic strings; no mixed-style runs, authored RTL, ellipsis or maxLines. Tracking is signed px; decoration is continuous without skip-ink. SVG keeps measured lines and embedded fonts, not outlines; SVG_TEXT_NOT_OUTLINED.","states":"Flat declared fill/opacity/radius/stroke variants only; render_frame previews one selected state across all declaring nodes, including SVG export; preview supports declared interaction."}
@@ -44,7 +44,7 @@ fn document() -> Value {
     value["restrictions"]["layout"] = json!("Row/column/free, with decimal 0%–100% child dimensions on definite parent axes and up to 8 full, non-nested layout breakpoints per container. First inclusive maxWidth match uses the requested frame viewport. Row wrap still requires definite positive width and positive minWidth on fill children.");
     value["restrictions"]["theme"] = json!("Frame/instance scope; nearest scoped ancestor wins over render/export fallback. Scoped names must exist in tokens (UNKNOWN_THEME); default always exists. Instance placement scopes apply; explicit instance theme replaces master root theme. Scene/context/inspect report effectiveTheme.");
     value["restrictions"]["animations"] = json!("Canvas/PNG/SVG show resting animation props. HTML preview plays declared animations, including ancestor hover via triggerNodeId. A literal authored group/frame ancestor ID in the same root frame is valid only on hover tracks. get_design_context.animated includes explicit triggerNodeId as discovery metadata.");
-    value["restrictions"]["overrides"] = json!("Paint-only descendant patches: stroke object merge; shadow array replace; states per-state visual property merge; opacity/radius supported. Instance root accepts fill/stroke/shadow/radius/opacity. Layout, sizing and structure remain non-overridable.");
+    value["restrictions"]["overrides"] = json!("Paint-only descendant patches (keys in overrideKeys): stroke object merge; shadow array replace; states per-state merge. Master root props go on the instance (keysByKind.instance). Layout, sizing, font keys and structure remain non-overridable.");
     value["catalogFingerprint"] = json!(format!(
         "{:x}",
         Sha256::digest(serde_json::to_vec(&value).unwrap())
@@ -108,6 +108,11 @@ mod tests {
         for key in ["SCENE_VERSION", "RENDERER_VERSION"] {
             assert!(types.contains(&format!("{key} = \"{}\"", pipeline_version(key))));
         }
+        assert_eq!(doc["overrideKeys"], json!(OVERRIDE_KEYS));
+        assert!(doc["restrictions"]["overrides"]
+            .as_str()
+            .unwrap()
+            .contains("overrideKeys"));
         assert_eq!(facts("states")["svg"], "supported");
         let svg_export = include_str!("jobs/export_svg.rs");
         for (prop, diagnostic) in [

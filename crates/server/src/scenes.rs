@@ -51,9 +51,9 @@ impl ScenesQuery {
 
     fn frames<'a>(&self, snapshot: &'a Snapshot) -> Result<Vec<&'a Node>> {
         if snapshot.revision != self.revision {
-            return Err(ApiError::new(
-                "REVISION_UNAVAILABLE",
-                "Requested authored revision is unavailable",
+            return Err(crate::reads::revision_unavailable(
+                self.revision,
+                snapshot.revision,
             ));
         }
         if !snapshot
@@ -85,9 +85,9 @@ impl ScenesQuery {
             return self.frames(&shared.snapshot);
         };
         if shared.snapshot.revision != self.revision {
-            return Err(ApiError::new(
-                "REVISION_UNAVAILABLE",
-                "Requested authored revision is unavailable",
+            return Err(crate::reads::revision_unavailable(
+                self.revision,
+                shared.snapshot.revision,
             ));
         }
         if !scoped

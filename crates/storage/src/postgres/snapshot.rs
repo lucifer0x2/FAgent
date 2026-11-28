@@ -52,8 +52,22 @@ pub(super) fn entities<C: GenericClient>(
     let (mut snapshot, binaries) = entities_with_binaries(db, project)?;
     if readiness {
         apply_readiness(&mut snapshot, &binaries);
+        fill_image_sizes(db, &mut snapshot);
     }
     Ok(snapshot)
+}
+
+/// Sizes of ready image assets stored without one (imported before JPEG and WebP sizes
+/// were recorded), read from their binaries. Nothing is written back.
+fn fill_image_sizes<C: GenericClient>(db: &mut Db<'_, C>, snapshot: &mut Snapshot) {
+    let project = snapshot.project_id.clone();
+    crate::image_size::fill_missing(&mut snapshot.assets, |asset| {
+        let limit = crate::MAX_ASSET_BYTES as i32;
+        let row = db
+            .query_opt(resources::BINARY, &[&project, &asset.relative_key, &limit])
+            .ok()??;
+        row.get::<_, Option<Vec<u8>>>(0)
+    });
 }
 
 /// Entities as stored, plus the project's binary hashes from the same query.

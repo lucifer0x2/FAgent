@@ -70,6 +70,8 @@ async fn measure_discovery_workflow() {
     total += size;
     println!("discovery-workflow: context={size} B; total={total} B");
     // 100 000 until import_assets (1.6 KB of tools/list) took the total to about 101.2 KB;
-    // raised to 100 KiB in that change. Keep new tools inside it.
-    assert!(total < 102_400, "discovery workflow is {total} B");
+    // raised to 100 KiB in that change. Task 43 (agent feedback fixes: new instance and
+    // override keys, pixel budget, cursor, note and asset fields) took it to about 103.0 KB;
+    // raised to 105 000 at the user's request. Keep new tools inside it.
+    assert!(total < 105_000, "discovery workflow is {total} B");
 }

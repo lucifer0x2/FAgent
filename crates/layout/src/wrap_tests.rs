@@ -118,3 +118,10 @@ fn definite_chains_root_viewport_fixed_hug_and_clamping() {
         invalid(v);
     }
 }
+#[test]
+fn wrapping_fill_child_error_names_min_width_with_an_example() {
+    let mut v = fixture();
+    v["nodes"][2]["props"]["minWidth"] = Value::Null;
+    let error = compute_value(v).unwrap_err();
+    assert!(error.message.contains("minWidth=240"), "{}", error.message);
+}

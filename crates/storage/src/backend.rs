@@ -166,7 +166,10 @@ pub trait StorageBackend: Send + Sync {
         if request.is_source() {
             return Err(StorageError::new(
                 "STAGING_UNSUPPORTED",
-                "This storage backend does not stage OCD source files",
+                &format!(
+                    "This storage backend does not stage OCD source files; {}",
+                    crate::inbox::NEEDS_DATA_ROOT
+                ),
             ));
         }
         self.read_batch_file_operations(project, request)

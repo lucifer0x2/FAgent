@@ -65,7 +65,7 @@ pub(super) fn relationships(
         && n.props.min_width.is_none_or(|v| v <= 0.0)
     {
         return Err(err(
-            "Wrapping row fill child requires explicit positive minWidth",
+            "A width=fill child of a wrapping row needs a positive minWidth, the width where it wraps to the next line (for example minWidth=240)",
         ));
     }
     Ok(())

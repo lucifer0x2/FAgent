@@ -85,8 +85,14 @@ be read separately through the rules frame; the working frame's context does not
   an "8px scale" or any other scale if the manifest has not set one.
 - **Layout:** row/column for content, free for deliberate overlay/decor. Store
   fixed/fill/hug, min/max, padding/gap instead of x/y computed from screenshots. A root frame
-  has numeric width/height; row wrap needs a definite width and a positive minWidth for a direct
-  width-fill child. Do not add %, Grid, breakpoints or column wrap on your own.
+  has a numeric width and a numeric height, or `height:"hug"` with a row/column layout (a free
+  root needs a number); row wrap needs a definite width and a positive minWidth for a direct
+  width-fill child (for example `minWidth=240`). Do not add %, Grid, breakpoints or column wrap
+  on your own.
+- **Clipping:** frames (and instance roots) clip their children by default; groups do not. A
+  child's outside stroke, shadow or overhang past a clipping parent's edge is cut. When it must
+  show, set `clip=false` on that parent (on an instance, or as an override on a master
+  descendant frame) instead of enlarging the parent.
 - **Component:** reuse a master ID via `instance`; only override fields that are
   supported/approved. Do not edit virtual child IDs; update the whole
   `props.overrides` of the instance when needed. Changing a master affects every instance and

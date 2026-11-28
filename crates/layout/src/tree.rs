@@ -16,7 +16,6 @@ pub(crate) fn build(
     let n = &input.nodes[idx];
     let p = &n.props;
     let parent_mode = parent.mode;
-    let has_breakpoints = p.layout.as_ref().is_some_and(|l| !l.breakpoints.is_empty());
     let layout = p.layout.as_ref().map(|l| l.at_width(input.viewport.width));
     let mode = layout.map(|l| l.mode.as_str()).unwrap_or("free");
     let mut style = Style {
@@ -85,27 +84,16 @@ pub(crate) fn build(
         .filter(|(_, c)| c.parent_id.as_deref() == Some(n.id.as_str()))
         .map(|(i, _)| i)
         .collect();
-    // Taffy's static boxes pass absolute descendants up to a containing block.
-    // Anchor responsive free children to their immediate parent, also when a
-    // breakpoint changes this container's placement from absolute to in-flow.
-    if style.position == Position::Static
-        && mode == "free"
-        && (has_breakpoints
-            || parent.has_breakpoints
-            || children.iter().any(|&i| {
-                let child = &input.nodes[i].props;
-                [&child.width, &child.height]
-                    .into_iter()
-                    .any(|size| size.as_ref().and_then(Sizing::percentage).is_some())
-            }))
-    {
+    // Taffy's static boxes pass absolute descendants up to a containing block, so a
+    // free container is always the containing block of its own children: their
+    // x/y, "N%" and "fill" sizes resolve against it, never against an ancestor.
+    if style.position == Position::Static && mode == "free" {
         style.position = Position::Relative;
     }
     let mut child_ids = Vec::new();
     let this = Parent {
         mode,
         align: stack::align(layout),
-        has_breakpoints,
     };
     for child in children {
         child_ids.push(build(child, input, tree, ids, order, this, false)?);

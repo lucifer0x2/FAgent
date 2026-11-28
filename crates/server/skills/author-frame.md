@@ -152,7 +152,7 @@ one `import_assets` call (one revision).
 ## Stack template
 
 Under an existing page, create a root frame with numeric `width` and a numeric
-or `"hug"` (long page) `height`, for example `{"width":960,"height":720,"layout":{"mode":"column","padding":24,"gap":16}}`.
+or `"hug"` (long page; needs a row/column layout) `height`, for example `{"width":960,"height":720,"layout":{"mode":"column","padding":24,"gap":16}}`.
 Use a child group with `width:"fill",height:"hug"` for a content section, and a
 `row` or `column` layout for its children. Choose widths deliberately: fixed for
 an icon, fill for the flexible content area, hug for content-driven dimensions.
@@ -196,6 +196,8 @@ space-between) default to start and need row or column. `stretch` sizes only
 children whose cross size is unset; numbers, percentages and `hug` keep their size. With
 `space-between`, `gap` is the minimum spacing. Centered content wider than its
 stack overflows both sides (clipped by frames); use start when it may not fit.
+Frames and instances clip children (groups do not): set `clip:false` on the
+parent to show a child's outside stroke, shadow or overhang.
 `update_node` replaces the whole layout object: resend `mode` and every other
 layout key with the one you change, or send `merge:true` to patch it.
 

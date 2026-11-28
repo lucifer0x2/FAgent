@@ -134,3 +134,13 @@ Append-only. Rules for entries:
 - Supersedes the open layout and instance triage in "Agent feedback: known limitations — 2026-11-17" (its items are in Tasks 43–46).
 - Replaced a private task name in Task 39 with a generic description.
 - Open: nothing assigned; branch `fix/agent-feedback` holds the task files.
+
+### Task 43 (agent feedback, phase 1) — 2026-11-27
+
+- User request: implement [Task 43](../../tasks/43-feedback-phase1-small-fixes.md); four subagents built slices A–D in parallel worktrees (`fix/feedback-ocd`, `-instances`, `-reads`, `-storage`); the lead reviewed each and merged them into `fix/agent-feedback` (not pushed).
+- Result: every item fixed, message-only or documented as the task asks; FB-27 not reproducible (pinned by tests); FB-14 traced to the client (the server sends U+E40D intact). Per-item table in the task's "Result".
+- Decisions: every `free` container is `Position::Relative` (no golden moved); `render_frame` over area returns `PIXEL_BUDGET`; new cursor format; discovery-workflow budget raised to 105,000 B (user); new tool texts trimmed to keep `tools/list` within 32 KiB.
+- Verified: crate tests show only the 41 failures already on `main` (Chromium worker, prerender note test, two `startup_env` PostgreSQL tests); clippy, fmt, public-content check; PostgreSQL ignored tests through `scripts/task19-check.sh`.
+- Open: Chromium-path checks not run end to end (no worker in tests); font override keys deferred; Tasks 44 and 45 can start (44 depends on slice B, now merged here).
+- Self-review: fixed `inspect_layout` overflow paging (a huge `diagnosticsOffset` overflowed; a byte budget made `nextOffset` skip dropped items); other review findings checked and left as designed.
+- PR review (CodeRabbit, 6 findings + docs check): all fixed. Capabilities publish `overrideKeys`; enqueue/paint admission and the hug-root `maxHeight` use whole device pixels; bare `clip` is rejected on `@token`; read cursor scopes end with a 128-bit digest of all bound fields (golden cursors regenerated, no page boundary moved); an overflow page the budget empties keeps `nextOffset` and sets `budgetTooSmall`; `deletedNoteIds` documented in SERVER/CONTRACT.

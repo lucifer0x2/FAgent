@@ -103,7 +103,7 @@ use PropScope::{Any, Container, Frame, Image, Layer, Rendered, Text};
 pub const PROPS: &[PropSpec] = &[
     prop("component", Frame, false, "object {name: string}; reusable master, no links or animations in its subtree", &[]),
     prop("componentId", PropScope::Instance, true, "ID of a component frame", &[]),
-    prop("overrides", PropScope::Instance, false, "object keyed by master descendant IDs; text, fill, visible, styleId, assetId, name, stroke (object merge), shadow (array replace), states (per-state visual property merge), opacity, radius", &[]),
+    prop("overrides", PropScope::Instance, false, "object keyed by master descendant IDs; text, fill, visible, styleId, assetId, name, stroke, shadow, states, opacity, radius, clip, textDecoration, textTransform, textAlign, letterSpacing, textWrap", &[]),
     prop("theme", PropScope::Themed, false, "string: default or a theme declared by at least one token; nearest scoped ancestor wins over render/export fallback", &[]),
     prop("visible", Any, false, "boolean; false hides the node and its descendants", &[]),
     prop("name", Any, false, "string, at most 256 bytes", &["title"]),
@@ -131,7 +131,7 @@ pub const PROPS: &[PropSpec] = &[
     prop("textTransform", Text, false, "none (default), uppercase, lowercase or capitalize; preserves authored source text", &["textCase", "case", "text-transform", "uppercase", "capitalize"]),
     prop("fill", Any, false, "solid hex color, color token {\"tokenId\"} or fill style {\"styleId\"}; boxes also accept {type:\"linear\",angle?:180,stops:[[position,color],...]}, or {type:\"radial\",center?:[0.5,0.5],radius?:number|[rx,ry],stops}; 2..16 ordered stops 0..1, angle -360..360, center -10..10, radius >0..100000 px (omitted: farthest-corner ellipse). Text fill is solid; fill animation requires a solid resting fill", &["color", "textColor", "background", "backgroundColor", "fillColor", "bg", "gradient", "backgroundImage", "fills", "linearGradient", "radialGradient"]),
     prop("opacity", Any, false, "number 0..1 or number token; on a container, fades the subtree as one group (CSS opacity)", &["alpha"]),
-    prop("clip", Any, false, "boolean; clips children to the node bounds", &["overflow", "clipsContent", "clipContent"]),
+    prop("clip", Any, false, "boolean; clips children to the node bounds; default true on frames/instances; false shows a child's outside stroke or shadow", &["overflow", "clipsContent", "clipContent"]),
     prop("radius", Any, false, "number 0..100000 or dimension token, or 1–4 values with CSS shorthand [top-left,top-right,bottom-right,bottom-left]; each value can be a dimension token; overlapping radii scale together like CSS", &["cornerRadius", "borderRadius", "corner_radius", "rx"]),
     prop("stroke", PropScope::Box, false, "object {color, width?, align?}: color is a solid hex, color token or solid fill style, or 1–4 in CSS shorthand [top,right,bottom,left]; width (default 1) a number 0..100000 or dimension token, or 1–4 values; align \"inside\" (default, takes layout space like a CSS border), \"center\" or \"outside\" (painted only). Painted above children", &["border", "borderColor", "borderWidth", "borderTop", "borderRight", "borderBottom", "borderLeft", "strokes", "strokeWidth", "strokeWeight", "strokeColor", "strokeAlign", "outline"]),
     prop("shadow", PropScope::Box, false, "array of 0..8 CSS box-shadow layers {x?:0,y?:0,blur?:0,spread?:0,color,inset?:false}; first layer on top. x/y -10000..10000 and spread -1000..1000 accept number tokens; blur 0..1000 accepts dimension tokens; color accepts solid hex/color token/solid fill style. Wrap text in a frame for a box shadow. Interaction state shadow is unsupported", &["boxShadow", "box-shadow", "shadows", "dropShadow", "innerShadow", "effects", "elevation"]),
@@ -178,3 +178,14 @@ pub const NODE_KINDS: [NodeKind; 7] = [
     NodeKind::Image,
     NodeKind::Instance,
 ];
+
+#[cfg(test)]
+mod tests {
+    #[test]
+    fn overrides_entry_lists_every_override_key() {
+        let value = super::prop_spec("overrides").unwrap().value;
+        for key in crate::instances::OVERRIDE_KEYS {
+            assert!(value.contains(&format!(" {key}")), "{key}");
+        }
+    }
+}

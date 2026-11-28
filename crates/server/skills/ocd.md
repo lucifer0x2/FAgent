@@ -1,23 +1,22 @@
 # OCD source for apply_batch
 
-Send `source` (OCD v1) alone or before `operations`: one atomic batch of the same JSON
-operations (`strict`, `dryRun`, idempotency unchanged). `SOURCE_PARSE_FAILED` has `line`,
-`column`, `suggestion`; errors on a compiled operation add its `line`/`column`, on a JSON
-one `opIndex` counts in `operations`.
+Send `source` (OCD v1) alone or before `operations`: one atomic batch (`strict`, `dryRun`,
+idempotency unchanged). Errors on source give `line`/`column` (`SOURCE_PARSE_FAILED` adds
+`suggestion`); a JSON operation's `opIndex` counts in `operations`.
 Big batches: `apply_batch_file` an inbox `x.ocd`.
 
 ```
-line  := indent (node | directive) [// comment]   indent = 2 spaces per level
+line  := indent (node | directive) [// comment]   indent = 2 spaces
 node  := kind[#id][.styleId] {attr | flag | WxH} ["text"]
 kind  := page | frame | group | rect | text | image | comp | use <componentId>
 attr  := key=value   value: number | fill | hug | 50% | #hex | $token | a,b,c
                             | "json string" | {json} | [json]   (no spaces outside quotes)
-flag  := row | col | free | wrap
+flag  := row | col | free | wrap | clip (clip=true)
 @token id value [type=] [name=] {theme=value}   @style id [name=] {attr}
-@set id {attr}   @del id   @move id parentId [index]   @order id index
+@set id {attr}   @del id (with its notes)   @move id parentId [index]   @order id index
 @note nodeId "text" [id=] [author=]   @reply noteId "text" [author=]   @resolve noteId
-@note-set noteId ["text"] [resolved=true|false] [node=]   @note-del noteId
-@in parentId   (indented new nodes, each with #id, under an existing node)
+@note-set noteId ["text"] [resolved=] [node=]   @note-del noteId
+@in parentId   (indented new nodes with #id under an existing node)
 ```
 
 | Shorthand | Writes |
@@ -33,19 +32,20 @@ flag  := row | col | free | wrap
 | `key={json}`, `props={json}`, `index=2` | raw value; props merged last; create index |
 
 Every catalog key (skill://fagent/props.md) works as written; later attributes win.
-On `use`, a non-instance key names a master descendant (string: its `text`; `{json}`: its
-override); node props, and descendants missing from a `comp` in the source, fail. A
-trailing string is a text node's `text`, else `name`. `@set` replaces whole values
-(`layout={…}`, `stroke=#000,1,inside`); partial writes (flags, `gap=`, `layout.gap=`,
-`stroke.width=`, `stroke=#000`, `ph.fill=`) send `update_node` `merge:true`, a JSON merge
-patch keeping the rest (`null` deletes; `{tokenId}`, `{styleId}`, gradients replace).
+On `use` a non-instance key (on `@set` a non-prop key) names a master descendant (string:
+its `text`; `{json}`: its override); node props, and descendants missing from a `comp` in
+the source, fail. A trailing string is a text node's `text`, else `name`. `@set` replaces whole values (`layout={…}`, `stroke=#000,1,inside`); partial writes
+(flags, `gap=`, `layout.gap=`, `stroke=#000`, `ph.fill=`, `ph="x"`, `key=null`) send
+`update_node` `merge:true`, a JSON merge patch keeping the rest (`null` deletes;
+`{tokenId}`, `{styleId}`, gradients replace).
 
 Defaults: root pages need `#id`; other nodes get `<nearest #id>-<kind>-<hash of
-parent, kind, text/name>`, returned as `autoIds` {line: id}: give nodes to edit an `#id`. Text width: `"fill"` in a start-aligned `col` of non-hug
-width, unset under `align=stretch`, else `"hug"`; height `"hug"` (unset in a stretched
-row); with breakpoints only agreed sizes; none under `@in`. Token/style `name` defaults to
-the ID; token `type` to `color` for `#hex`, `dimension` for numbers (else required); `$x`
-is an alias. A style of only `fill` is a fill style, else text.
+parent, kind, text/name>`, returned as `autoIds` {line: id}: give nodes to edit an `#id`.
+Root frames without `h` hug in `row`/`col`. Text width: `"fill"` in a start-aligned `col`
+of non-hug width, unset under `align=stretch`, else `"hug"`; height `"hug"` (unset in a
+stretched row); with breakpoints only agreed sizes; none under `@in`. Token/style `name`:
+the ID; token `type`: `color` for `#hex`, `dimension` for numbers, else required; `$x` is
+an alias. A style of only `fill` is a fill style, else text.
 
 <!-- ocd-sample -->
 ```ocd

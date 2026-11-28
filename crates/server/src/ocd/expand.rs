@@ -5,7 +5,7 @@ use super::auto_id::Siblings;
 use super::directives;
 use super::error::{OcdError, Result};
 use super::node::{self, Batch, Open};
-use super::parser::{DirectiveStmt, Stmt};
+use super::parser::{DirectiveStmt, Part, Stmt};
 use super::{value, Compiled, MAX_OPERATIONS};
 
 fn close(open: Open) -> Result<()> {
@@ -48,6 +48,7 @@ pub fn operations(statements: Vec<(usize, Stmt)>) -> Result<Compiled> {
         for open in stack.drain(depth..) {
             close(open)?;
         }
+        no_null(&statement)?;
         previous = Some(match &statement {
             Stmt::Directive(d) if d.name.text != "in" => Some(d.name.text.clone()),
             _ => None,
@@ -79,6 +80,28 @@ pub fn operations(statements: Vec<(usize, Stmt)>) -> Result<Compiled> {
     Ok(out)
 }
 
+/// A bare `null` removes a prop, which only `@set` does; anywhere else it is a mistake for
+/// leaving the key out or for the text "null".
+fn no_null(statement: &Stmt) -> Result<()> {
+    let (parts, values) = match statement {
+        Stmt::Node(node) => (&node.parts, &[][..]),
+        Stmt::Directive(d) if d.name.text == "set" => return Ok(()),
+        // A token's default value is its second positional argument.
+        Stmt::Directive(d) if d.name.text == "token" => (&d.parts, &d.positional[1..]),
+        Stmt::Directive(d) => (&d.parts, &[][..]),
+    };
+    let attrs = parts.iter().filter_map(|part| match part {
+        Part::Attr(_, value) => Some(value),
+        _ => None,
+    });
+    match attrs.chain(values).find(|token| value::is_null(token)) {
+        Some(token) => Err(token.error(
+            "null only removes a prop on @set (@set <id> key=null); leave the key out here, or write \"null\" for the text",
+        )),
+        None => Ok(()),
+    }
+}
+
 /// `@in parentId`: exactly one ID; the new nodes go on the indented lines below it.
 fn within(d: DirectiveStmt) -> Result<Open> {
     if let Some(part) = d.parts.first() {
@@ -94,5 +117,7 @@ fn within(d: DirectiveStmt) -> Result<Open> {
         parent: None,
         within: Some(d.name),
         comp: false,
+        // The stored parent's kind is not known here.
+        page: false,
     })
 }

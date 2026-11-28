@@ -1,7 +1,7 @@
 # Task 43 — Agent feedback, phase 1: small fixes
 
 **Priority (user, 2026-11-27):** first of the agent-feedback phases (43 → 44 → 45; 46 is a backlog). Independent of the viewer order (36 → 37 → 31/35 → 33).
-**Status:** Not assigned. Packaged 2026-11-27 from a read-only trace of the maintainer's agent-feedback log against `main` at `7d71753`. The server crates on `main` are identical to the deployed build, so every open item below still reproduces on `main` unless it says "reproduce first".
+**Status:** Done 2026-11-27 on `fix/agent-feedback` (slices A–D merged; not pushed). Results in "Result" at the end. Packaged 2026-11-27 from a read-only trace of the maintainer's agent-feedback log against `main` at `7d71753`. The server crates on `main` are identical to the deployed build, so every open item below still reproduces on `main` unless it says "reproduce first".
 **Depends on:** nothing. Tasks 44 and 45 build on slice B.
 **Slices:** four, with disjoint owned files, so each can run in its own session. One session may take several slices in order.
 **Workspace:** one branch per slice from `main`: `fix/feedback-ocd` (A), `fix/feedback-instances` (B), `fix/feedback-reads` (C), `fix/feedback-storage` (D). A session that takes every slice may use `fix/agent-feedback` (already created from `main`). Do not push or open a PR unless the user asks.
@@ -102,3 +102,35 @@ Already fixed on `main` (no work; list them in the final report as "fixed on mai
 - Commits on the slice branch; tests for every item; updated MCP texts and docs.
 - A `docs/agents/LOG.md` entry per slice and a status line at the top of this file.
 - A final table for the maintainer: `FB-n` → fixed / not reproducible / deferred (with the reason), so the feedback log can be updated.
+
+## Result — 2026-11-27
+
+Each slice was built on its own branch (`fix/feedback-ocd`, `fix/feedback-instances`, `fix/feedback-reads`, `fix/feedback-storage`) and merged into `fix/agent-feedback`. Tests: the same 41 failures as `main` (Chromium render worker, `notes::a_notes_only_commit_enqueues_no_prerender`, two `startup_env` PostgreSQL tests), no new ones; render AC were checked on the native Vello CPU path. The PostgreSQL ignored tests passed through `scripts/task19-check.sh`.
+
+| FB | Result |
+| --- | --- |
+| FB-17, FB-35 | Fixed (A): bare descendant keys on `@set` compile like the dotted form. |
+| FB-19 | Fixed (A): `key=null` on `@set` removes the prop through the merge patch; `null` elsewhere is an error. |
+| FB-37 | Fixed (A): bare `clip` is `clip=true`; other bare prop names ask for `key=value`. |
+| FB-5 | Fixed (A, B): row/column root frames without `h` hug; `free` roots without `h` fail at compile; docs updated. |
+| FB-27 | Not reproducible (A): a `free` frame without `h` stores no height and stretches; pinned by OCD, layout and end-to-end tests. |
+| FB-23 | Fixed (B): every `free` container is the containing block of its children; no golden moved. |
+| FB-40 | Fixed (B): `states` on an instance root. |
+| FB-51, FB-26 | Fixed (B): `clip` on instances and in overrides. |
+| FB-31 | Fixed (B): text paint overrides; font keys deferred (need user approval). |
+| FB-30 | Message fixed (B); alias or root `layout` is Task 44. |
+| FB-50 | Message fixed (B); the rule stays. |
+| FB-42, FB-43 | Documented (B); flipping the clip default is not in scope. |
+| FB-52 | Fixed (C): `get_outline` honors `properties`. |
+| FB-38 | Fixed (C): cursors no longer bind `properties`/`budget`/`limit`; errors name the changed field or revision. |
+| FB-13, FB-49 | Fixed (C): `PIXEL_BUDGET` carries `maxPixels`, `requestedPixels`, `maxScale`. |
+| FB-16, FB-48 | Error fixed (C): `currentRevision`; reading older revisions is Task 39. |
+| FB-14 | Server not at fault (C): a raw `tools/call` returns U+E40D intact; `textEscaped` added. |
+| FB-32 | Fixed (C): jobs keep up to 500 overflow items; `inspect_layout` pages them. |
+| FB-1 | Failure modes fixed (D); the report most likely came from a build deployed before the 2026-11-17 inbox fix. |
+| FB-21 | Fixed (D): JPEG/WebP sizes at import; null sizes filled on read. |
+| FB-46 (follow-up) | Fixed (D): `noteCount`/`noteLimit` in `get_edit_context`. |
+| FB-45 | Fixed (D): `deletedNoteIds` in commit and dry-run results. |
+| FB-3, FB-4, FB-6, FB-7, FB-9 (b, c), FB-11, FB-20, FB-8 (most) | Fixed on `main` before this task. |
+
+Behavior changes agents may notice: `render_frame` over the pixel area returns `PIXEL_BUDGET` instead of `INVALID_REQUEST`; cursors have a new, shorter format (cursors issued before a deploy become invalid); a bare unknown key on `@set` is a descendant override, so a misspelled prop fails at commit with a suggestion; PostgreSQL needs a data root like SQLite. The discovery-workflow byte budget was raised to 105,000 B at the user's request; `tools/list` stays inside 32 KiB.

@@ -12,6 +12,8 @@ pub struct Candidate {
     pub notes: BTreeMap<String, Note>,
     /// Node IDs deleted by this batch; links to them are pruned before validation.
     pub(super) deleted: BTreeSet<String>,
+    /// Note IDs removed with a node deleted by this batch (`cascade_notes`).
+    pub(super) cascaded_notes: BTreeSet<String>,
 }
 impl Candidate {
     pub fn from_snapshot(s: &Snapshot) -> Self {
@@ -39,7 +41,18 @@ impl Candidate {
             fonts: s.fonts.iter().cloned().map(|x| (x.id.clone(), x)).collect(),
             notes: s.notes.iter().cloned().map(|x| (x.id.clone(), x)).collect(),
             deleted: BTreeSet::new(),
+            cascaded_notes: BTreeSet::new(),
         }
+    }
+
+    /// Notes removed because this batch deleted their anchor node and not recreated,
+    /// sorted: `BatchResult::deleted_note_ids`.
+    pub fn deleted_note_ids(&self) -> Vec<String> {
+        let removed = self.cascaded_notes.iter();
+        removed
+            .filter(|id| !self.notes.contains_key(*id))
+            .cloned()
+            .collect()
     }
 }
 impl Candidate {

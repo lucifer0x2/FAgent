@@ -29,6 +29,8 @@ uuid = { version = "1", features = ["v4", "serde"] }
 argon2 = "0.5.3"
 ring = "0.17.14"
 futures-util = "0.3"
+# Already built through storage (postgres → stringprep); general categories for `textEscaped`.
+unicode-properties = "0.1.5"
 
 [dev-dependencies]
 brotli = "8"

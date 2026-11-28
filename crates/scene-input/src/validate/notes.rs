@@ -91,10 +91,12 @@ impl Candidate {
         removed: &BTreeSet<String>,
         changed: &mut BTreeSet<String>,
     ) {
+        let cascaded = &mut self.cascaded_notes;
         self.notes.retain(|id, note| {
             let keep = !removed.contains(&note.node_id);
             if !keep {
                 changed.insert(id.clone());
+                cascaded.insert(id.clone());
             }
             keep
         });

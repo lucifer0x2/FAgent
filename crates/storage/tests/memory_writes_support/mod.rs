@@ -38,6 +38,8 @@ pub struct Tally {
     pub previews: usize,
     /// Requests at the current base checked against `Candidate`.
     pub oracle: usize,
+    /// Of those, results that reported notes deleted with their nodes.
+    pub deleted_notes: usize,
 }
 
 /// A result or error as the API would serialize it.
@@ -65,8 +67,11 @@ fn send(storage: &Storage, project: &str, request: &Value, dry: bool) -> Value {
 }
 
 /// `Candidate` apply per operation, link pruning and a full `validate()`: the
-/// changed ids, or the error the batch must fail with.
-fn reference(before: &Snapshot, operations: &Value) -> std::result::Result<Vec<String>, Value> {
+/// changed ids and the notes deleted with their nodes, or the error the batch must fail with.
+fn reference(
+    before: &Snapshot,
+    operations: &Value,
+) -> std::result::Result<(Vec<String>, Vec<String>), Value> {
     let operations: Vec<Operation> = serde_json::from_value(operations.clone()).unwrap();
     let mut candidate = Candidate::from_snapshot(before);
     let mut changed = BTreeSet::new();
@@ -77,7 +82,7 @@ fn reference(before: &Snapshot, operations: &Value) -> std::result::Result<Vec<S
     }
     candidate.prune_links(&mut changed);
     match candidate.validate() {
-        Ok(()) => Ok(changed.into_iter().collect()),
+        Ok(()) => Ok((changed.into_iter().collect(), candidate.deleted_note_ids())),
         Err(error) => Err(serde_json::to_value(error).unwrap()),
     }
 }
@@ -156,12 +161,15 @@ impl Pair {
         tally.oracle += 1;
         let key = &request["idempotencyKey"];
         match reference(&before, &request["operations"]) {
-            Ok(changed) => {
+            Ok((changed, notes)) => {
                 assert!(
                     result.get("error").is_none(),
                     "{key}: only storage rejects: {result}"
                 );
                 assert_eq!(result["changedIds"], json!(changed), "{key}: changed ids");
+                let deleted = result.get("deletedNoteIds").cloned().unwrap_or(json!([]));
+                assert_eq!(deleted, json!(notes), "{key}: deleted note ids");
+                tally.deleted_notes += usize::from(!notes.is_empty());
             }
             Err(error) => assert_eq!(result["error"], error, "{key}: error differs"),
         }

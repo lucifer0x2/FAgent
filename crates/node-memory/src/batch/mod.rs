@@ -63,6 +63,13 @@ impl<'a> Prepared<'a> {
         &self.changed
     }
 
+    /// Notes removed with the nodes the batch deleted (`BatchResult::deleted_note_ids`),
+    /// sorted; also in `changed_ids`.
+    pub fn deleted_note_ids(&self) -> &[String] {
+        let staged = self.staged.as_ref().expect("batch is staged");
+        &staged.delta().deleted_with_nodes
+    }
+
     /// The rows that differ from the base revision.
     pub fn rows(&self) -> Rows {
         let staged = self.staged.as_ref().expect("batch is staged");

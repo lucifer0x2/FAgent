@@ -6,26 +6,121 @@ use serde::Serialize;
 use serde_json::{json, Value};
 use sha2::{Digest, Sha256};
 
+/// Request fields a cursor does not bind: they shape each entry or the page size, never the
+/// entry list the offset indexes. `revision` is bound through the snapshot revision instead.
+const UNBOUND: [&str; 5] = ["cursor", "properties", "budget", "limit", "revision"];
+
+/// One-letter code of every bound request field, so a cursor stays as short as the single hash
+/// it replaced (the byte budget counts the cursor).
+const CODES: [(&str, char); 18] = [
+    ("tool", 't'),
+    ("projectId", 'p'),
+    ("nodeId", 'n'),
+    ("frameId", 'f'),
+    ("depth", 'd'),
+    ("ids", 'i'),
+    ("viewport", 'v'),
+    ("viewports", 'w'),
+    ("theme", 'h'),
+    ("kinds", 'k'),
+    ("nameContains", 'm'),
+    ("textContains", 'x'),
+    ("parentId", 'r'),
+    ("compact", 'c'),
+    ("nodeFormat", 'o'),
+    ("notes", 'N'),
+    ("instances", 'I'),
+    ("statesMode", 's'),
+];
+const DIGEST: usize = 6;
+
+/// The cursor scope of a snapshot read: the revision, then for each bound field its code and
+/// the first six hex digits of its JSON's SHA-256 (`<revision>.t1a2b3cp4d5e6f…`), so a mismatch
+/// names the changed parameter instead of a generic `INVALID_CURSOR`. Six digits can collide
+/// (two `nameContains` values may share them), so the scope ends with `~` and a 128-bit digest
+/// of every bound field together: any changed value changes the scope.
 pub fn scope(s: &Snapshot, tool: &str, req: &ReadRequest) -> Result<(String, usize)> {
-    if req.revision.is_some_and(|r| r != s.revision) {
-        return Err(ApiError::new(
-            "REVISION_UNAVAILABLE",
-            "Requested read revision is unavailable",
-        ));
+    if let Some(requested) = req.revision.filter(|r| *r != s.revision) {
+        return Err(super::revision_unavailable(requested, s.revision));
     }
     let mut query = serde_json::to_value(req)?;
-    query.as_object_mut().unwrap().remove("cursor");
-    let scope = format!(
-        "{:x}",
-        Sha256::digest(serde_json::to_vec(&json!([
-            s.project_id,
-            s.revision,
-            tool,
-            query
-        ]))?)
-    );
+    let fields = query.as_object_mut().unwrap();
+    fields.retain(|key, value| !UNBOUND.contains(&key.as_str()) && !value.is_null());
+    fields.insert("tool".into(), json!(tool));
+    let mut scope = format!("{}.", s.revision);
+    let whole = Sha256::digest(serde_json::to_vec(&query)?);
+    let fields = query.as_object_mut().unwrap();
+    for (name, code) in CODES {
+        if let Some(value) = fields.remove(name) {
+            scope.push(code);
+            scope.push_str(&digest(&value)?);
+        }
+    }
+    // A field without a code (none today) still binds the cursor, unnamed.
+    if !fields.is_empty() {
+        scope.push('?');
+        scope.push_str(&digest(&query)?);
+    }
+    scope.push('~');
+    scope.push_str(&URL_SAFE_NO_PAD.encode(&whole[..16]));
     let offset = offset(&scope, req.cursor.as_deref())?;
     Ok((scope, offset))
+}
+/// First [`DIGEST`] hex digits of the SHA-256 of `value`'s JSON.
+fn digest(value: &Value) -> Result<String> {
+    let hash = format!("{:x}", Sha256::digest(serde_json::to_vec(value)?));
+    Ok(hash[..DIGEST].to_owned())
+}
+/// A scope from [`scope`]: its revision and per-field digests, or `None` for another format.
+fn parts(scope: &str) -> Option<(u64, Vec<(&str, &str)>)> {
+    let (scope, _whole) = scope.split_once('~')?;
+    let (revision, fields) = scope.split_once('.')?;
+    let mut list = Vec::new();
+    let mut rest = fields;
+    while !rest.is_empty() {
+        let code = rest.chars().next()?;
+        let digest = rest.get(1..1 + DIGEST)?;
+        let name = CODES
+            .iter()
+            .find(|(_, c)| *c == code)
+            .map_or("query", |(name, _)| *name);
+        list.push((name, digest));
+        rest = &rest[1 + DIGEST..];
+    }
+    Some((revision.parse().ok()?, list))
+}
+/// Why a cursor from `found` does not continue the read `expected`: a newer revision, or the
+/// first bound parameter whose value changed (named in the message and `error.field`).
+fn mismatch(expected: &str, found: &str) -> ApiError {
+    let (Some((current, want)), Some((issued, got))) = (parts(expected), parts(found)) else {
+        return invalid();
+    };
+    if current != issued {
+        let mut error = ApiError::new(
+            "INVALID_CURSOR",
+            &format!("Cursor belongs to revision {issued}, but the project is now at revision {current}; restart the read without cursor"),
+        );
+        error.0.current_revision = Some(current);
+        error.0.field = Some("cursor".into());
+        return error;
+    }
+    let value = |list: &[(&str, &str)], key: &str| {
+        list.iter()
+            .find(|(k, _)| *k == key)
+            .map(|(_, digest)| digest.to_string())
+    };
+    let changed = want
+        .iter()
+        .chain(&got)
+        .map(|(key, _)| *key)
+        .find(|key| value(&want, key) != value(&got, key));
+    let Some(key) = changed else { return invalid() };
+    let mut error = ApiError::new(
+        "INVALID_CURSOR",
+        &format!("Cursor belongs to a read with another {key}; repeat {key} as on the first page, or restart the read without cursor. properties, budget and limit may change between pages"),
+    );
+    error.0.field = Some(key.into());
+    error
 }
 /// Scope hash and offset for a read whose identity is not a snapshot query, such as an
 /// immutable render job: `identity` must hold every parameter the cursor binds.
@@ -39,7 +134,7 @@ fn offset(scope: &str, cursor: Option<&str>) -> Result<usize> {
     let decoded = URL_SAFE_NO_PAD.decode(raw).map_err(|_| invalid())?;
     let value: Value = serde_json::from_slice(&decoded).map_err(|_| invalid())?;
     if value["scope"] != scope {
-        return Err(invalid());
+        return Err(mismatch(scope, value["scope"].as_str().unwrap_or_default()));
     }
     value["offset"]
         .as_u64()

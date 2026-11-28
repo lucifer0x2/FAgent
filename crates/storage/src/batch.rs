@@ -12,6 +12,10 @@ pub struct DryRunResult {
     pub dry_run: bool,
     pub base_revision: u64,
     pub changed_ids: Vec<String>,
+    /// As `BatchResult::deleted_note_ids`: notes the batch would remove with their
+    /// anchor node; omitted when none.
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub deleted_note_ids: Vec<String>,
     pub diagnostics: Vec<Value>,
 }
 

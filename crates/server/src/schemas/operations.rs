@@ -60,6 +60,12 @@ pub fn schema() -> Value {
         &["id"],
     );
     add("delete_note", json!({"id":id()}), &["id"]);
+    if let Some(delete) = variants
+        .iter_mut()
+        .find(|v| v["properties"]["op"]["const"] == "delete_subtree")
+    {
+        delete["description"] = json!("Also deletes notes on these nodes (deletedNoteIds).");
+    }
     json!({"oneOf":variants})
 }
 fn token_value() -> Value {

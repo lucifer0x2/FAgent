@@ -209,14 +209,22 @@ async fn fields_cursor_binding_and_limits_are_explicit() {
         assert_eq!(code(&response), "INVALID_REQUEST", "{bad}: {response}");
     }
 
-    // The cursor binds job, scene key, nodeIds, fields and page parameters.
+    // The cursor binds job, scene key and nodeIds; fields and page parameters may change
+    // between pages (FB-38).
     let paged = with(args.clone(), json!({"limit":100,"fields":["bounds"]}));
     let first = s.call("inspect_layout", paged.clone()).await;
     let cursor = first["nextCursor"].clone();
+    let call = with(
+        with(paged.clone(), json!({"nodeIds":["n001"]})),
+        json!({ "cursor": cursor }),
+    );
+    let response = s.call("inspect_layout", call).await;
+    assert_eq!(code(&response), "INVALID_CURSOR", "{response}");
+    let same = with(paged.clone(), json!({ "cursor": cursor }));
+    let same = s.call("inspect_layout", same).await;
     for changed in [
         json!({"fields":["lines"]}),
         json!({"limit":50}),
-        json!({"nodeIds":["n001"]}),
         json!({"budget":65536}),
     ] {
         let call = with(
@@ -224,7 +232,11 @@ async fn fields_cursor_binding_and_limits_are_explicit() {
             json!({ "cursor": cursor }),
         );
         let response = s.call("inspect_layout", call).await;
-        assert_eq!(code(&response), "INVALID_CURSOR", "{changed}: {response}");
+        assert!(response.get("error").is_none(), "{changed}: {response}");
+        assert_eq!(
+            response["nodes"][0]["id"], same["nodes"][0]["id"],
+            "{changed}"
+        );
     }
     let tampered = with(paged.clone(), json!({"cursor":"eyJvZmZzZXQiOjF9"}));
     assert_eq!(

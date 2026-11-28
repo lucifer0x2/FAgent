@@ -1,6 +1,7 @@
-//! Attribute values: numbers, booleans, `$token` references, quoted JSON strings, inline
-//! `{json}`/`[json]`, comma lists, and anything else as a bare string (`fill`, `hug`, `50%`,
-//! `#hex`, keywords).
+//! Attribute values: numbers, booleans, `null`, `$token` references, quoted JSON strings,
+//! inline `{json}`/`[json]`, comma lists, and anything else as a bare string (`fill`, `hug`,
+//! `50%`, `#hex`, keywords). A bare `null` removes a prop and only `@set` takes it (`expand`
+//! rejects it elsewhere); the text "null" is written quoted.
 use super::error::Result;
 use super::lexer::Token;
 use serde_json::{json, Value};
@@ -18,11 +19,12 @@ pub fn parse(token: &Token) -> Result<Value> {
     scalar(token)
 }
 
-/// A value read as a string unless it is quoted, JSON or a `$token`: names and text stay
-/// literal even when they look like numbers.
+/// A value read as a string unless it is quoted, JSON, a `$token` or `null`: names and text
+/// stay literal even when they look like numbers.
 pub fn literal(token: &Token) -> Result<Value> {
     match token.text.chars().next() {
         Some('"' | '{' | '[' | '$') => scalar(token),
+        _ if is_null(token) => Ok(Value::Null),
         _ => Ok(Value::String(token.text.clone())),
     }
 }
@@ -44,9 +46,15 @@ pub fn scalar(token: &Token) -> Result<Value> {
         _ => Ok(match text {
             "true" => Value::Bool(true),
             "false" => Value::Bool(false),
+            "null" => Value::Null,
             _ => Value::String(text.into()),
         }),
     }
+}
+
+/// A bare `null`, the value that removes a prop on `@set`.
+pub fn is_null(token: &Token) -> bool {
+    token.text == "null"
 }
 
 /// Integral numbers stay integers so compiled JSON matches hand-written operations.

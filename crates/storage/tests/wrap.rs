@@ -204,3 +204,19 @@ fn valid_fixed_hug_nested_equal_bounds_and_oversized_minimum_persist() {
     let store = Store::open(temp.path()).unwrap();
     assert_eq!(store.open_project(&id).unwrap().snapshot().unwrap(), before);
 }
+#[test]
+fn wrapping_fill_child_error_names_min_width_with_an_example() {
+    let (_temp, _store, p) = setup();
+    p.apply_batch(request(&p, 0, "initial", fixture())).unwrap();
+    let missing = create(
+        "missing-min",
+        NodeKind::Group,
+        Some("row"),
+        json!({"width":"fill","height":40}),
+    );
+    let error = p
+        .apply_batch(request(&p, 1, "missing-min", vec![missing]))
+        .unwrap_err();
+    assert_eq!(error.field.as_deref(), Some("minWidth"));
+    assert!(error.message.contains("minWidth=240"), "{}", error.message);
+}

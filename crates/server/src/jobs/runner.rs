@@ -45,7 +45,11 @@ pub(super) fn spawn(
                 drop(owner);
                 let started = Instant::now();
                 let deadline = started + config.job_timeout;
-                let result = run(&config, &store, &mut worker, &work, deadline).await;
+                let result = run(&config, &store, &mut worker, &work, deadline)
+                    .await
+                    .map_err(|error| {
+                        super::png::hug_budget(error, work.input["viewport"]["width"].as_f64())
+                    });
                 let Some(owner) = jobs.upgrade() else {
                     break 'rings;
                 };
