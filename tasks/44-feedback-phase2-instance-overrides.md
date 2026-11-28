@@ -1,7 +1,7 @@
 # Task 44 — Agent feedback, phase 2: deeper instance overrides and large context reads
 
 **Priority (user, 2026-11-27):** second agent-feedback phase, after [Task 43](43-feedback-phase1-small-fixes.md) slice B.
-**Status:** Not assigned. Packaged 2026-11-27 from a read-only trace against `main` at `7d71753`. Items are named `FB-n` after the maintainer's private feedback log (see Task 43 "Context"); examples are synthetic.
+**Status:** Done 2026-11-28 on `fix/feedback-overrides` (item 5 built on `fix/feedback-context-size` and merged; not pushed). Decisions and per-item results in "Result" at the end. Packaged 2026-11-27 from a read-only trace against `main` at `7d71753`. Items are named `FB-n` after the maintainer's private feedback log (see Task 43 "Context"); examples are synthetic.
 **Depends on:** Task 43 slice B merged (same files: `instances.rs`, `instance_checks.rs`, `validate/properties.rs`, `props_catalog.rs`, `docs/COMPONENTS.md`). Item 5 is independent and may start at once.
 **Owned scope:** `crates/scene-input/src/instances.rs`, `instance_paint.rs`, `validate/instance_checks.rs`, `validate/properties.rs`, `validate/layout.rs`, `props_catalog.rs`; `crates/layout/src/stack.rs`, `tree.rs`, `validation.rs`, `validation/layout.rs` and layout tests; `crates/server/src/ocd/instance_keys.rs`, `ocd/set.rs`, `ocd/props.rs` and OCD tests; `crates/server/src/reads/tree.rs`, `reads/instances.rs`, `reads/pagination.rs`, `reads/find/page.rs` (item 5); `crates/server/src/capabilities.rs`, `crates/server/skills/*.md`; server tests `instance*.rs`; `docs/COMPONENTS.md`, `docs/SERVER.md`, `docs/CONTRACT.md`.
 **Workspace:** a new branch `fix/feedback-overrides` from `main` after Task 43 slice B is merged (item 5 may go on its own branch `fix/feedback-context-size`). Do not push or open a PR unless the user asks.
@@ -39,3 +39,18 @@ Each item below has a semantic choice. Ask the user before implementing it, and 
 ## Outputs
 
 Commits on the branch, updated MCP texts (`capabilities.rs`, `props_catalog.rs`, skills) and docs, a `docs/agents/LOG.md` entry with the decisions, a status line here, and the `FB-n` → result table for the maintainer.
+
+## Result — 2026-11-28
+
+Decisions (user, 2026-11-28): item 1 merge per key, `breakpoints` replaced whole, no `x`/`y`; item 2 no alias, and the agent texts that led to the mistake are fixed; item 3 (a); item 4 merge per descendant; item 5 depth-limited components paged as cursor entries.
+
+| FB | Result |
+| --- | --- |
+| FB-12, FB-30 | Fixed: overrides take `width`, `height`, `min*`/`max*` and `layout`; instances take `layout`; `stroke` and `layout` merge per key through one shared root/patch helper (`instance_paint.rs`). Fill inside a hug axis still fails under `props.overrides.<id>.width`. |
+| FB-30 (root key) | No alias. Cause in the agent texts: the component contract listed only name, visibility, position and sizing as instance root keys, the server instructions said "flat overrides" without naming the root, and no example set a root prop on an instance. All now say root props go on the instance next to `componentId` (`props_doc/instances.rs`, `instructions.rs`, `capabilities.rs`, `props_catalog.rs`, `author-frame.md`, `ocd.md`). |
+| FB-28 | Fixed: `<nestedInstanceId>/<descendantId>` keys (any depth) pass to the nested instance, outer patch winning per key; validation walks each segment (`validate/override_targets.rs`) and suggests the closest path; the placed-node `.expect` is an error. OCD accepts `b/t=` and `b/t.text=` on `use` and `@set`. |
+| FB-22 | Fixed with (a): a cross-axis `fill` in an `align:"stretch"` stack whose cross size hugs stretches to the line (layout tree, both validators; the authored validator requires stretch under every breakpoint rule). With a definite cross size `fill` stays 100%, so no existing layout moves. |
+| FB-9 (a) | Fixed: `@set x overrides={…}` compiles to a merge patch (other descendants kept, `null` removes one). |
+| FB-33 | Fixed: `components` is a paged array of `{name, rootId, nodes}` entries limited to masters reachable within `depth`; `CONTEXT_ITEM_TOO_LARGE` names `field`, `itemId`, `bytes` and suggests only possible actions (`reads/too_large.rs`). Breaking shape change; no viewer code read the old object. The `get_design_context` tool text does not mention it (`tools/list` would pass its 32 KiB cap). |
+
+New tests: `crates/server/tests/instance_overrides.rs`, `tests/context_components.rs`, `layout` `cross_axis_fill_stretches_in_a_hug_stack`, OCD `use_overrides_sizes_and_layout`, `use_and_set_take_paths_through_nested_instances`, `whole_overrides_merge_per_descendant`; each fails on `main`.
