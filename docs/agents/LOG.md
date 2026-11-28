@@ -162,10 +162,10 @@ Append-only. Rules for entries:
 - User request: implement [Task 44](../../tasks/44-feedback-phase2-instance-overrides.md) on `fix/feedback-overrides` from `main` at `2983fd4`; item 5 by a subagent on `fix/feedback-context-size`.
 - Decisions (user): 1 layout overrides merge per key, `breakpoints` replace whole, no `x`/`y`; 2 no `overrides.<masterRootId>` alias, and fix the instructions that led agents to write it; 3 (a) cross-axis `fill` under `align:"stretch"`; 4 `@set overrides={…}` merges per descendant; 5 depth-limited components paged as cursor entries.
 - Item 2 cause found in the agent texts: the component contract said an instance's own keys cover only name, visibility, position and sizing (paint omitted), the server instructions said "flat overrides" without naming the root, and no example set a root prop on an instance. All three now say root props go on the instance next to `componentId`.
+- Result: every item fixed; per-item table in the task's "Result". `components` in `get_design_context` is now a paged array (breaking; no viewer code read it).
+- Verified: crate tests show 41 failures, all also failing on `main` at `2983fd4` (Chromium render worker, the prerender note test, PostgreSQL/listener `startup_env` tests); the seven new Task 44 tests and the item 5 tests fail on `main`; clippy `-D warnings`, fmt, public-content check.
+- Open: the `get_design_context` tool text does not describe `components` paging (`tools/list` 32 KiB cap); the `instances_mcp` paging assert after a render step does not run without Chromium; pushed to `fix/feedback-overrides` at the user's request (no PR).
 
 ### Large-board zoom and pan follow-up — 2026-11-28
 
 - Confirmed the redraw path in `draw.rs` and `encode.rs` against the earlier viewer lag measurements. The recorded sample has no project identifier, so its timings cannot be attributed to the reported project.
-- Result: every item fixed; per-item table in the task's "Result". `components` in `get_design_context` is now a paged array (breaking; no viewer code read it).
-- Verified: crate tests show 41 failures, all also failing on `main` at `2983fd4` (Chromium render worker, the prerender note test, PostgreSQL/listener `startup_env` tests); the seven new Task 44 tests and the item 5 tests fail on `main`; clippy `-D warnings`, fmt, public-content check.
-- Open: the `get_design_context` tool text does not describe `components` paging (`tools/list` 32 KiB cap); the `instances_mcp` paging assert after a render step does not run without Chromium; not pushed.
