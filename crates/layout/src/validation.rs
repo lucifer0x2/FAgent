@@ -134,11 +134,21 @@ pub(crate) fn validate(input: &LayoutInput) -> Result<(), LayoutError> {
                 } else {
                     size.is_none() || is_hug(size)
                 };
-                if is_fill(child) && hug {
+                if is_fill(child) && hug && !stretches_cross(parent, input, height) {
                     return Err(err("Fill inside hug axis is ambiguous"));
                 }
             }
         }
     }
     Ok(())
+}
+
+/// Whether the `height` (else width) axis is the cross axis of `parent`'s stretching stack
+/// at this viewport: a `fill` child there stretches to the line (see `Parent::stretches_fill`).
+fn stretches_cross(parent: &AuthoredNode, input: &LayoutInput, height: bool) -> bool {
+    parent.props.layout.as_ref().is_some_and(|layout| {
+        let rule = layout.at_width(input.viewport.width);
+        rule.align.as_deref() == Some("stretch")
+            && rule.mode == if height { "row" } else { "column" }
+    })
 }

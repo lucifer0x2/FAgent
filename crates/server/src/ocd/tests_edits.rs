@@ -97,7 +97,7 @@ fn use_keys_must_be_instance_props_or_master_descendants() {
     // A node prop that instances do not take, with the master known or not.
     for source in [
         format!("{MASTER}  use#a input text=\"y\"\n"),
-        "page#p\n  use#a input gap=8\n".into(),
+        "page#p\n  use#a input size=14\n".into(),
     ] {
         let e = error(&source);
         assert!(
@@ -111,4 +111,50 @@ fn use_keys_must_be_instance_props_or_master_descendants() {
         ops("page#p\n  use#a stored titel=\"y\"\n")[1]["props"]["overrides"],
         json!({"titel":{"text":"y"}})
     );
+}
+
+/// FB-12, FB-30: sizing and layout keys override a descendant; layout keys patch the root.
+#[test]
+fn use_overrides_sizes_and_layout() {
+    let source = format!(
+        "{MASTER}  use#a input ph={{\"width\":164}} ph.w=fill icon.layout={{\"justify\":\"center\"}} p=4 gap=8\n"
+    );
+    let props = &ops(&source)[4]["props"];
+    assert_eq!(
+        props["overrides"],
+        json!({"ph":{"width":"fill"},"icon":{"layout":{"justify":"center"}}})
+    );
+    assert_eq!(props["layout"], json!({"padding":4,"gap":8}));
+    let source = format!("{MASTER}  use#m1 input ph={{\"width\":164}}\n");
+    assert_eq!(
+        ops(&source)[4]["props"]["overrides"],
+        json!({"ph":{"width":164}})
+    );
+}
+
+/// FB-28: `btn/label` reaches a descendant of a nested instance's master.
+#[test]
+fn use_and_set_take_paths_through_nested_instances() {
+    let source = "page#p\n  comp#card 10x10\n    use#btn button\n  \
+        use#c card btn/label=\"Buy\" btn/label.fill=#fff btn/icon/glyph.visible=false\n";
+    assert_eq!(
+        ops(source)[3]["props"]["overrides"],
+        json!({"btn/label":{"text":"Buy","fill":"#fff"},"btn/icon/glyph":{"visible":false}})
+    );
+    assert_eq!(
+        ops(r#"@set c btn/label="Sell" btn/label.text="Sell""#)[0]["props"],
+        json!({"overrides":{"btn/label":{"text":"Sell"}}})
+    );
+    // The first segment is checked against a master of this source.
+    let e = error("page#p\n  comp#card 10x10\n    use#btn button\n  use#c card btnn/label=\"x\"\n");
+    assert_eq!((e.line, e.column), (4, 14), "{}", e.message);
+    assert_eq!(e.suggestion.as_deref(), Some("btn"));
+    for bad in ["btn//label", "/label", "btn/"] {
+        let e = error(&format!("@set c {bad}=\"x\""));
+        assert!(
+            e.message.contains("Invalid override target"),
+            "{bad}: {}",
+            e.message
+        );
+    }
 }

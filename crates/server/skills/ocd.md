@@ -28,14 +28,14 @@ flag  := row | col | free | wrap | clip (clip=true)
 | `stroke=#E5E7EB,2,inside` | `stroke {color,width,align}` |
 | `size=24/32`, `font=`, `family=`, `weight=` | `fontSize`/`lineHeight`, `fontId`, `fontFamily`, `fontWeight` |
 | `comp#input name=Input` | frame + `component {name}` (name: ID) |
-| `use#a input ph="x"`, `ph.r=8` (any node key) | instance `componentId`, `overrides {ph:{text,radius}}` |
+| `use#a input fill=$pri ph="x"`, `b/t="y"` | instance `componentId`, root `fill`, `overrides {ph:{text},b/t:{text}}` |
 | `key={json}`, `props={json}`, `index=2` | raw value; props merged last; create index |
 
-Every catalog key (skill://fagent/props.md) works as written; later attributes win.
-On `use` a non-instance key (on `@set` a non-prop key) names a master descendant (string:
+Catalog keys (skill://fagent/props.md) work as written; later attributes win.
+On `use` a non-instance key (on `@set` a non-prop key) names a descendant (string:
 its `text`; `{json}`: its override); node props, and descendants missing from a `comp` in
 the source, fail. A trailing string is a text node's `text`, else `name`. `@set` replaces whole values (`layout={…}`, `stroke=#000,1,inside`); partial writes
-(flags, `gap=`, `layout.gap=`, `stroke=#000`, `ph.fill=`, `ph="x"`, `key=null`) send
+(flags, `gap=`, `layout.gap=`, `stroke=#000`, `ph.fill=`, `ph="x"`, `overrides=`, `key=null`) send
 `update_node` `merge:true`, a JSON merge patch keeping the rest (`null` deletes;
 `{tokenId}`, `{styleId}`, gradients replace).
 

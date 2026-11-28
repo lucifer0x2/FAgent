@@ -20,6 +20,7 @@ mod lookup;
 mod navigation;
 mod node;
 mod notes;
+mod override_targets;
 mod paint;
 mod prop_keys;
 mod properties;

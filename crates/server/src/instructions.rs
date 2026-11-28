@@ -26,9 +26,11 @@ use get_subtree {projectId, nodeId} for a smaller authored read. \
 verify the returned scope, and report a missing/deleted ID instead of guessing another element. \
 Read skill://fagent/implement-frame.md for the address contract.
 
-Reuse named tokens/styles and frame props.component masters with kind instance, componentId and \
-flat overrides before duplicating trees. Frame/instance theme selects a token scheme for that \
-subtree; nearest scope wins. Context defaults to references; instances:expand reads virtual children.
+Reuse named tokens/styles and frame props.component masters with kind instance and componentId \
+before duplicating trees: master root props (fill, size, layout) go on the instance itself, \
+overrides only on master descendant IDs (btn/label through nested instances). Frame/instance \
+theme selects a token scheme for that subtree; nearest scope wins. Context defaults to \
+references; instances:expand reads virtual children.
 
 Finding: when you know a node's name, visible text, kind, ID or parent (parentId lists direct \
 children), call find_nodes; use get_outline when you need structure: depth counts from the scope \

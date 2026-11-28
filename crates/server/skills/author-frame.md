@@ -89,7 +89,8 @@ These are ordered `tools/call` parameter objects for a fresh project whose
 `create_project` response supplied revision 0. Replace `PROJECT_ID` with its ID;
 sample IDs/colors/text are illustrative, not new confirmed design requirements.
 The first batch creates one reusable master, a shared text style, two instances
-and a named scheme. The second edits text with `update_node`, `id` and
+and a named scheme; the second instance sets the master root's `fill` on itself and
+overrides the master descendant `label`. The second batch edits text with `update_node`, `id` and
 `props.text`/`fontSize`; there is no `update_text`, `nodeId` or `props.content`.
 
 <!-- structured-authoring-calls -->
@@ -103,7 +104,7 @@ and a named scheme. The second edits text with `update_node`, `id` and
     {"op":"create_node","id":"label","kind":"text","parentId":"card","props":{"text":"Hello","styleId":"body","width":"fill","height":"hug","fill":{"tokenId":"ink"}}},
     {"op":"create_node","id":"screen","kind":"frame","parentId":"page","props":{"width":640,"height":480,"layout":{"mode":"column","gap":16}}},
     {"op":"create_node","id":"first","kind":"instance","parentId":"screen","props":{"componentId":"card"}},
-    {"op":"create_node","id":"second","kind":"instance","parentId":"screen","props":{"componentId":"card","theme":"a2","overrides":{"label":{"text":"Welcome"}}}}
+    {"op":"create_node","id":"second","kind":"instance","parentId":"screen","props":{"componentId":"card","theme":"a2","fill":"#F8FAFC","overrides":{"label":{"text":"Welcome"}}}}
   ]}},
   {"name":"apply_batch","arguments":{"projectId":"PROJECT_ID","expectedRevision":1,"idempotencyKey":"author-edit","operations":[
     {"op":"update_node","id":"label","props":{"text":"Hello again","fontSize":18}}

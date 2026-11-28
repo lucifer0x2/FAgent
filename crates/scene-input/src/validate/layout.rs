@@ -12,9 +12,23 @@ fn fill_in_hug(key: &str, parent: &Value) -> StorageError {
         _ => "",
     };
     if key == cross {
-        message += &format!("; to size children to the widest one, set the parent's layout.align to \"stretch\" and omit the child's {key}");
+        message += &format!("; to size children to the widest one, set the parent's layout.align to \"stretch\" and omit the child's {key} (an instance whose master sets {key} uses {key}=\"fill\")");
     }
     StorageError::validation(key, &message)
+}
+
+/// Whether `key` is the cross axis of a stretching stack under every layout rule of
+/// `parent` (base and breakpoints): a `fill` child there stretches to the line.
+fn stretches_cross(key: &str, parent: &Value) -> bool {
+    let mode = if key == "height" { "row" } else { "column" };
+    let stretches = |rule: &Value| rule["mode"] == mode && rule["align"] == "stretch";
+    let layout = &parent["layout"];
+    stretches(layout)
+        && layout["breakpoints"]
+            .as_array()
+            .into_iter()
+            .flatten()
+            .all(|entry| stretches(&entry["layout"]))
 }
 
 impl Resolver<'_> {
@@ -41,7 +55,9 @@ impl Resolver<'_> {
                 if v == "fill" && n.props.get("component").is_none() {
                     if let Some(parent) = n.parent_id.as_ref().and_then(|id| self.find(id)) {
                         let props = self.resolve_scoped_props(parent)?;
-                        if props.get(key).is_none() || props.get(key).is_some_and(|v| v == "hug") {
+                        let hugs =
+                            props.get(key).is_none() || props.get(key).is_some_and(|v| v == "hug");
+                        if hugs && !stretches_cross(key, &props) {
                             return Err(fill_in_hug(key, &props));
                         }
                     }

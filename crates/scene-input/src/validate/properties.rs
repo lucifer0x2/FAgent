@@ -23,11 +23,8 @@ impl Resolver<'_> {
                 })?;
             let mut placed = n.clone();
             placed.kind = NodeKind::Frame;
-            placed.props = master.props.clone();
-            let mut patch = n.props.as_object().unwrap().clone();
-            patch.remove("componentId");
-            patch.remove("overrides");
-            crate::instance_paint::merge_props(&mut placed.props, &patch);
+            placed.props = crate::instance_paint::instance_root_props(&master.props, &n.props)
+                .ok_or_else(|| StorageError::validation("props", "Properties must be an object"))?;
             return self.properties(&placed);
         }
         let props = self.resolve_scoped_props(n)?;

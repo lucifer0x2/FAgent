@@ -1,10 +1,10 @@
 //! `@set id {attr}` compiles to `update_node`. Whole values (`fill=`, `layout={…}`,
-//! `overrides={…}`, `stroke=c,w,a`, `props={…}`) replace the stored prop. Partial writes of
-//! an object prop merge into the stored object at commit (`merge:true`, a JSON merge patch):
-//! layout flags and `p`/`gap`/`align`/`justify`, `<prop>.<field>=` (`layout.gap=8`,
-//! `stroke.width=2`), instance descendant overrides (`ph.text=`, and the bare `ph="x"` and
-//! `ph={…}` of `use`: a bare key that is no catalog prop names a descendant), and
-//! `stroke=color[,width]`. `key=null` removes a prop or field, so nulls always go into the
+//! `stroke=c,w,a`, `props={…}`) replace the stored prop. Partial writes of an object prop
+//! merge into the stored object at commit (`merge:true`, a JSON merge patch): layout flags
+//! and `p`/`gap`/`align`/`justify`, `<prop>.<field>=` (`layout.gap=8`, `stroke.width=2`),
+//! instance descendant overrides (`overrides={…}`, `ph.text=`, and the bare `ph="x"` and
+//! `ph={…}` of `use`: a bare key that is no catalog prop names a descendant; `btn/label`
+//! reaches through a nested instance), and `stroke=color[,width]`. `key=null` removes a prop or field, so nulls always go into the
 //! merge patch. A statement with both writes a replacing update for object values, then a
 //! merging one.
 use super::error::Result;
@@ -81,6 +81,8 @@ fn partial(part: &Part) -> Result<Option<Map<String, Value>>> {
     let single = |target| props::build(std::slice::from_ref(part), target, None).map(Some);
     match part {
         Part::Flag(_) => single(Target::Update),
+        // Per descendant, like `ph={…}`: other descendants' overrides stay, `null` removes.
+        Part::Attr(key, _) if key.text == "overrides" => single(Target::Update),
         Part::Attr(key, raw) if key.text == "stroke" => {
             // A JSON object, all three list fields or `null` replace; a color[,width] patches.
             let whole = raw.text.starts_with('{')

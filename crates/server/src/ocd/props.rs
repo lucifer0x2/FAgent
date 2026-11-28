@@ -131,7 +131,7 @@ fn descendant_prop(
     raw: &Token,
 ) -> Result<()> {
     let len = descendant.chars().count();
-    let id = value::id(&key.slice(0, Some(len)))?;
+    let id = value::override_target(&key.slice(0, Some(len)))?;
     let prop = key.slice(len + 1, None);
     attr(override_entry(props, id), &prop, raw, Target::Node)
 }
@@ -139,7 +139,7 @@ fn descendant_prop(
 /// `ph="x"` on `use` and `@set` sets the descendant's text; `ph={json}` merges a whole
 /// override object; `ph=null` (`@set` only) removes the descendant's override.
 fn descendant_value(props: &mut Map<String, Value>, key: &Token, raw: &Token) -> Result<()> {
-    let descendant = value::id(key)?;
+    let descendant = value::override_target(key)?;
     let entry = match value::literal(raw)? {
         Value::Object(object) if raw.text.starts_with('{') => object,
         text @ Value::String(_) => Map::from_iter([("text".into(), text)]),

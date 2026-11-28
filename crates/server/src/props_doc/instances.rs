@@ -10,10 +10,16 @@ fn keys(list: &[&str]) -> String {
 pub(super) fn section() -> String {
     format!(
         "{INTRO}The `instance` keys listed above, except `componentId` and `overrides`, patch \
-         the expanded master root (its props go here); `stroke` and `states` merge.\n\n\
-         `overrides` is an object keyed by authored master descendant IDs. Each value is a \
-         partial props object accepting {}, validated for the target's kind against the fully \
-         merged value. {REST}",
+         the expanded master root: to change the root's fill, stroke, radius, size or \
+         padding, write the key on the instance itself, next to `componentId` \
+         (`{{\"componentId\":\"card\",\"fill\":\"#ffffff\",\"layout\":{{\"padding\":8}}}}`); \
+         `stroke`, `layout` and `states` merge.\n\n\
+         `overrides` is an object keyed by authored master descendant IDs, never the master \
+         root's own ID. A key `<nestedInstanceId>/<descendantId>` (`btn/label`, deeper paths \
+         alike) reaches into an instance nested in the master and wins over that instance's \
+         own override. Each value is a partial props object accepting {}, validated for the \
+         target's kind against the fully merged value; `layout` merges per key and its \
+         `breakpoints` replace the master's list. {REST}",
         keys(OVERRIDE_KEYS)
     )
 }
@@ -23,17 +29,18 @@ const INTRO: &str = "\n## Components and instances\n\n\
      are authored normally. Masters may use fill/hug sizing; a rendered root frame \
      still needs a numeric width. Create an `instance` leaf with `componentId` pointing \
      to the master. It inherits the master's layout and paint; its own name, visibility, \
-     position and sizing replace the corresponding root properties. ";
+     position, sizing, paint and layout replace or patch the corresponding root \
+     properties. ";
 
 const REST: &str = "Stroke objects merge; shadow arrays \
      replace all layers; states merge per state and visual property (including stroke). \
      Patching hover preserves focus/pressed and unpatched hover properties. State shadow \
      remains unsupported. Image \
-     references use `assetId`; token references use `{tokenId: \"...\"}`. The target \
-     cannot be the master root. Layout, sizing, font keys, \
-     structure and component references cannot be overridden. \
+     references use `assetId`; token references use `{tokenId: \"...\"}`. Font keys, \
+     `x`/`y`, structure and component references cannot be overridden. \
      Master root/child states are inherited by the corresponding expanded nodes. \
-     `update_node` replaces the complete `overrides` object (`merge:true` patches entries).\n\n\
+     `update_node` replaces the complete `overrides` object (`merge:true` patches entries; \
+     OCD `@set` always patches).\n\n\
      Frames and instances accept `theme: \"night\"`: the name must occur in a token's \
      themes (or be `default`), otherwise `UNKNOWN_THEME`. The nearest scope wins; \
      render/export theme is the global fallback. Expanded instances inherit scopes at \

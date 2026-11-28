@@ -75,6 +75,25 @@ pub fn index(raw: &Token) -> Result<Value> {
     }
 }
 
+/// An override target: a master descendant ID, or IDs joined by `/` through nested
+/// instances (`btn/label`).
+pub fn override_target(token: &Token) -> Result<String> {
+    let valid = token.text.split('/').all(|segment| {
+        !segment.is_empty()
+            && segment
+                .bytes()
+                .all(|b| b.is_ascii_alphanumeric() || b == b'_' || b == b'-')
+    });
+    if valid {
+        Ok(token.text.clone())
+    } else {
+        Err(token.error(format!(
+            "Invalid override target `{}`; use a descendant ID (letters, digits, _ and -), or IDs joined by / through nested instances",
+            token.text
+        )))
+    }
+}
+
 /// A resource or node ID: letters, digits, `_` and `-`.
 pub fn id(token: &Token) -> Result<String> {
     let valid = !token.text.is_empty()

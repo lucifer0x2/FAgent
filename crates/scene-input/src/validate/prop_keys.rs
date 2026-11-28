@@ -17,6 +17,11 @@ pub(super) fn check_keys(kind: &NodeKind, props: &Map<String, Value>) -> Result<
                 crate::suggest_among(key, allowed.iter().copied()).map(Into::into);
             return Err(e);
         }
+        if *kind == NodeKind::Instance {
+            // `INSTANCE_KEYS` is the instance's list; the expanded root (a frame) is
+            // checked against the catalog scopes, `layout` included.
+            continue;
+        }
         match prop_spec(key) {
             None => {
                 let suggestion = suggest_prop(key);

@@ -83,19 +83,8 @@ fn check_instance(
         overlay: Some(placed),
         theme,
     };
-    // Override targets are authored master descendants: walk authored ancestors only.
-    let plain = Resolver {
-        lookup,
-        overlay: None,
-        theme: "default",
-    };
     for (target, patch) in overrides {
-        if target == &master.id {
-            return Err(master_root_target(&node.id, target));
-        }
-        if !plain.ancestors(target).any(|a| a.id == master.id) {
-            return Err(not_descendant(lookup, &node.id, target, &master.id));
-        }
+        super::override_targets::check_target(lookup, &node.id, target, master)?;
         let patch = patch.as_object().ok_or_else(|| {
             StorageError::validation(
                 &format!("props.overrides.{target}"),
@@ -114,7 +103,12 @@ fn check_instance(
         }
         let child = placed
             .get(&format!("{}/{target}", node.id))
-            .expect("master descendant has an expanded placement");
+            .ok_or_else(|| {
+                StorageError::validation(
+                    &format!("props.overrides.{target}"),
+                    "Override target has no expanded node",
+                )
+            })?;
         for theme in themes {
             resolver(theme).properties(child).map_err(|mut e| {
                 e.field = Some(format!(
@@ -149,39 +143,6 @@ pub(super) fn check_expanded<'a>(
         }
     }
     Ok(())
-}
-
-/// An override keyed by the master root: its props are instance keys, not overrides.
-fn master_root_target(node: &str, target: &str) -> StorageError {
-    let mut error = StorageError::validation(
-        &format!("props.overrides.{target}"),
-        &format!(
-            "Override targets are master descendants; the master root's properties are set on the instance itself (for example {{\"componentId\":\"{target}\",\"fill\":\"#ffffff\"}}). Instance keys: {}",
-            INSTANCE_KEYS.join(", ")
-        ),
-    );
-    let context = error.node_context();
-    context.node_id = Some(node.into());
-    context.allowed_keys = Some(INSTANCE_KEYS.iter().map(|s| (*s).into()).collect());
-    error
-}
-
-/// A non-descendant override target, most likely a mistyped descendant ID or instance key.
-fn not_descendant(lookup: &dyn Lookup, node: &str, target: &str, master: &str) -> StorageError {
-    let mut descendants = lookup.descendants(master);
-    descendants.sort_unstable();
-    let mut error = StorageError::validation(
-        &format!("props.overrides.{target}"),
-        "Override target must be a master descendant",
-    );
-    let near = crate::suggest_among(
-        target,
-        descendants.into_iter().chain(INSTANCE_KEYS.iter().copied()),
-    );
-    let context = error.node_context();
-    context.node_id = Some(node.into());
-    context.suggestion = near.map(Into::into);
-    error
 }
 
 /// Whether `id` or one of its ancestors is a component master.

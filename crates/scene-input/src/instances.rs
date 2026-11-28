@@ -11,7 +11,9 @@ fn not_object() -> StorageError {
 }
 
 /// Keys an `overrides.<descendantId>` patch may set on a master descendant. Font keys
-/// (`fontSize`, `lineHeight`, `fontId`, `fontWeight`, `fontStyle`) stay master-only.
+/// (`fontSize`, `lineHeight`, `fontId`, `fontWeight`, `fontStyle`) and the position (`x`,
+/// `y`) stay master-only. A `<nestedInstanceId>/<descendantId>` target reaches through a
+/// nested instance (see [`expand`]).
 pub const OVERRIDE_KEYS: &[&str] = &[
     "text",
     "fill",
@@ -30,9 +32,16 @@ pub const OVERRIDE_KEYS: &[&str] = &[
     "textAlign",
     "letterSpacing",
     "textWrap",
+    "width",
+    "height",
+    "minWidth",
+    "maxWidth",
+    "minHeight",
+    "maxHeight",
+    "layout",
 ];
 /// Keys an instance node may author; all but `componentId` and `overrides` patch the
-/// expanded root (`stroke` and `states` merge, the rest replace).
+/// expanded root (`stroke`, `layout` and `states` merge, the rest replace).
 pub const INSTANCE_KEYS: &[&str] = &[
     "componentId",
     "overrides",
@@ -54,9 +63,37 @@ pub const INSTANCE_KEYS: &[&str] = &[
     "opacity",
     "states",
     "clip",
+    "layout",
 ];
 
+/// Hands a nested instance the outer overrides addressed through it: a key
+/// `<child>/<rest>` becomes `<rest>` among the nested instance's own overrides, and the
+/// outer patch wins key by key. Deeper paths keep their tail for the next level.
+fn pass_through(nested: &mut Node, child: &str, outer: &Value) -> Result<()> {
+    let prefix = format!("{child}/");
+    let through: serde_json::Map<String, Value> = outer
+        .as_object()
+        .into_iter()
+        .flatten()
+        .filter_map(|(key, patch)| Some((key.strip_prefix(&prefix)?.to_owned(), patch.clone())))
+        .collect();
+    if through.is_empty() {
+        return Ok(());
+    }
+    let props = nested.props.as_object_mut().ok_or_else(not_object)?;
+    let mut own = props
+        .get("overrides")
+        .and_then(Value::as_object)
+        .cloned()
+        .unwrap_or_default();
+    crate::instance_paint::merge_overrides(&mut own, through);
+    props.insert("overrides".into(), Value::Object(own));
+    Ok(())
+}
+
 /// Expands references before resolving styles/tokens, preserving stable virtual IDs.
+/// Virtual IDs join the instance path with `/` (`card/btn/label`); an override key uses the
+/// same path below the instance (`btn/label`) to reach into nested instances.
 pub fn expand(nodes: &[Node]) -> Result<Vec<Node>> {
     if !nodes.iter().any(|n| n.kind == NodeKind::Instance) {
         return Ok(nodes.to_vec());
@@ -164,15 +201,8 @@ impl<L: Lookup> Expander<'_, L> {
             })?;
         let mut root = node.clone();
         root.kind = NodeKind::Frame;
-        root.props = master.props.clone();
-        root.props
-            .as_object_mut()
-            .ok_or_else(not_object)?
-            .remove("component");
-        let mut patch = node.props.as_object().ok_or_else(not_object)?.clone();
-        patch.remove("componentId");
-        patch.remove("overrides");
-        crate::instance_paint::merge_props(&mut root.props, &patch);
+        root.props = crate::instance_paint::instance_root_props(&master.props, &node.props)
+            .ok_or_else(not_object)?;
         out.push(root);
         self.descendants(
             &master.id,
@@ -211,6 +241,9 @@ impl<L: Lookup> Expander<'_, L> {
             }
             let id = virtual_node.id.clone();
             let nested = virtual_node.kind == NodeKind::Instance;
+            if nested {
+                pass_through(&mut virtual_node, &child.id, overrides)?;
+            }
             self.node(virtual_node, depth, out)?;
             if !nested {
                 self.descendants(&child.id, &id, prefix, overrides, (depth, level + 1), out)?;

@@ -1,6 +1,6 @@
 use crate::model::*;
 use crate::stack::{self, Parent};
-use crate::util::{dim, err, is_fill, root_hugs_height};
+use crate::util::{dim, err, is_fill, is_hug, root_hugs_height};
 use std::collections::HashMap;
 use taffy::prelude::*;
 
@@ -42,6 +42,12 @@ pub(crate) fn build(
         },
         ..Default::default()
     };
+    if parent.stretches_fill(p) {
+        match parent_mode {
+            "row" => style.size.height = auto(),
+            _ => style.size.width = auto(),
+        }
+    }
     if (parent_mode == "row" && is_fill(&p.width))
         || (parent_mode == "column" && is_fill(&p.height))
     {
@@ -91,9 +97,17 @@ pub(crate) fn build(
         style.position = Position::Relative;
     }
     let mut child_ids = Vec::new();
+    // The scene root's axes come from the viewport, except a hug root height.
+    let cross_hugs = match mode {
+        "row" if root => hugs,
+        "row" => p.height.is_none() || is_hug(&p.height),
+        "column" => !root && (p.width.is_none() || is_hug(&p.width)),
+        _ => false,
+    };
     let this = Parent {
         mode,
         align: stack::align(layout),
+        cross_hugs,
     };
     for child in children {
         child_ids.push(build(child, input, tree, ids, order, this, false)?);

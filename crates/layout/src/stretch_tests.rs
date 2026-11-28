@@ -164,3 +164,69 @@ fn invalid_stack_rules_fail_before_measurement() {
         assert!(serde_json::from_value::<LayoutInput>(guarded(layout)).is_err());
     }
 }
+
+/// FB-22: a cross-axis `fill` in a stretching stack that hugs that axis stretches to the
+/// line; with a definite cross size it stays 100% of the parent.
+#[test]
+fn cross_axis_fill_stretches_in_a_hug_stack() {
+    let kids = json!([
+        node(
+            "row",
+            "f",
+            "group",
+            json!({"width":300,"layout":{"mode":"row","align":"stretch","padding":5}})
+        ),
+        rect("tall", "row", 50., 120.),
+        node(
+            "fill",
+            "row",
+            "rectangle",
+            json!({"width":20,"height":"fill"})
+        ),
+        node(
+            "free",
+            "row",
+            "frame",
+            json!({"width":20,"height":"fill","layout":{"mode":"free"}})
+        ),
+        node(
+            "fixed",
+            "f",
+            "group",
+            json!({"width":300,"height":80,"layout":{"mode":"row","align":"stretch"}})
+        ),
+        node(
+            "pct",
+            "fixed",
+            "rectangle",
+            json!({"width":20,"height":"fill"})
+        )
+    ]);
+    let b = run(input((400., 400.), json!({"mode":"column"}), kids));
+    assert_eq!((b["fill"][3], b["free"][3]), (120., 120.));
+    assert_eq!(b["row"][3], 130.);
+    assert_eq!(b["pct"][3], 80.);
+    // Without stretch the same fill is still rejected.
+    let kids = json!([
+        node(
+            "row",
+            "f",
+            "group",
+            json!({"width":300,"layout":{"mode":"row"}})
+        ),
+        node(
+            "fill",
+            "row",
+            "rectangle",
+            json!({"width":20,"height":"fill"})
+        )
+    ]);
+    let input: LayoutInput =
+        serde_json::from_value(input((400., 400.), json!({"mode":"column"}), kids)).unwrap();
+    let error = compute(&input, &MeasureCache::new()).unwrap_err();
+    assert!(
+        error.message.contains("Fill inside hug"),
+        "{}",
+        error.message
+    );
+}

@@ -1,6 +1,7 @@
 //! `@set`: whole values replace as before; partial writes of an object prop (layout keys and
-//! flags, `<prop>.<field>=`, descendant overrides, a partial `stroke`) compile to a merging
-//! `update_node`, after a replacing one when the statement also writes object values.
+//! flags, `<prop>.<field>=`, descendant overrides and `overrides={…}`, a partial `stroke`)
+//! compile to a merging `update_node`, after a replacing one when the statement also writes
+//! object values.
 use super::tests::ops;
 use super::{compile, OcdError};
 use serde_json::{json, Value};
@@ -149,12 +150,6 @@ fn full_objects_and_scalars_compile_to_one_replacing_update() {
         )]
     );
     assert_eq!(
-        ops(&format!("@set card {OVERRIDES}")),
-        vec![replaced(
-            json!({"overrides":{"ph":{"text":"x","fill":{"tokenId":"pri"}}}})
-        )]
-    );
-    assert_eq!(
         ops(r#"@set card props={"layout":{"mode":"row"},"opacity":0.5}"#),
         vec![replaced(json!({"layout":{"mode":"row"},"opacity":0.5}))]
     );
@@ -182,5 +177,26 @@ fn node_creation_keeps_the_same_shorthands() {
     assert_eq!(
         ops[4]["props"]["overrides"],
         json!({"ph":{"text":"x","fill":{"tokenId":"pri"}}})
+    );
+}
+
+/// FB-9 (a): `overrides={…}` merges per descendant, like `ph={…}`; `null` removes one.
+#[test]
+fn whole_overrides_merge_per_descendant() {
+    assert_eq!(
+        ops(&format!("@set card {OVERRIDES}")),
+        merged(json!({"overrides":{"ph":{"text":"x","fill":{"tokenId":"pri"}}}}))
+    );
+    assert_eq!(
+        ops(r#"@set card overrides={"t1":{"text":"B"}}"#),
+        ops(r#"@set card t1={"text":"B"}"#)
+    );
+    assert_eq!(
+        ops(r#"@set card overrides={"t2":null} t1.text="B" layout={"mode":"row"}"#),
+        vec![
+            replaced(json!({"layout":{"mode":"row"}})),
+            json!({"op":"update_node","id":"card","merge":true,
+                "props":{"overrides":{"t2":null,"t1":{"text":"B"}}}}),
+        ]
     );
 }

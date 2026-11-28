@@ -1,5 +1,6 @@
 //! Row/column stack rules mapped onto Taffy flexbox, CSS style.
 use crate::model::{LayoutRule, Props, Sizing};
+use crate::util::is_fill;
 use taffy::prelude::*;
 
 pub(crate) const ALIGNS: [&str; 4] = ["start", "center", "end", "stretch"];
@@ -10,13 +11,28 @@ pub(crate) const JUSTIFIES: [&str; 4] = ["start", "center", "end", "space-betwee
 pub(crate) struct Parent<'a> {
     pub mode: &'a str,
     pub align: &'a str,
+    /// The parent's cross-axis size follows its content (unset or `hug`).
+    pub cross_hugs: bool,
 }
 
 impl Parent<'_> {
     pub(crate) const ROOT: Parent<'static> = Parent {
         mode: "free",
         align: "start",
+        cross_hugs: false,
     };
+
+    /// A cross-axis `fill` in a stretching stack whose cross size hugs: the child has no
+    /// definite size to fill, so it stretches to the line instead (CSS `align-self:
+    /// stretch` with an auto size). With a definite parent size `fill` stays 100%.
+    pub(crate) fn stretches_fill(&self, child: &Props) -> bool {
+        let cross = match self.mode {
+            "row" => &child.height,
+            "column" => &child.width,
+            _ => return false,
+        };
+        self.align == "stretch" && self.cross_hugs && is_fill(cross)
+    }
 }
 
 /// Padding (plus `insets` taken by the box itself, [t, r, b, l]), gap, wrap and alignment.

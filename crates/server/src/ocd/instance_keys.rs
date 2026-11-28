@@ -18,11 +18,15 @@ pub fn check(parts: &[Part], descendants: Option<&[String]>) -> Result<()> {
             Some((target, _)) => (target, true),
             None => (key.text.as_str(), false),
         };
-        let known = descendants.is_some_and(|ids| ids.iter().any(|id| id == target));
+        // A path through nested instances (`btn/label`): this source only knows the first
+        // master, so only the first segment is checked here; storage checks the rest.
+        let first = target.split('/').next().unwrap_or(target);
+        let known = descendants.is_some_and(|ids| ids.iter().any(|id| id == first));
         if known || (!dotted && (key.text == "props" || instance_key(target))) {
             continue;
         }
-        let at = key.slice(0, Some(target.chars().count()));
+        let at = key.slice(0, Some(first.chars().count()));
+        let target = first;
         if !dotted && effective_key(target).is_some() {
             return Err(at.error(format!(
                 "`{target}` is not an instance property; override a master descendant with <descendantId>.{target}=…"
