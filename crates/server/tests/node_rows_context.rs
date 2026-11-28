@@ -80,7 +80,7 @@ async fn rows_round_trip_context_states_instances_notes_and_depth() {
                 assert_eq!(instance["componentId"], "master");
                 assert_eq!(instance["childCount"], 1);
                 assert!(instance.get("resolvedProps").is_none());
-                assert!(expected["components"]["master"]["nodes"][0].is_object());
+                assert!(expected["components"][0]["nodes"][0].is_object());
             } else if depth == 1 {
                 assert_eq!(instance["omittedChildren"], 1);
             } else {
@@ -128,7 +128,7 @@ async fn rows_count_against_byte_budget_and_cursors_bind_format_and_revision() {
     let rows_cursor = rows[0]["nextCursor"].clone();
     assert!(objects.len() > 1 && rows.len() > 1);
     assert!(items(&rows[..1], "nodes").len() > items(&objects[..1], "nodes").len());
-    assert!(rows[0]["components"]["master"]["nodes"][0].is_object());
+    assert!(rows[0]["components"][0]["nodes"][0].is_object());
     assert_eq!(rows[0]["components"], objects[0]["components"]);
     assert!(rows[1..]
         .iter()

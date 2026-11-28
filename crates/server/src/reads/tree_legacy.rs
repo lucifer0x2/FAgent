@@ -74,7 +74,19 @@ pub(super) fn read(
             )
         })
         .transpose()?;
-    let mut entries = Vec::new();
+    // Reference mode pages each needed master definition first, then the nodes that use them.
+    let mut entries = if context && !expand {
+        instances::definitions(
+            s,
+            &ordered,
+            req.depth,
+            &by_id,
+            compact.is_some(),
+            super::states::requested(&req),
+        )
+    } else {
+        Vec::new()
+    };
     // depth filters from the scope root (depth 0); omitted, it lists the whole scope.
     for (node, d) in ordered
         .iter()
@@ -140,18 +152,6 @@ pub(super) fn read(
         response["nodeColumns"] = json!(node_rows::COLUMNS);
     }
     if context {
-        if !expand && offset == 0 {
-            let definitions = instances::definitions(
-                s,
-                &ordered,
-                &by_id,
-                compact.is_some(),
-                super::states::requested(&req),
-            );
-            if definitions.as_object().is_some_and(|o| !o.is_empty()) {
-                response["components"] = definitions;
-            }
-        }
         response["theme"] = json!(theme);
         compact::mark(&mut response, compact.as_ref());
         response["viewport"] = json!(req.viewport);

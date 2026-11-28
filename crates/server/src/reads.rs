@@ -24,6 +24,7 @@ mod states;
 mod stored_corruption_tests;
 pub(crate) mod targets;
 mod text_escape;
+mod too_large;
 #[cfg(test)]
 mod traversal_tests;
 mod tree;

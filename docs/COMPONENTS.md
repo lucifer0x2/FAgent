@@ -24,8 +24,9 @@ past its edge. Full authoring rules are in `skill://fagent/props.md`. Render, in
 with stable virtual IDs such as `row3/cmpRow-q`; writes to those IDs fail with
 `INSTANCE_CHILD_READONLY`. Change the instance's whole `props.overrides` object.
 
-`get_design_context` defaults to `instances:"reference"`: each referenced master
-appears once in first-page `components` (including nested dependencies), while
+`get_design_context` defaults to `instances:"reference"`: each master referenced
+within `depth` appears once as a paged `components` entry `{name, rootId, nodes}`
+(including nested dependencies; see `SERVER.md`), while
 instance leaves expose `componentId`, `overrides`, `childCount` and, when computed,
 `computed:{bounds,children:{"row3/cmpRow-q":{bounds,lines}}}`. Choose
 `instances:"expand"` for all virtual nodes. Compact resources cover definitions and

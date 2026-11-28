@@ -1,5 +1,5 @@
 //! Retain only the requested response prefix while still counting every match.
-use super::super::pagination;
+use super::super::{pagination, too_large};
 use crate::error::{ApiError, Result};
 use base64::{engine::general_purpose::URL_SAFE_NO_PAD, Engine};
 use serde_json::{json, Value};
@@ -64,7 +64,7 @@ impl Matches {
         response["nextCursor"] = Value::Null;
         let base = pagination::json_len(&response)?;
         if base > self.budget {
-            return Err(ApiError::new("CONTEXT_ITEM_TOO_LARGE", "Context metadata exceeds the response budget; request fewer viewports or a larger budget"));
+            return Err(too_large::metadata(&response, base, self.budget)?);
         }
         let mut added = 0;
         let mut next = self.offset;
@@ -72,7 +72,9 @@ impl Matches {
             let grow = pagination::json_len(&value)? + usize::from(next > self.offset);
             if base + added + grow + cursor(scope, next + 1).len() - 3 > self.budget {
                 if next == self.offset {
-                    return Err(ApiError::new("CONTEXT_ITEM_TOO_LARGE", "One complete item exceeds the response budget; use a property filter or larger budget"));
+                    let metadata = base + added;
+                    let error = too_large::item(&response, "nodes", &value, metadata, self.budget);
+                    return Err(error?);
                 }
                 break;
             }

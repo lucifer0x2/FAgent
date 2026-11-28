@@ -190,7 +190,7 @@ pub fn page(
     response["nextCursor"] = Value::Null;
     let base = json_len(&response)?;
     if base > budget {
-        return Err(ApiError::new("CONTEXT_ITEM_TOO_LARGE", "Context metadata exceeds the response budget; request fewer viewports or a larger budget"));
+        return Err(super::too_large::metadata(&response, base, budget)?);
     }
     // While a page is open it is measured as truncated:true with the cursor after the last
     // entry: `false`→`true` is −1 byte and `null`→`"<cursor>"` is +len−2, hence `len − 3`.
@@ -216,7 +216,10 @@ pub fn page(
         if base + added + grow + cursor(scope, next + 1).len() - 3 > budget {
             list.pop();
             if next == offset {
-                return Err(ApiError::new("CONTEXT_ITEM_TOO_LARGE", "One complete item exceeds the response budget; use a property filter or larger budget"));
+                let metadata = base + added;
+                return Err(super::too_large::item(
+                    &response, field, value, metadata, budget,
+                )?);
             }
             break;
         }

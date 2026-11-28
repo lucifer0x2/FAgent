@@ -47,7 +47,7 @@ async fn instances_states_context_keeps_master_virtual_variants_and_theme_resour
                     root
                 );
                 let (nodes, prefix) = if mode == "reference" {
-                    let definitions = &context["components"]["master"]["nodes"];
+                    let definitions = &context["components"][0]["nodes"];
                     assert_eq!(
                         node(definitions, "master")["resolvedStates"]["hover"]["fill"],
                         root
@@ -92,7 +92,7 @@ async fn instances_states_context_keeps_master_virtual_variants_and_theme_resour
         assert!(node(&context["nodes"], "instance")
             .get("resolvedStates")
             .is_none());
-        for definition in context["components"]["master"]["nodes"].as_array().unwrap() {
+        for definition in context["components"][0]["nodes"].as_array().unwrap() {
             assert!(definition.get("resolvedStates").is_none());
         }
     }
