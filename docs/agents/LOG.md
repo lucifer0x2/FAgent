@@ -144,3 +144,9 @@ Append-only. Rules for entries:
 - Open: Chromium-path checks not run end to end (no worker in tests); font override keys deferred; Tasks 44 and 45 can start (44 depends on slice B, now merged here).
 - Self-review: fixed `inspect_layout` overflow paging (a huge `diagnosticsOffset` overflowed; a byte budget made `nextOffset` skip dropped items); other review findings checked and left as designed.
 - PR review (CodeRabbit, 6 findings + docs check): all fixed. Capabilities publish `overrideKeys`; enqueue/paint admission and the hug-root `maxHeight` use whole device pixels; bare `clip` is rejected on `@token`; read cursor scopes end with a 128-bit digest of all bound fields (golden cursors regenerated, no page boundary moved); an overflow page the budget empties keeps `nextOffset` and sets `budgetTooSmall`; `deletedNoteIds` documented in SERVER/CONTRACT.
+
+### Task 47 (native desktop app) — 2026-11-28
+
+- Packaged [Task 47](../../tasks/47-native-desktop-app.md) at the user's request: `fagent-server` stays the headless binary; new `fagent-desktop` runs the viewer with an optional in-process server sharing one `Storage`/`NodeMemory`. Cases C0–C5 (default: local SQLite, MCP off), settings with port/database probes, remote-server mode, tray.
+- Phase 0 is a decision gate (native `vello_gpu` + UI toolkit choice).
+- Revised after a code check and user decisions: SQLite `.instance.lock` makes a shared `~/.fagent` one-process-at-a-time (locked-root flow added); PostgreSQL probe must not call `with_config` (it initializes the schema); a port change rebuilds `AppState` (`base_url` is fixed per `Config`); live updates are in-process only; tray hides and freezes state; tabs; External mode includes loopback servers; every MCP change restarts `AppState`; PostgreSQL is user-managed (no cross-process live updates).
