@@ -40,25 +40,41 @@ pub(super) fn definition_nodes_indexed<'a>(
 pub(super) fn definitions(
     s: &Snapshot,
     scope: &[(&Node, usize)],
+    depth: Option<usize>,
     resolved: &HashMap<&str, &Node>,
     compact: bool,
     states: bool,
-) -> Value {
-    definitions_indexed(&TreeIndex::new(&s.nodes), scope, resolved, compact, states)
+) -> Vec<(String, Value)> {
+    definitions_indexed(
+        &TreeIndex::new(&s.nodes),
+        scope,
+        depth,
+        resolved,
+        compact,
+        states,
+    )
 }
 
+/// One `components` page entry (`{name, rootId, nodes}`) per master a context needs, in root
+/// ID order. Needed are the masters of instances at most `depth` levels below the scope root
+/// (every instance without `depth`), plus every master nested inside those, because a
+/// definition's own instance leaves name them. Entries page with the read's cursor like nodes
+/// and resources, so no single response has to hold every definition.
 pub(super) fn definitions_indexed(
     index: &TreeIndex,
     scope: &[(&Node, usize)],
+    depth: Option<usize>,
     resolved: &HashMap<&str, &Node>,
     compact: bool,
     states: bool,
-) -> Value {
-    let definitions = definition_nodes_indexed(index, scope);
-    if definitions.is_empty() {
-        return json!({});
-    }
-    let mut components = BTreeMap::new();
+) -> Vec<(String, Value)> {
+    let within: Vec<_> = scope
+        .iter()
+        .filter(|(_, d)| depth.is_none_or(|max| *d <= max))
+        .copied()
+        .collect();
+    let definitions = definition_nodes_indexed(index, &within);
+    let mut components = Vec::new();
     for root in definitions
         .iter()
         .filter(|n| n.props.get("component").is_some())
@@ -84,12 +100,12 @@ pub(super) fn definitions_indexed(
                 value
             })
             .collect();
-        components.insert(
-            id,
+        components.push((
+            "components".to_owned(),
             json!({"name":root.props["component"]["name"],"rootId":id,"nodes":nodes}),
-        );
+        ));
     }
-    json!(components)
+    components
 }
 
 pub(super) fn reference(

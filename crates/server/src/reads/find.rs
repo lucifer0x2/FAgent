@@ -96,7 +96,9 @@ fn read_scoped(scoped: &ScopedSnapshot<'_>, req: ReadRequest) -> Result<(Value, 
     }
     let mut response = json!({"schemaVersion":1,"projectId":s.project_id,"revision":s.revision,"scope":root,"criteria":entry::echo(&req),"scannedNodes":work.visited,"totalMatches":matches.total,"nodes":[],"limits":{"nodes":limit,"bytes":budget}});
     skipped(&mut response, work.skipped_instance_matches);
-    let mut response = matches.finish(response, &scope)?;
+    let mut response = matches
+        .finish(response, &scope)
+        .map_err(super::too_large::as_matches)?;
     let found = response.as_object_mut().unwrap().remove("nodes").unwrap();
     response["matches"] = found;
     Ok((response, work))

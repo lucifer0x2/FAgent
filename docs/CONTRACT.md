@@ -151,7 +151,11 @@ Tree/context/resource reads return one authored revision, `truncated` and
 `nextCursor`. Cursors bind project, revision, tool and query scope/filters/bounds;
 changing scope or advancing revision requires restarting pagination. A response
 budget never silently discards a complete item. An item exceeding the byte
-budget returns `CONTEXT_ITEM_TOO_LARGE`; callers can use a property filter.
+budget returns `CONTEXT_ITEM_TOO_LARGE` with `error.field` (the response array, or
+the largest metadata field when metadata alone does not fit), `itemId` when the
+item has one, `bytes` and `budget`; the message suggests only actions that can
+help (a property filter, `get_subtree` for one master, fewer viewports), and a
+larger budget only while the request is below the 65,536 maximum.
 Each page is capped at 200 tree entries and 64 KiB, with at most 100 items per
 resource kind. `depth` (0–8) filters nodes by distance from the scope root (depth 0);
 deeper nodes are never listed, and a node whose children were cut carries
@@ -180,9 +184,12 @@ and renderer receive ordinary frames and stable virtual children
 data always retain authored references, never the expanded tree.
 
 `get_design_context` defaults to `instances:"reference"`: scoped instances remain
-leaves, `components` contains the transitive referenced master definitions once on
-the first page, and optional instance `computed.children` maps virtual IDs to bounds
-and lines. `instances:"expand"` returns the virtual tree and its computed bounds.
+leaves, `components` lists each needed master definition once as a cursor entry
+`{name, rootId, nodes}` (root ID order, before the frame's nodes, at most 100 per
+page; a page without definitions has no `components` key), and optional instance
+`computed.children` maps virtual IDs to bounds and lines. Needed masters are those
+of instances listed within `depth` (all instances without `depth`) plus every
+master nested inside them; so `depth:0` lists none. `instances:"expand"` returns the virtual tree and its computed bounds.
 The mode is part of cursor identity. Compact resources include dependencies of both
 master definitions and placed overrides. Outline/subtree expose reference leaves
 with `componentId` and expanded `childCount`; virtual IDs can be read directly.

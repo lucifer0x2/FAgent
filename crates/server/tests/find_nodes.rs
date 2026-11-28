@@ -195,10 +195,12 @@ async fn invalid_requests_use_existing_error_codes() {
         .unwrap()
         .contains("only the latest revision"));
     let tight = json!({"projectId":p,"ids":["long"],"properties":["text"],"budget":1024});
-    assert_eq!(
-        code(s.call("find_nodes", tight).await),
-        "CONTEXT_ITEM_TOO_LARGE"
-    );
+    let tight = s.call("find_nodes", tight).await;
+    assert_eq!(code(tight.clone()), "CONTEXT_ITEM_TOO_LARGE");
+    // FB-33: the error names the response field and the item, with its size.
+    assert_eq!(tight["error"]["field"], "matches", "{tight}");
+    assert_eq!(tight["error"]["itemId"], "long", "{tight}");
+    assert!(tight["error"]["bytes"].as_u64().unwrap() > 1024, "{tight}");
     s.batch(
         &p,
         1,

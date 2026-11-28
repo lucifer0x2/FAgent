@@ -76,7 +76,8 @@ async fn instances_mcp_context_reference_expand_find_and_bounds() {
     let mut expanded_args = args.clone();
     expanded_args["instances"] = json!("expand");
     let expanded = context(&s, expanded_args.clone()).await;
-    assert_eq!(reference["components"].as_object().unwrap().len(), 1);
+    assert_eq!(reference["components"].as_array().unwrap().len(), 1);
+    assert_eq!(reference["components"][0]["rootId"], "cmpRow");
     assert_eq!(reference["nodes"].as_array().unwrap().len(), 21);
     assert_eq!(expanded["nodes"].as_array().unwrap().len(), 101);
     let (r, e) = (
@@ -164,7 +165,7 @@ async fn instances_mcp_context_reference_expand_find_and_bounds() {
     let first = context(&s, paged.clone()).await;
     paged["cursor"] = first["nextCursor"].clone();
     let second = context(&s, paged).await;
-    assert!(first["components"].is_object());
+    assert!(first["components"].is_array());
     assert!(second.get("components").is_none());
 }
 

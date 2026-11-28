@@ -45,8 +45,9 @@ cross-axis `fill` (`height:"fill"` in a row) stretches the child to the line. Th
 how an instance replaces a fixed master height to match its tallest sibling; with a
 definite cross size `fill` stays 100% of the parent.
 
-`get_design_context` defaults to `instances:"reference"`: each referenced master
-appears once in first-page `components` (including nested dependencies), while
+`get_design_context` defaults to `instances:"reference"`: each master referenced
+within `depth` appears once as a paged `components` entry `{name, rootId, nodes}`
+(including nested dependencies; see `SERVER.md`), while
 instance leaves expose `componentId`, `overrides`, `childCount` and, when computed,
 `computed:{bounds,children:{"row3/cmpRow-q":{bounds,lines}}}`. Choose
 `instances:"expand"` for all virtual nodes. Compact resources cover definitions and

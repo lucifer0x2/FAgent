@@ -143,7 +143,8 @@ pub(super) fn read(s: &Snapshot, req: ReadRequest) -> Result<Value> {
         limit,
         budget - RENAME_BYTES,
         &scope,
-    )?;
+    )
+    .map_err(super::super::too_large::as_matches)?;
     let matches = page.as_object_mut().and_then(|o| o.remove("nodes"));
     page["matches"] = matches.unwrap_or_else(|| json!([]));
     Ok(page)

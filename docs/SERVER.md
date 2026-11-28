@@ -660,6 +660,33 @@ counts the encoded rows and their declarations, so page boundaries may differ.
 Repeat the same `nodeFormat` to follow a cursor within its revision. Omit
 `nodeFormat` to receive node objects.
 
+### Component definitions in design context
+
+With `instances: "reference"` (the default), `get_design_context` lists each master
+definition the read needs once, as a cursor entry in `components`:
+`{"name": "<component name>", "rootId": "<master root ID>", "nodes": [...]}`, where
+`nodes` is the master's preorder tree with `props`, `effectiveTheme`, `resolvedProps`
+(and `resolvedStates` with `statesMode: "resolved"`). Entries come in root ID order,
+before the frame's `nodes`, and page with the read's cursor like nodes and resources
+(at most 100 per page); a page that carries none has no `components` key. Collect
+the arrays across pages; each master appears on exactly one page.
+
+A master is needed when an instance listed by the read references it, so `depth`
+narrows the set: only instances at most `depth` levels below the frame count
+(`depth: 0` lists the frame alone and no definition), and without `depth` every
+instance in the frame does. Masters nested inside a needed master, through its own
+instance leaves, are needed too, transitively, so every listed definition can be
+expanded. `instances: "expand"` returns no `components`: the virtual children are
+nodes. `compact` resources still cover the whole frame, as before.
+
+Before FB-33, `components` was one object keyed by root ID on the first page only,
+always holding every master referenced anywhere in the frame, so a frame whose
+definitions together passed 64 KiB failed with `CONTEXT_ITEM_TOO_LARGE` even at
+`depth: 0, compact: true`. A single definition larger than the page still fails, with
+`error.field: "components"` and `itemId: "<rootId>"`; read that master with
+`get_subtree {nodeId: "<rootId>"}` or use `instances: "expand"` to page its nodes
+(`tests/context_components.rs`).
+
 ## Navigation links
 
 Navigation is declared through authored props (no
@@ -756,7 +783,7 @@ truncated, nextCursor, limits {nodes, bytes}
 - Three outcomes are distinct: no match is `totalMatches: 0`, `matches: []`,
   `truncated: false` (not an error); a complete answer is `truncated: false` with
   `nextCursor: null`; more pages is `truncated: true` with `nextCursor`. A single match
-  larger than `budget` returns `CONTEXT_ITEM_TOO_LARGE`.
+  larger than `budget` returns `CONTEXT_ITEM_TOO_LARGE` with `field: "matches"`, its `itemId` and `bytes`.
 - Instance-heavy pages: before `instances` existed, `find_nodes` always searched the
   virtual children of every instance, so a broad page- or project-wide query (for
   example `kinds:["text"]`) returned and counted every instance's copy of its master

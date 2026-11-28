@@ -121,13 +121,28 @@ pub(super) fn read_scoped(
             )
         })
         .transpose()?;
-    let mut entries = super::tree_nodes::Source {
-        index,
-        expanded: &expanded_index,
-        resolved: &by_id,
-        computed: computed.as_ref(),
-    }
-    .entries(name, &req, &ordered, compact.is_some());
+    // Reference mode pages each needed master definition first, then the nodes that use them.
+    let mut entries = if context && !expand {
+        instances::definitions_indexed(
+            &authored_index,
+            &ordered,
+            req.depth,
+            &by_id,
+            compact.is_some(),
+            super::states::requested(&req),
+        )
+    } else {
+        Vec::new()
+    };
+    entries.extend(
+        super::tree_nodes::Source {
+            index,
+            expanded: &expanded_index,
+            resolved: &by_id,
+            computed: computed.as_ref(),
+        }
+        .entries(name, &req, &ordered, compact.is_some()),
+    );
     if context {
         entries.extend(notes::entries_indexed(
             scope_notes.iter().copied(),
@@ -143,18 +158,6 @@ pub(super) fn read_scoped(
         response["nodeColumns"] = json!(node_rows::COLUMNS);
     }
     if context {
-        if !expand && offset == 0 {
-            let definitions = instances::definitions_indexed(
-                &authored_index,
-                &ordered,
-                &by_id,
-                compact.is_some(),
-                super::states::requested(&req),
-            );
-            if definitions.as_object().is_some_and(|o| !o.is_empty()) {
-                response["components"] = definitions;
-            }
-        }
         response["theme"] = json!(theme);
         compact::mark(&mut response, compact.as_ref());
         response["viewport"] = json!(req.viewport);
