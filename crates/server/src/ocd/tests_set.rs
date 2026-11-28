@@ -184,6 +184,10 @@ fn node_creation_keeps_the_same_shorthands() {
 #[test]
 fn whole_overrides_merge_per_descendant() {
     assert_eq!(
+        ops("@set card overrides=null"),
+        merged(json!({"overrides":null}))
+    );
+    assert_eq!(
         ops(&format!("@set card {OVERRIDES}")),
         merged(json!({"overrides":{"ph":{"text":"x","fill":{"tokenId":"pri"}}}}))
     );

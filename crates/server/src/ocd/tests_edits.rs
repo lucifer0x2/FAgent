@@ -149,6 +149,15 @@ fn use_and_set_take_paths_through_nested_instances() {
     let e = error("page#p\n  comp#card 10x10\n    use#btn button\n  use#c card btnn/label=\"x\"\n");
     assert_eq!((e.line, e.column), (4, 14), "{}", e.message);
     assert_eq!(e.suggestion.as_deref(), Some("btn"));
+    // A segment that spells a prop shorthand is still a missing descendant, not a prop.
+    let e = error("page#p\n  comp#card 10x10\n    use#btn button\n  use#c card w/label=\"x\"\n");
+    assert!(e.message.contains("not a descendant"), "{}", e.message);
+    assert!(!e.message.contains("instance property"), "{}", e.message);
+    // With a stored master, storage checks the path.
+    assert_eq!(
+        ops("page#p\n  use#c stored w/label=\"x\"\n")[1]["props"]["overrides"],
+        json!({"w/label":{"text":"x"}})
+    );
     for bad in ["btn//label", "/label", "btn/"] {
         let e = error(&format!("@set c {bad}=\"x\""));
         assert!(

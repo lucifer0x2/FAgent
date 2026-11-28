@@ -165,6 +165,7 @@ Append-only. Rules for entries:
 - Result: every item fixed; per-item table in the task's "Result". `components` in `get_design_context` is now a paged array (breaking; no viewer code read it).
 - Verified: crate tests show 41 failures, all also failing on `main` at `2983fd4` (Chromium render worker, the prerender note test, PostgreSQL/listener `startup_env` tests); the seven new Task 44 tests and the item 5 tests fail on `main`; clippy `-D warnings`, fmt, public-content check.
 - Open: the `get_design_context` tool text does not describe `components` paging (`tools/list` 32 KiB cap); the `instances_mcp` paging assert after a render step does not run without Chromium; pushed to `fix/feedback-overrides` at the user's request (no PR).
+- Code review (subagent, `code-review` skill): no blocking findings. Fixed the OCD error for a path whose first segment spells a prop shorthand (`w/label`); documented that a master breakpoint rule still wins over an instance `layout` patch and that `@set overrides={}` changes nothing (`overrides=null` clears); a bare `use` key equal to a layout shorthand now patches the instance root, like other instance keys (left as is).
 
 ### Large-board zoom and pan follow-up — 2026-11-28
 

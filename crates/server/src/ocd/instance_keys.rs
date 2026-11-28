@@ -26,7 +26,16 @@ pub fn check(parts: &[Part], descendants: Option<&[String]>) -> Result<()> {
             continue;
         }
         let at = key.slice(0, Some(first.chars().count()));
-        let target = first;
+        if first.len() < target.len() {
+            // A path segment is never a prop: it must be a nested instance's ID.
+            let Some(ids) = descendants else { continue };
+            let near = suggest_among(first, ids.iter().map(String::as_str));
+            return Err(at
+                .error(format!(
+                    "`{first}` is not a descendant of the master component; the segment before / names an instance inside it"
+                ))
+                .suggest(near));
+        }
         if !dotted && effective_key(target).is_some() {
             return Err(at.error(format!(
                 "`{target}` is not an instance property; override a master descendant with <descendantId>.{target}=…"

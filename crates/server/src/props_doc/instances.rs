@@ -19,7 +19,8 @@ pub(super) fn section() -> String {
          alike) reaches into an instance nested in the master and wins over that instance's \
          own override. Each value is a partial props object accepting {}, validated for the \
          target's kind against the fully merged value; `layout` merges per key and its \
-         `breakpoints` replace the master's list. {REST}",
+         `breakpoints` replace the master's list; at a width where a master breakpoint applies, \
+         that full rule wins over the patched base layout, so patch `breakpoints` too. {REST}",
         keys(OVERRIDE_KEYS)
     )
 }
@@ -40,7 +41,7 @@ const REST: &str = "Stroke objects merge; shadow arrays \
      `x`/`y`, structure and component references cannot be overridden. \
      Master root/child states are inherited by the corresponding expanded nodes. \
      `update_node` replaces the complete `overrides` object (`merge:true` patches entries; \
-     OCD `@set` always patches).\n\n\
+     OCD `@set` always patches: `overrides=null` clears all, `{}` changes nothing).\n\n\
      Frames and instances accept `theme: \"night\"`: the name must occur in a token's \
      themes (or be `default`), otherwise `UNKNOWN_THEME`. The nearest scope wins; \
      render/export theme is the global fallback. Expanded instances inherit scopes at \

@@ -18,10 +18,12 @@ keyed by master descendant ID. The lists below follow `INSTANCE_KEYS` and
 the master's whole list) and `states` merges per state; every other key replaces
 the master value. So `{"inner":{"width":164,"layout":{"justify":"center"}}}`
 keeps the inner row's padding and gap, and an instance's own `layout:{"padding":8}`
-moves the master's children. Font keys (`fontSize`, `lineHeight`, `fontId`,
-`fontWeight`, `fontStyle`), `x`/`y` of descendants and structure stay inherited
-from the master. A merged size is validated where the node is placed, so a `fill`
-inside a hug axis still fails under `props.overrides.<id>.width`.
+moves the master's children. A patch changes the base rule only: at a width where a
+master breakpoint applies, that full rule still wins, so patch `breakpoints` as well.
+Font keys (`fontSize`, `lineHeight`, `fontId`, `fontWeight`, `fontStyle`), `x`/`y` of
+descendants and structure stay inherited from the master. A merged size is validated
+where the node is placed, so a `fill` inside a hug axis still fails under
+`props.overrides.<id>.width`.
 
 The master root is not an override target: set its props on the instance itself,
 next to `componentId` (`overrides.<masterRootId>` fails and lists the instance
@@ -38,7 +40,7 @@ past its edge. Full authoring rules are in `skill://fagent/props.md`. Render, in
 with stable virtual IDs such as `row3/cmpRow-q`; writes to those IDs fail with
 `INSTANCE_CHILD_READONLY`. Change the instance's `props.overrides`: `update_node`
 replaces the whole object unless `merge:true`; OCD `@set x overrides={…}` merges per
-descendant (`null` removes one).
+descendant (`"<id>":null` removes one, `overrides=null` clears all, `{}` changes nothing).
 
 In a row or column with `align:"stretch"` whose cross size hugs its content, a
 cross-axis `fill` (`height:"fill"` in a row) stretches the child to the line. This is
